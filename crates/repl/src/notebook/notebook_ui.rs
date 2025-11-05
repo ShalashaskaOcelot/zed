@@ -672,7 +672,7 @@ impl NotebookEditor {
     fn has_focused_editor(&self, window: &Window, cx: &App) -> bool {
         self.cell_map.values().any(|cell| {
             if let Cell::Code(code_cell) = cell {
-                code_cell.read(cx).editor.read(cx).focus_handle(cx).is_focused(window, cx)
+                code_cell.read(cx).editor.read(cx).focus_handle(cx).is_focused(window)
             } else {
                 false
             }
