@@ -822,10 +822,10 @@ impl Render for NotebookEditor {
             .on_action(cx.listener(Self::select_previous))
             .on_action(cx.listener(Self::select_first))
             .on_action(cx.listener(Self::select_last))
-            .flex()
-            .items_start()
             .size_full()
-            .overflow_hidden()
+            .flex()
+            .flex_row()
+            .items_start()
             .px(DynamicSpacing::Base12.px(cx))
             .gap(DynamicSpacing::Base12.px(cx))
             .bg(cx.theme().colors().tab_bar_background)
@@ -833,7 +833,7 @@ impl Render for NotebookEditor {
                 v_flex()
                     .id("notebook-cells")
                     .flex_1()
-                    .size_full()
+                    .h_full()
                     .overflow_y_scroll()
                     .child(list(
                         self.cell_list.clone(),
