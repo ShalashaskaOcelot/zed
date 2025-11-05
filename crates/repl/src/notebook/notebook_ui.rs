@@ -844,8 +844,7 @@ impl Render for NotebookEditor {
                                 .map(|cell| this.render_cell(ix, cell, window, cx))
                                 .unwrap_or_else(|| div().into_any())
                         }),
-                    ))
-                    .size_full(),
+                    )),
             )
             .child(self.render_notebook_controls(window, cx))
     }
