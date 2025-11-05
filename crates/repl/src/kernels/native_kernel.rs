@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 use crate::Session;
 
-use super::RunningKernel;
+use super::{MessageRouter, RunningKernel};
 
 #[derive(Debug, Clone)]
 pub struct LocalKernelSpecification {
@@ -105,13 +105,12 @@ impl Debug for NativeRunningKernel {
 }
 
 impl NativeRunningKernel {
-    pub fn new(
+    pub fn new<R: MessageRouter>(
         kernel_specification: LocalKernelSpecification,
         entity_id: EntityId,
         working_directory: PathBuf,
         fs: Arc<dyn Fs>,
-        // todo: convert to weak view
-        session: Entity<Session>,
+        router: Entity<R>,
         window: &mut Window,
         cx: &mut App,
     ) -> Task<Result<Box<dyn RunningKernel>>> {
@@ -172,13 +171,13 @@ impl NativeRunningKernel {
             messages_rx.push(shell_reply_rx);
 
             cx.spawn({
-                let session = session.clone();
+                let router = router.clone();
 
                 async move |cx| {
                     while let Some(message) = messages_rx.next().await {
-                        session
-                            .update_in(cx, |session, window, cx| {
-                                session.route(&message, window, cx);
+                        router
+                            .update_in(cx, |router, window, cx| {
+                                router.route(&message, window, cx);
                             })
                             .ok();
                     }
@@ -188,14 +187,14 @@ impl NativeRunningKernel {
 
             // iopub task
             let iopub_task = cx.spawn({
-                let session = session.clone();
+                let router = router.clone();
 
                 async move |cx| -> anyhow::Result<()> {
                     loop {
                         let message = iopub_socket.read().await?;
-                        session
-                            .update_in(cx, |session, window, cx| {
-                                session.route(&message, window, cx);
+                        router
+                            .update_in(cx, |router, window, cx| {
+                                router.route(&message, window, cx);
                             })
                             .ok();
                     }

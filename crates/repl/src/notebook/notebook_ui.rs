@@ -324,29 +324,68 @@ impl NotebookEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // TODO: Kernel startup needs to be refactored
-        //
-        // The issue: NativeRunningKernel::new() and RemoteRunningKernel::new() both expect
-        // Entity<Session>, but we have Entity<NotebookEditor>. The kernel code is tightly
-        // coupled to Session for message routing.
-        //
-        // Solutions:
-        // 1. Create a MessageRouter trait that both Session and NotebookEditor implement
-        // 2. Make kernel constructors generic over MessageRouter
-        // 3. Refactor kernels to return message channels instead of doing routing internally
-        //
-        // For now, we'll print a message and not start the kernel. This structure is in
-        // place for when the refactor is done.
+        use crate::kernels::{NativeRunningKernel, RemoteRunningKernel};
+        use std::env::temp_dir;
 
-        eprintln!("Kernel startup not yet implemented for notebooks");
-        eprintln!("Would start kernel: {:?}", kernel_spec.name());
+        let fs = self.project.read(cx).fs().clone();
+        let entity_id = cx.entity().entity_id();
 
-        // When implemented, this should:
-        // 1. Start the kernel process
-        // 2. Create iopub, shell, and control sockets
-        // 3. Spawn tasks to read from sockets
-        // 4. Route messages to self.route()
-        // 5. Set self.kernel = Kernel::RunningKernel(...)
+        // Get working directory from notebook path or use temp
+        let working_directory = self.notebook_item
+            .read(cx)
+            .path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(temp_dir);
+
+        let notebook_handle = cx.entity();
+
+        // Start the kernel based on type
+        let kernel = match kernel_spec.clone() {
+            KernelSpecification::Jupyter(kernel_specification)
+            | KernelSpecification::PythonEnv(kernel_specification) => NativeRunningKernel::new(
+                kernel_specification,
+                entity_id,
+                working_directory,
+                fs,
+                notebook_handle.clone(),
+                window,
+                cx,
+            ),
+            KernelSpecification::Remote(remote_kernel_specification) => RemoteRunningKernel::new(
+                remote_kernel_specification,
+                working_directory,
+                notebook_handle.clone(),
+                window,
+                cx,
+            ),
+        };
+
+        let pending_kernel = cx
+            .spawn(async move |this, cx| {
+                let kernel = kernel.await;
+
+                match kernel {
+                    Ok(kernel) => {
+                        this.update(cx, |notebook, cx| {
+                            notebook.kernel = Kernel::RunningKernel(kernel);
+                            cx.notify();
+                        })
+                        .ok();
+                    }
+                    Err(err) => {
+                        this.update(cx, |notebook, cx| {
+                            notebook.kernel = Kernel::ErroredLaunch(err.to_string());
+                            cx.notify();
+                        })
+                        .ok();
+                    }
+                }
+            })
+            .shared();
+
+        self.kernel = Kernel::StartingKernel(pending_kernel);
+        cx.notify();
     }
 
     /// Route incoming Jupyter messages to the appropriate cell
@@ -728,6 +767,17 @@ impl NotebookEditor {
                 cell.clone().into_any_element()
             }
         }
+    }
+}
+
+impl crate::kernels::MessageRouter for NotebookEditor {
+    fn route(&mut self, message: &JupyterMessage, window: &mut Window, cx: &mut App) {
+        // SAFETY: This cast is safe because this method is only ever called from within
+        // an Entity<NotebookEditor>::update_in closure, where cx is actually &mut Context<NotebookEditor>.
+        // The MessageRouter trait requires &mut App to be generic, but the implementation
+        // knows it's actually Context<Self>.
+        let cx = unsafe { &mut *(cx as *mut App as *mut Context<Self>) };
+        NotebookEditor::route(self, message, window, cx);
     }
 }
 

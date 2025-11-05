@@ -645,6 +645,18 @@ pub enum SessionEvent {
 
 impl EventEmitter<SessionEvent> for Session {}
 
+impl crate::kernels::MessageRouter for Session {
+    fn route(&mut self, message: &JupyterMessage, window: &mut Window, cx: &mut App) {
+        // SAFETY: This cast is safe because this method is only ever called from within
+        // an Entity<Session>::update_in closure, where cx is actually &mut Context<Session>.
+        // The MessageRouter trait requires &mut App to be generic, but the implementation
+        // knows it's actually Context<Self>. This is a common pattern in GPUI for bridging
+        // generic contexts.
+        let cx = unsafe { &mut *(cx as *mut App as *mut Context<Self>) };
+        Session::route(self, message, window, cx);
+    }
+}
+
 impl Render for Session {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (status_text, interrupt_button) = match &self.kernel {

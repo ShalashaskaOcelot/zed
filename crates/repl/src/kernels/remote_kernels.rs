@@ -11,7 +11,7 @@ use smol::io::AsyncReadExt as _;
 
 use crate::Session;
 
-use super::RunningKernel;
+use super::{MessageRouter, RunningKernel};
 use anyhow::Result;
 use jupyter_websocket_client::{
     JupyterWebSocket, JupyterWebSocketReader, JupyterWebSocketWriter, KernelLaunchRequest,
@@ -127,10 +127,10 @@ pub struct RemoteRunningKernel {
 }
 
 impl RemoteRunningKernel {
-    pub fn new(
+    pub fn new<R: MessageRouter>(
         kernelspec: RemoteKernelSpecification,
         working_directory: std::path::PathBuf,
-        session: Entity<Session>,
+        router: Entity<R>,
         window: &mut Window,
         cx: &mut App,
     ) -> Task<Result<Box<dyn RunningKernel>>> {
@@ -192,15 +192,15 @@ impl RemoteRunningKernel {
             });
 
             let receiving_task = cx.spawn({
-                let session = session.clone();
+                let router = router.clone();
 
                 async move |cx| {
                     while let Some(message) = r.next().await {
                         match message {
                             Ok(message) => {
-                                session
-                                    .update_in(cx, |session, window, cx| {
-                                        session.route(&message, window, cx);
+                                router
+                                    .update_in(cx, |router, window, cx| {
+                                        router.route(&message, window, cx);
                                     })
                                     .ok();
                             }
