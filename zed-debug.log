@@ -1,0 +1,313 @@
+warning: unused import: `crate::kernels::LocalKernelSpecification`
+  --> crates/repl/src/notebook/notebook_ui.rs:21:5
+   |
+21 | use crate::kernels::LocalKernelSpecification;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/cell.rs:269:9
+    |
+269 |         window: &mut Window,
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/cell.rs:466:33
+    |
+466 |     pub fn gutter_output(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    |                                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/notebook_ui.rs:625:48
+    |
+625 | ...                   .tooltip(move |window, cx| {
+    |                                      ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/notebook_ui.rs:640:48
+    |
+640 | ...                   .tooltip(move |window, cx| {
+    |                                      ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/notebook_ui.rs:657:48
+    |
+657 | ...                   .tooltip(move |window, cx| {
+    |                                      ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/notebook_ui.rs:671:48
+    |
+671 | ...                   .tooltip(move |window, cx| {
+    |                                      ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/notebook_ui.rs:688:48
+    |
+688 | ...                   .tooltip(move |window, cx| {
+    |                                      ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/notebook_ui.rs:702:48
+    |
+702 | ...                   .tooltip(move |window, cx| {
+    |                                      ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `this`
+   --> crates/repl/src/notebook/cell.rs:208:69
+    |
+208 |                 let language_task = cx.spawn_in(window, async move |this, cx| {
+    |                                                                     ^^^^ help: if this is intentional, prefix it with an underscore: `_this`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/cell.rs:252:33
+    |
+252 |     fn selected_bg_color(&self, window: &mut Window, cx: &mut Context<Self>) -> Hsla {
+    |                                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/cell.rs:527:23
+    |
+527 |     fn control(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<CellControl> {
+    |                       ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `cx`
+   --> crates/repl/src/notebook/cell.rs:527:44
+    |
+527 |     fn control(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<CellControl> {
+    |                                            ^^ help: if this is intentional, prefix it with an underscore: `_cx`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/cell.rs:565:23
+    |
+565 |     fn run(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    |                       ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `cx`
+   --> crates/repl/src/notebook/cell.rs:565:44
+    |
+565 |     fn run(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    |                                            ^^ help: if this is intentional, prefix it with an underscore: `_cx`
+
+warning: unused variable: `language_name`
+   --> crates/repl/src/notebook/notebook_ui.rs:110:13
+    |
+110 |         let language_name = notebook_item.read(cx).language_name();
+    |             ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_language_name`
+
+warning: unused variable: `index`
+   --> crates/repl/src/notebook/notebook_ui.rs:120:14
+    |
+120 |         for (index, cell) in notebook_item
+    |              ^^^^^ help: if this is intentional, prefix it with an underscore: `_index`
+
+warning: unused variable: `notebook_handle`
+   --> crates/repl/src/notebook/notebook_ui.rs:136:13
+    |
+136 |         let notebook_handle = cx.entity().downgrade();
+    |             ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_notebook_handle`
+
+warning: unused variable: `this`
+   --> crates/repl/src/notebook/notebook_ui.rs:141:13
+    |
+141 |         let this = cx.entity();
+    |             ^^^^ help: if this is intentional, prefix it with an underscore: `_this`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/notebook_ui.rs:166:27
+    |
+166 |     fn has_outputs(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    |                           ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/notebook_ui.rs:176:33
+    |
+176 |     fn clear_outputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    |                                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/notebook_ui.rs:221:9
+    |
+221 |         window: &mut Window,
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/notebook_ui.rs:259:32
+    |
+259 |     fn move_cell_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    |                                ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `cx`
+   --> crates/repl/src/notebook/notebook_ui.rs:259:53
+    |
+259 |     fn move_cell_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    |                                                     ^^ help: if this is intentional, prefix it with an underscore: `_cx`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/notebook_ui.rs:263:34
+    |
+263 |     fn move_cell_down(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    |                                  ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `cx`
+   --> crates/repl/src/notebook/notebook_ui.rs:263:55
+    |
+263 |     fn move_cell_down(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    |                                                       ^^ help: if this is intentional, prefix it with an underscore: `_cx`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/notebook_ui.rs:267:38
+    |
+267 |     fn add_markdown_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    |                                      ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `cx`
+   --> crates/repl/src/notebook/notebook_ui.rs:267:59
+    |
+267 |     fn add_markdown_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    |                                                           ^^ help: if this is intentional, prefix it with an underscore: `_cx`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/notebook_ui.rs:271:34
+    |
+271 |     fn add_code_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    |                                  ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `cx`
+   --> crates/repl/src/notebook/notebook_ui.rs:271:55
+    |
+271 |     fn add_code_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    |                                                       ^^ help: if this is intentional, prefix it with an underscore: `_cx`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/notebook_ui.rs:575:21
+    |
+575 |     fn button_group(window: &mut Window, cx: &mut Context<Self>) -> Div {
+    |                     ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `window`
+   --> crates/repl/src/notebook/notebook_ui.rs:740:9
+    |
+740 |         window: &mut Window,
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: unused variable: `window`
+    --> crates/repl/src/notebook/notebook_ui.rs:1046:53
+     |
+1046 |     fn tab_content(&self, params: TabContentParams, window: &Window, cx: &App) -> AnyElement {
+     |                                                     ^^^^^^ help: if this is intentional, prefix it with an underscore: `_window`
+
+warning: fields `markdown_parsing_task` and `languages` are never read
+   --> crates/repl/src/notebook/cell.rs:340:5
+    |
+334 | pub struct MarkdownCell {
+    |            ------------ fields in this struct
+...
+340 |     markdown_parsing_task: Task<()>,
+    |     ^^^^^^^^^^^^^^^^^^^^^
+...
+343 |     languages: Arc<LanguageRegistry>,
+    |     ^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` on by default
+
+warning: field `language_task` is never read
+   --> crates/repl/src/notebook/cell.rs:439:5
+    |
+430 | pub struct CodeCell {
+    |            -------- field in this struct
+...
+439 |     language_task: Task<()>,
+    |     ^^^^^^^^^^^^^
+
+warning: method `output_control` is never used
+   --> crates/repl/src/notebook/cell.rs:458:8
+    |
+442 | impl CodeCell {
+    | ------------- method in this implementation
+...
+458 |     fn output_control(&self) -> Option<CellControlType> {
+    |        ^^^^^^^^^^^^^^
+
+warning: constant `MAX_TEXT_BLOCK_WIDTH` is never used
+  --> crates/repl/src/notebook/notebook_ui.rs:51:18
+   |
+51 | pub(crate) const MAX_TEXT_BLOCK_WIDTH: f32 = 9999.0;
+   |                  ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `SMALL_SPACING_SIZE` is never used
+  --> crates/repl/src/notebook/notebook_ui.rs:52:18
+   |
+52 | pub(crate) const SMALL_SPACING_SIZE: f32 = 8.0;
+   |                  ^^^^^^^^^^^^^^^^^^
+
+warning: constant `LARGE_SPACING_SIZE` is never used
+  --> crates/repl/src/notebook/notebook_ui.rs:54:18
+   |
+54 | pub(crate) const LARGE_SPACING_SIZE: f32 = 16.0;
+   |                  ^^^^^^^^^^^^^^^^^^
+
+warning: fields `languages` and `remote_id` are never read
+  --> crates/repl/src/notebook/notebook_ui.rs:78:5
+   |
+77 | pub struct NotebookEditor {
+   |            -------------- fields in this struct
+78 |     languages: Arc<LanguageRegistry>,
+   |     ^^^^^^^^^
+...
+84 |     remote_id: Option<ViewId>,
+   |     ^^^^^^^^^
+
+warning: unused `std::result::Result` that must be used
+   --> crates/repl/src/notebook/cell.rs:211:21
+    |
+211 | /                     buffer.update(cx, |buffer, cx| {
+212 | |                         buffer.set_language(language.clone(), cx);
+213 | |                     });
+    | |______________________^
+    |
+    = note: this `Result` may be an `Err` variant, which should be handled
+    = note: `#[warn(unused_must_use)]` on by default
+help: use `let _ = ...` to ignore the resulting value
+    |
+211 |                     let _ = buffer.update(cx, |buffer, cx| {
+    |                     +++++++
+
+warning: `repl` (lib) generated 41 warnings (run `cargo fix --lib -p repl` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.75s
+     Running `target/debug/zed`
+Cannot run cells: kernel is not running (status: Starting)
+Add code block triggered
+Add code block triggered
+Add code block triggered
+Add code block triggered
+Add code block triggered
+Add markdown block triggered
+Add markdown block triggered
+Add markdown block triggered
+Add markdown block triggered
+Add markdown block triggered
+Move cell down triggered
+Move cell down triggered
+Move cell down triggered
+Move cell up triggered
+Move cell up triggered
+Move cell up triggered
+Move cell up triggered
+Move cell up triggered
+Move cell up triggered
+Cannot run cells: kernel is not running (status: Starting)
+Cannot run cells: kernel is not running (status: Starting)
+Cannot run cells: kernel is not running (status: Starting)
+Cannot run cells: kernel is not running (status: Starting)
+Cannot run cells: kernel is not running (status: Starting)
+Cannot run cells: kernel is not running (status: Starting)
+Cannot run cells: kernel is not running (status: Starting)
+Cannot run cells: kernel is not running (status: Starting)
+Cannot run cells: kernel is not running (status: Starting)
+Cannot run cells: kernel is not running (status: Starting)
+Cannot run cells: kernel is not running (status: Starting)
+Cannot run cells: kernel is not running (status: Starting)
