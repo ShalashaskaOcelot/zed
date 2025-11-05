@@ -1,4 +1,3 @@
-#![allow(unused, dead_code)]
 use std::sync::Arc;
 
 use editor::{Editor, EditorMode, MultiBuffer};
@@ -396,7 +395,7 @@ impl Render for MarkdownCell {
             markdown_preview::markdown_renderer::RenderContext::new(None, window, cx);
 
         v_flex()
-            .size_full()
+            .w_full()
             // TODO: Move base cell render into trait impl so we don't have to repeat this
             .children(self.cell_position_spacer(true, window, cx))
             .child(
@@ -570,7 +569,7 @@ impl RunnableCell for CodeCell {
 impl Render for CodeCell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
-            .size_full()
+            .w_full()
             // TODO: Move base cell render into trait impl so we don't have to repeat this
             .children(self.cell_position_spacer(true, window, cx))
             // Editor portion
@@ -717,7 +716,7 @@ impl RenderableCell for RawCell {
 impl Render for RawCell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
-            .size_full()
+            .w_full()
             // TODO: Move base cell render into trait impl so we don't have to repeat this
             .children(self.cell_position_spacer(true, window, cx))
             .child(

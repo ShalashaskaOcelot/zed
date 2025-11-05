@@ -1,4 +1,3 @@
-#![allow(unused, dead_code)]
 use std::future::Future;
 use std::{path::PathBuf, sync::Arc};
 
@@ -442,7 +441,7 @@ impl NotebookEditor {
         cell: &Cell,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> AnyElement {
         let cell_position = self.cell_position(index);
 
         let is_selected = index == self.selected_cell_index;
@@ -518,9 +517,7 @@ impl Render for NotebookEditor {
                             this.cell_order
                                 .get(ix)
                                 .and_then(|cell_id| this.cell_map.get(cell_id))
-                                .map(|cell| {
-                                    this.render_cell(ix, cell, window, cx).into_any_element()
-                                })
+                                .map(|cell| this.render_cell(ix, cell, window, cx))
                                 .unwrap_or_else(|| div().into_any())
                         }),
                     ))
