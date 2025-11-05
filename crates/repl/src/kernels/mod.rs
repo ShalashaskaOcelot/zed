@@ -23,9 +23,12 @@ use util::rel_path::RelPath;
 pub type JupyterMessageChannel = stream::SelectAll<Receiver<JupyterMessage>>;
 
 /// Trait for routing Jupyter messages to their destination (Session or NotebookEditor)
-pub trait MessageRouter: Send + 'static {
+pub trait MessageRouter: 'static {
     /// Route a Jupyter message to be processed
     fn route(&mut self, message: &JupyterMessage, window: &mut Window, cx: &mut App);
+
+    /// Handle kernel error
+    fn kernel_errored(&mut self, error_message: String, window: &mut Window, cx: &mut App);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

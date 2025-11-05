@@ -451,6 +451,10 @@ impl CodeCell {
         self.outputs.clear();
     }
 
+    pub fn add_output(&mut self, output: Output) {
+        self.outputs.push(output);
+    }
+
     fn output_control(&self) -> Option<CellControlType> {
         if self.has_outputs() {
             Some(CellControlType::ClearCell)

@@ -655,6 +655,11 @@ impl crate::kernels::MessageRouter for Session {
         let cx = unsafe { &mut *(cx as *mut App as *mut Context<Self>) };
         Session::route(self, message, window, cx);
     }
+
+    fn kernel_errored(&mut self, error_message: String, _window: &mut Window, cx: &mut App) {
+        let cx = unsafe { &mut *(cx as *mut App as *mut Context<Self>) };
+        Session::kernel_errored(self, error_message, cx);
+    }
 }
 
 impl Render for Session {

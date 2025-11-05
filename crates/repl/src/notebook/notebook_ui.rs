@@ -21,9 +21,10 @@ use workspace::{ToolbarItemEvent, ToolbarItemView};
 
 use crate::{Kernel, KernelSpecification, KernelStatus};
 use crate::kernels::{LocalKernelSpecification, RunningKernel};
+use crate::outputs::Output;
 use runtimelib::{ExecuteRequest, JupyterMessage, JupyterMessageContent};
 
-use super::{Cell, CellPosition, RenderableCell};
+use super::{Cell, CellPosition, RenderableCell, RunnableCell};
 
 use nbformat::v4::CellId;
 use nbformat::v4::Metadata as NotebookMetadata;
@@ -425,9 +426,11 @@ impl NotebookEditor {
         match &message.content {
             JupyterMessageContent::ExecuteReply(reply) => {
                 // Update execution count
-                cell.update(cx, |cell, _cx| {
-                    cell.set_execution_count(reply.execution_count as i32);
-                });
+                if let Some(count) = reply.execution_count {
+                    cell.update(cx, |cell, _cx| {
+                        cell.set_execution_count(count as i32);
+                    });
+                }
 
                 // Remove from pending executions
                 self.pending_executions.remove(parent_message_id);
@@ -435,17 +438,17 @@ impl NotebookEditor {
             }
             JupyterMessageContent::ExecuteResult(result) => {
                 // Add output to cell
-                let output = super::Output::new(&result.data, None, window, cx);
+                let output = Output::new(&result.data, None, window, cx);
                 cell.update(cx, |cell, _cx| {
-                    cell.outputs.push(output);
+                    cell.add_output(output);
                 });
                 cx.notify();
             }
             JupyterMessageContent::DisplayData(display_data) => {
                 // Add output to cell
-                let output = super::Output::new(&display_data.data, None, window, cx);
+                let output = Output::new(&display_data.data, None, window, cx);
                 cell.update(cx, |cell, _cx| {
-                    cell.outputs.push(output);
+                    cell.add_output(output);
                 });
                 cx.notify();
             }
@@ -453,11 +456,11 @@ impl NotebookEditor {
                 // Add stream output
                 use crate::outputs::plain::TerminalOutput;
                 let terminal_output = cx.new(|cx| TerminalOutput::from(&stream.text, window, cx));
-                let output = super::Output::Stream {
+                let output = Output::Stream {
                     content: terminal_output,
                 };
                 cell.update(cx, |cell, _cx| {
-                    cell.outputs.push(output);
+                    cell.add_output(output);
                 });
                 cx.notify();
             }
@@ -472,9 +475,9 @@ impl NotebookEditor {
                     evalue: error.evalue.clone(),
                     traceback,
                 };
-                let output = super::Output::ErrorOutput(error_view);
+                let output = Output::ErrorOutput(error_view);
                 cell.update(cx, |cell, _cx| {
-                    cell.outputs.push(output);
+                    cell.add_output(output);
                 });
                 cx.notify();
             }
@@ -778,6 +781,12 @@ impl crate::kernels::MessageRouter for NotebookEditor {
         // knows it's actually Context<Self>.
         let cx = unsafe { &mut *(cx as *mut App as *mut Context<Self>) };
         NotebookEditor::route(self, message, window, cx);
+    }
+
+    fn kernel_errored(&mut self, error_message: String, _window: &mut Window, cx: &mut App) {
+        let cx = unsafe { &mut *(cx as *mut App as *mut Context<Self>) };
+        self.kernel = crate::Kernel::ErroredLaunch(error_message);
+        cx.notify();
     }
 }
 

@@ -274,7 +274,7 @@ impl NativeRunningKernel {
             .detach();
 
             cx.spawn({
-                let session = session.clone();
+                let router = router.clone();
                 async move |cx| {
                     async fn with_name(
                         name: &'static str,
@@ -293,10 +293,11 @@ impl NativeRunningKernel {
                         if let Err(err) = result {
                             log::error!("kernel: handling failed for {name}: {err:?}");
 
-                            session
-                                .update(cx, |session, cx| {
-                                    session.kernel_errored(
+                            router
+                                .update_in(cx, |router, window, cx| {
+                                    router.kernel_errored(
                                         format!("handling failed for {name}: {err}"),
+                                        window,
                                         cx,
                                     );
                                     cx.notify();
@@ -310,30 +311,32 @@ impl NativeRunningKernel {
 
             let status = process.status();
 
-            let process_status_task = cx.spawn(async move |cx| {
-                let error_message = match status.await {
-                    Ok(status) => {
-                        if status.success() {
-                            log::info!("kernel process exited successfully");
-                            return;
+            let process_status_task = cx.spawn({
+                let router = router.clone();
+                async move |cx| {
+                    let error_message = match status.await {
+                        Ok(status) => {
+                            if status.success() {
+                                log::info!("kernel process exited successfully");
+                                return;
+                            }
+
+                            format!("kernel process exited with status: {:?}", status)
                         }
+                        Err(err) => {
+                            format!("kernel process exited with error: {:?}", err)
+                        }
+                    };
 
-                        format!("kernel process exited with status: {:?}", status)
-                    }
-                    Err(err) => {
-                        format!("kernel process exited with error: {:?}", err)
-                    }
-                };
+                    log::error!("{}", error_message);
 
-                log::error!("{}", error_message);
-
-                session
-                    .update(cx, |session, cx| {
-                        session.kernel_errored(error_message, cx);
-
-                        cx.notify();
-                    })
-                    .ok();
+                    router
+                        .update_in(cx, |router, window, cx| {
+                            router.kernel_errored(error_message, window, cx);
+                            cx.notify();
+                        })
+                        .ok();
+                }
             });
 
             anyhow::Ok(Box::new(Self {
