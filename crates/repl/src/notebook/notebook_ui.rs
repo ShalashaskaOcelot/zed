@@ -440,28 +440,49 @@ impl NotebookEditor {
         }
     }
 
+    fn find_python_in_venv(&self, cx: &App) -> Option<PathBuf> {
+        let notebook_item = self.notebook_item.read(cx);
+        let notebook_dir = notebook_item.path.parent()?;
+
+        // Try common venv locations
+        for venv_name in &["venv", ".venv", "env", ".env"] {
+            let venv_python = notebook_dir.join(venv_name).join("bin").join("python");
+            if venv_python.exists() {
+                log::info!("Found venv Python at: {:?}", venv_python);
+                return Some(venv_python);
+            }
+            // Also try python3
+            let venv_python3 = notebook_dir.join(venv_name).join("bin").join("python3");
+            if venv_python3.exists() {
+                log::info!("Found venv Python at: {:?}", venv_python3);
+                return Some(venv_python3);
+            }
+        }
+
+        log::warn!("No venv found in notebook directory, using system Python");
+        None
+    }
+
     fn get_kernel_specification(&self, cx: &App) -> Option<KernelSpecification> {
         // For now, we'll try to get the kernelspec from the notebook metadata
         // In the future, this could present a picker to the user
         let notebook_item = self.notebook_item.read(cx);
         let kernelspec = notebook_item.notebook.metadata.kernelspec.as_ref()?;
 
-        // Create a local kernel specification from the notebook's kernelspec
-        // This is a simplified approach - in production you'd want to:
-        // 1. Check available kernels on the system
-        // 2. Match the notebook's kernelspec to an available kernel
-        // 3. Fall back to a default or prompt the user
+        // Try to find venv Python first, fall back to system python
+        let python_path = self.find_python_in_venv(cx)
+            .unwrap_or_else(|| PathBuf::from("python3"));
 
-        // For now, just create a basic spec
+        log::info!("Using Python for kernel: {:?}", python_path);
+
         use crate::kernels::LocalKernelSpecification;
-        use std::path::PathBuf;
 
         Some(KernelSpecification::Jupyter(LocalKernelSpecification {
             name: kernelspec.name.clone(),
-            path: PathBuf::from("jupyter"), // This would need to be resolved properly
+            path: PathBuf::from("jupyter"),
             kernelspec: jupyter_protocol::JupyterKernelspec {
                 argv: vec![
-                    "python".to_string(),
+                    python_path.to_string_lossy().to_string(),
                     "-m".to_string(),
                     "ipykernel_launcher".to_string(),
                     "-f".to_string(),
@@ -646,6 +667,16 @@ impl NotebookEditor {
 
     fn selected_index(&self) -> usize {
         self.selected_cell_index
+    }
+
+    fn has_focused_editor(&self, window: &Window, cx: &App) -> bool {
+        self.cell_map.values().any(|cell| {
+            if let Cell::Code(code_cell) = cell {
+                code_cell.read(cx).editor.read(cx).focus_handle(cx).is_focused(window, cx)
+            } else {
+                false
+            }
+        })
     }
 
     pub fn set_selected_index(
@@ -968,10 +999,14 @@ impl Render for NotebookEditor {
             .on_action(
                 cx.listener(|this, &AddCodeBlock, window, cx| this.add_code_block(window, cx)),
             )
-            .on_action(cx.listener(Self::select_next))
-            .on_action(cx.listener(Self::select_previous))
-            .on_action(cx.listener(Self::select_first))
-            .on_action(cx.listener(Self::select_last))
+            // Only handle navigation keys when no editor is focused
+            // This prevents conflicts where arrow keys move both cursor and selection
+            .when(!self.has_focused_editor(window, cx), |this| {
+                this.on_action(cx.listener(Self::select_next))
+                    .on_action(cx.listener(Self::select_previous))
+                    .on_action(cx.listener(Self::select_first))
+                    .on_action(cx.listener(Self::select_last))
+            })
             .size_full()
             .flex()
             .flex_row()
