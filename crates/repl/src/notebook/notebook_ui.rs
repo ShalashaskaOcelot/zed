@@ -139,7 +139,9 @@ impl NotebookEditor {
         log::info!("NotebookEditor::new - loaded {} cells", cell_count);
 
         let this = cx.entity();
-        let cell_list = ListState::new(cell_count, gpui::ListAlignment::Top, px(1000.));
+        // Use a reasonable estimated cell height (100px) so cells are rendered
+        // This is just an estimate for scrolling performance, actual cells size themselves
+        let cell_list = ListState::new(cell_count, gpui::ListAlignment::Top, px(100.));
 
         let mut editor = Self {
             project,
