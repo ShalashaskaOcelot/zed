@@ -9,8 +9,6 @@ use async_tungstenite::tungstenite::{client::IntoClientRequest, http::HeaderValu
 use futures::StreamExt;
 use smol::io::AsyncReadExt as _;
 
-use crate::Session;
-
 use super::{MessageRouter, RunningKernel};
 use anyhow::Result;
 use jupyter_websocket_client::{

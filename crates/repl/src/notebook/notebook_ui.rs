@@ -6,28 +6,24 @@ use client::proto::ViewId;
 use collections::HashMap;
 use feature_flags::{FeatureFlagAppExt as _, NotebookFeatureFlag};
 use futures::FutureExt;
-use futures::future::Shared;
 use gpui::{
-    AnyElement, App, Entity, EventEmitter, FocusHandle, Focusable, ListScrollEvent, ListState,
-    Point, Subscription, Task, actions, list, prelude::*,
+    AnyElement, App, Entity, EventEmitter, FocusHandle, Focusable, ListState,
+    Point, Task, actions, list, prelude::*,
 };
 use language::{Language, LanguageRegistry};
 use project::{Project, ProjectEntryId, ProjectPath};
 use ui::{Tooltip, prelude::*};
-use workspace::item::{ItemEvent, SaveOptions, TabContentParams};
+use workspace::item::{SaveOptions, TabContentParams};
 use workspace::searchable::SearchableItemHandle;
-use workspace::{Item, ItemHandle, Pane, ProjectItem, ToolbarItemLocation};
-use workspace::{ToolbarItemEvent, ToolbarItemView};
+use workspace::{Item, Pane, ProjectItem};
 
-use crate::{Kernel, KernelSpecification, KernelStatus};
-use crate::kernels::{LocalKernelSpecification, RunningKernel};
+use crate::Kernel;
 use crate::outputs::Output;
 use runtimelib::{ExecuteRequest, JupyterMessage, JupyterMessageContent};
 
 use super::{Cell, CellPosition, RenderableCell, RunnableCell};
 
 use nbformat::v4::CellId;
-use nbformat::v4::Metadata as NotebookMetadata;
 
 actions!(
     notebook,
@@ -426,11 +422,9 @@ impl NotebookEditor {
         match &message.content {
             JupyterMessageContent::ExecuteReply(reply) => {
                 // Update execution count
-                if let Some(count) = reply.execution_count {
-                    cell.update(cx, |cell, _cx| {
-                        cell.set_execution_count(count as i32);
-                    });
-                }
+                cell.update(cx, |cell, _cx| {
+                    cell.set_execution_count(reply.execution_count.0 as i32);
+                });
 
                 // Remove from pending executions
                 self.pending_executions.remove(parent_message_id);

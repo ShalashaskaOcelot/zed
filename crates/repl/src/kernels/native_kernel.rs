@@ -22,8 +22,6 @@ use std::{
 };
 use uuid::Uuid;
 
-use crate::Session;
-
 use super::{MessageRouter, RunningKernel};
 
 #[derive(Debug, Clone)]
