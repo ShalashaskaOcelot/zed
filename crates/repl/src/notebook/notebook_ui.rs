@@ -136,6 +136,8 @@ impl NotebookEditor {
         let notebook_handle = cx.entity().downgrade();
         let cell_count = cell_order.len();
 
+        log::info!("NotebookEditor::new - loaded {} cells", cell_count);
+
         let this = cx.entity();
         let cell_list = ListState::new(cell_count, gpui::ListAlignment::Top, px(1000.));
 
@@ -741,6 +743,12 @@ impl NotebookEditor {
         let cell_position = self.cell_position(index);
 
         let is_selected = index == self.selected_cell_index;
+
+        log::trace!("Rendering cell at index {}: {:?}", index, match cell {
+            Cell::Code(_) => "Code",
+            Cell::Markdown(_) => "Markdown",
+            Cell::Raw(_) => "Raw",
+        });
 
         match cell {
             Cell::Code(cell) => {
