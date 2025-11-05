@@ -12,6 +12,7 @@ use gpui::{
 };
 use language::{Language, LanguageRegistry};
 use project::{Project, ProjectEntryId, ProjectPath};
+use settings::Settings as _;
 use ui::{Tooltip, prelude::*};
 use util::ResultExt;
 use workspace::item::{SaveOptions, TabContentParams};
@@ -19,7 +20,6 @@ use workspace::searchable::SearchableItemHandle;
 use workspace::{Item, Pane, ProjectItem};
 
 use crate::{Kernel, KernelSpecification};
-use crate::kernels::LocalKernelSpecification;
 use crate::outputs::Output;
 use runtimelib::{ExecuteRequest, JupyterMessage, JupyterMessageContent};
 
@@ -230,7 +230,7 @@ impl NotebookEditor {
         };
 
         // Get the code from the cell's editor buffer (which reflects current edits)
-        let code = code_cell.read(cx).editor.read(cx).text(cx);
+        let code = code_cell.read(cx).text(cx);
 
         if code.trim().is_empty() {
             return;
@@ -292,11 +292,11 @@ impl NotebookEditor {
 
     fn add_markdown_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use super::cell::MarkdownCell;
-        use nbformat::v4::CellMetadata;
         use uuid::Uuid;
 
-        let cell_id = CellId::from(Uuid::new_v4().to_string());
+        let cell_id = CellId::from(Uuid::new_v4());
         let source = String::new();
+        let metadata = serde_json::from_str("{}").unwrap();
 
         let markdown_cell = cx.new(|cx| {
             let markdown_parsing_task = {
@@ -310,8 +310,9 @@ impl NotebookEditor {
                         })
                         .await;
 
-                    this.update(cx, |cell: &mut MarkdownCell, _| {
+                    this.update(cx, |cell: &mut MarkdownCell, cx| {
                         cell.parsed_markdown = Some(parsed_markdown);
+                        cx.notify();
                     })
                     .log_err();
                 })
@@ -322,7 +323,7 @@ impl NotebookEditor {
                 image_cache: RetainAllImageCache::new(cx),
                 languages: self.languages.clone(),
                 id: cell_id.clone(),
-                metadata: CellMetadata::default(),
+                metadata,
                 source: source.clone(),
                 parsed_markdown: None,
                 selected: false,
@@ -348,12 +349,12 @@ impl NotebookEditor {
         use super::cell::CodeCell;
         use editor::{Editor, EditorMode, MultiBuffer};
         use language::Buffer;
-        use nbformat::v4::CellMetadata;
         use theme::ThemeSettings;
         use uuid::Uuid;
 
-        let cell_id = CellId::from(Uuid::new_v4().to_string());
+        let cell_id = CellId::from(Uuid::new_v4());
         let text = String::new();
+        let metadata = serde_json::from_str("{}").unwrap();
 
         let notebook_language = self.notebook_item.read(cx).notebook_language();
         let notebook_language = cx
@@ -403,7 +404,7 @@ impl NotebookEditor {
 
             CodeCell {
                 id: cell_id.clone(),
-                metadata: CellMetadata::default(),
+                metadata,
                 execution_count: None,
                 source: text,
                 editor: editor_view,

@@ -336,7 +336,7 @@ pub struct MarkdownCell {
     metadata: CellMetadata,
     image_cache: Entity<RetainAllImageCache>,
     source: String,
-    parsed_markdown: Option<markdown_preview::markdown_elements::ParsedMarkdown>,
+    pub(crate) parsed_markdown: Option<markdown_preview::markdown_elements::ParsedMarkdown>,
     markdown_parsing_task: Task<()>,
     selected: bool,
     cell_position: Option<CellPosition>,
@@ -443,6 +443,11 @@ impl CodeCell {
     pub fn is_dirty(&self, cx: &App) -> bool {
         self.editor.read(cx).buffer().read(cx).is_dirty(cx)
     }
+
+    pub fn text(&self, cx: &App) -> String {
+        self.editor.read(cx).text(cx)
+    }
+
     pub fn has_outputs(&self) -> bool {
         !self.outputs.is_empty()
     }
