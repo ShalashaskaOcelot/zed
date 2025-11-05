@@ -17,7 +17,8 @@ use workspace::item::{SaveOptions, TabContentParams};
 use workspace::searchable::SearchableItemHandle;
 use workspace::{Item, Pane, ProjectItem};
 
-use crate::Kernel;
+use crate::{Kernel, KernelSpecification};
+use crate::kernels::LocalKernelSpecification;
 use crate::outputs::Output;
 use runtimelib::{ExecuteRequest, JupyterMessage, JupyterMessageContent};
 
