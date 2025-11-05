@@ -902,12 +902,6 @@ impl NotebookEditor {
 
         let is_selected = index == self.selected_cell_index;
 
-        log::trace!("Rendering cell at index {}: {:?}", index, match cell {
-            Cell::Code(_) => "Code",
-            Cell::Markdown(_) => "Markdown",
-            Cell::Raw(_) => "Raw",
-        });
-
         match cell {
             Cell::Code(cell) => {
                 cell.update(cx, |cell, _cx| {
