@@ -579,6 +579,8 @@ impl RunnableCell for CodeCell {
 
 impl Render for CodeCell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        log::trace!("CodeCell::render - rendering code cell with {} source lines", self.source.lines().count());
+
         v_flex()
             .w_full()
             // TODO: Move base cell render into trait impl so we don't have to repeat this
@@ -597,7 +599,7 @@ impl Render for CodeCell {
                         div().py_1p5().w_full().child(
                             div()
                                 .flex()
-                                .size_full()
+                                .w_full()
                                 .flex_1()
                                 .py_3()
                                 .px_5()
