@@ -20,7 +20,8 @@ use workspace::{Item, ItemHandle, Pane, ProjectItem, ToolbarItemLocation};
 use workspace::{ToolbarItemEvent, ToolbarItemView};
 
 use crate::{Kernel, KernelSpecification, KernelStatus};
-use runtimelib::{ExecuteRequest, JupyterMessage};
+use crate::kernels::{LocalKernelSpecification, RunningKernel};
+use runtimelib::{ExecuteRequest, JupyterMessage, JupyterMessageContent};
 
 use super::{Cell, CellPosition, RenderableCell};
 
@@ -323,76 +324,123 @@ impl NotebookEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::kernels::{NativeRunningKernel, RemoteRunningKernel};
-        use std::env::temp_dir;
+        // TODO: Kernel startup needs to be refactored
+        //
+        // The issue: NativeRunningKernel::new() and RemoteRunningKernel::new() both expect
+        // Entity<Session>, but we have Entity<NotebookEditor>. The kernel code is tightly
+        // coupled to Session for message routing.
+        //
+        // Solutions:
+        // 1. Create a MessageRouter trait that both Session and NotebookEditor implement
+        // 2. Make kernel constructors generic over MessageRouter
+        // 3. Refactor kernels to return message channels instead of doing routing internally
+        //
+        // For now, we'll print a message and not start the kernel. This structure is in
+        // place for when the refactor is done.
 
-        let fs = self.project.read(cx).fs().clone();
-        let entity_id = cx.entity().entity_id();
+        eprintln!("Kernel startup not yet implemented for notebooks");
+        eprintln!("Would start kernel: {:?}", kernel_spec.name());
 
-        // Get working directory from notebook path or use temp
-        let working_directory = self.notebook_item
-            .read(cx)
-            .path
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(temp_dir);
-
-        let notebook_handle = cx.entity();
-
-        // Start the kernel based on type
-        let kernel = match kernel_spec.clone() {
-            KernelSpecification::Jupyter(kernel_specification)
-            | KernelSpecification::PythonEnv(kernel_specification) => NativeRunningKernel::new(
-                kernel_specification,
-                entity_id,
-                working_directory,
-                fs,
-                notebook_handle.clone(),
-                window,
-                cx,
-            ),
-            KernelSpecification::Remote(remote_kernel_specification) => RemoteRunningKernel::new(
-                remote_kernel_specification,
-                working_directory,
-                notebook_handle.clone(),
-                window,
-                cx,
-            ),
-        };
-
-        let pending_kernel = cx
-            .spawn(async move |this, cx| {
-                let kernel = kernel.await;
-
-                match kernel {
-                    Ok(kernel) => {
-                        this.update(cx, |notebook, cx| {
-                            notebook.kernel = Kernel::RunningKernel(kernel);
-                            notebook.start_message_handler(cx);
-                            cx.notify();
-                        })
-                        .ok();
-                    }
-                    Err(err) => {
-                        this.update(cx, |notebook, cx| {
-                            notebook.kernel = Kernel::ErroredLaunch(err.to_string());
-                            cx.notify();
-                        })
-                        .ok();
-                    }
-                }
-            })
-            .shared();
-
-        self.kernel = Kernel::StartingKernel(pending_kernel);
-        cx.notify();
+        // When implemented, this should:
+        // 1. Start the kernel process
+        // 2. Create iopub, shell, and control sockets
+        // 3. Spawn tasks to read from sockets
+        // 4. Route messages to self.route()
+        // 5. Set self.kernel = Kernel::RunningKernel(...)
     }
 
-    fn start_message_handler(&mut self, cx: &mut Context<Self>) {
-        // This will handle incoming messages from the kernel
-        // For now, just a placeholder
-        // In the real implementation, we'd subscribe to the kernel's message channel
-        println!("Message handler started - kernel is running");
+    /// Route incoming Jupyter messages to the appropriate cell
+    pub fn route(&mut self, message: &JupyterMessage, window: &mut Window, cx: &mut Context<Self>) {
+        // Handle status messages
+        match &message.content {
+            JupyterMessageContent::Status(status) => {
+                self.kernel.set_execution_state(&status.execution_state);
+                cx.notify();
+                return;
+            }
+            JupyterMessageContent::KernelInfoReply(reply) => {
+                self.kernel.set_kernel_info(reply);
+                return;
+            }
+            _ => {}
+        }
+
+        // Route messages to cells based on parent message ID
+        let parent_message_id = match message.parent_header.as_ref() {
+            Some(header) => &header.msg_id,
+            None => return,
+        };
+
+        // Find the cell that this message is for
+        let cell_id = match self.pending_executions.get(parent_message_id) {
+            Some(id) => id.clone(),
+            None => return,
+        };
+
+        let cell = match self.cell_map.get(&cell_id) {
+            Some(Cell::Code(code_cell)) => code_cell,
+            _ => return,
+        };
+
+        // Handle different message types
+        match &message.content {
+            JupyterMessageContent::ExecuteReply(reply) => {
+                // Update execution count
+                cell.update(cx, |cell, _cx| {
+                    cell.set_execution_count(reply.execution_count as i32);
+                });
+
+                // Remove from pending executions
+                self.pending_executions.remove(parent_message_id);
+                cx.notify();
+            }
+            JupyterMessageContent::ExecuteResult(result) => {
+                // Add output to cell
+                let output = super::Output::new(&result.data, None, window, cx);
+                cell.update(cx, |cell, _cx| {
+                    cell.outputs.push(output);
+                });
+                cx.notify();
+            }
+            JupyterMessageContent::DisplayData(display_data) => {
+                // Add output to cell
+                let output = super::Output::new(&display_data.data, None, window, cx);
+                cell.update(cx, |cell, _cx| {
+                    cell.outputs.push(output);
+                });
+                cx.notify();
+            }
+            JupyterMessageContent::StreamContent(stream) => {
+                // Add stream output
+                use crate::outputs::plain::TerminalOutput;
+                let terminal_output = cx.new(|cx| TerminalOutput::from(&stream.text, window, cx));
+                let output = super::Output::Stream {
+                    content: terminal_output,
+                };
+                cell.update(cx, |cell, _cx| {
+                    cell.outputs.push(output);
+                });
+                cx.notify();
+            }
+            JupyterMessageContent::ErrorOutput(error) => {
+                // Add error output
+                use crate::outputs::{plain::TerminalOutput, user_error::ErrorView};
+                let traceback = cx.new(|cx| {
+                    TerminalOutput::from(&error.traceback.join("\n"), window, cx)
+                });
+                let error_view = ErrorView {
+                    ename: error.ename.clone(),
+                    evalue: error.evalue.clone(),
+                    traceback,
+                };
+                let output = super::Output::ErrorOutput(error_view);
+                cell.update(cx, |cell, _cx| {
+                    cell.outputs.push(output);
+                });
+                cx.notify();
+            }
+            _ => {}
+        }
     }
 
     fn cell_count(&self) -> usize {
