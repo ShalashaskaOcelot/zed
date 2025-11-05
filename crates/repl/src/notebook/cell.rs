@@ -521,11 +521,18 @@ impl RenderableCell for CodeCell {
     }
 
     fn control(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<CellControl> {
+        use crate::notebook::notebook_ui::RunSelectedCell;
+
         let cell_control = if self.has_outputs() {
             CellControl::new("rerun-cell", CellControlType::RerunCell)
+                .on_click(move |_, window, cx| {
+                    window.dispatch_action(Box::new(RunSelectedCell), cx);
+                })
         } else {
             CellControl::new("run-cell", CellControlType::RunCell)
-                .on_click(cx.listener(move |this, _, window, cx| this.run(window, cx)))
+                .on_click(move |_, window, cx| {
+                    window.dispatch_action(Box::new(RunSelectedCell), cx);
+                })
         };
 
         Some(cell_control)

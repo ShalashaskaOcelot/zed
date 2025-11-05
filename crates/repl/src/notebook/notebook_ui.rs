@@ -9,7 +9,7 @@ use futures::FutureExt;
 use futures::future::Shared;
 use gpui::{
     AnyElement, App, Entity, EventEmitter, FocusHandle, Focusable, ListScrollEvent, ListState,
-    Point, Task, actions, list, prelude::*,
+    Point, Subscription, Task, actions, list, prelude::*,
 };
 use language::{Language, LanguageRegistry};
 use project::{Project, ProjectEntryId, ProjectPath};
@@ -18,6 +18,9 @@ use workspace::item::{ItemEvent, SaveOptions, TabContentParams};
 use workspace::searchable::SearchableItemHandle;
 use workspace::{Item, ItemHandle, Pane, ProjectItem, ToolbarItemLocation};
 use workspace::{ToolbarItemEvent, ToolbarItemView};
+
+use crate::{Kernel, KernelSpecification, KernelStatus};
+use runtimelib::{ExecuteRequest, JupyterMessage};
 
 use super::{Cell, CellPosition, RenderableCell};
 
@@ -31,6 +34,8 @@ actions!(
         OpenNotebook,
         /// Runs all cells in the notebook.
         RunAll,
+        /// Runs the currently selected cell.
+        RunSelectedCell,
         /// Clears all cell outputs.
         ClearOutputs,
         /// Moves the current cell up.
@@ -83,6 +88,14 @@ pub struct NotebookEditor {
     selected_cell_index: usize,
     cell_order: Vec<CellId>,
     cell_map: HashMap<CellId, Cell>,
+
+    // Kernel for executing code
+    kernel: Kernel,
+    kernel_specification: Option<KernelSpecification>,
+    // Map message IDs to cell IDs for tracking execution responses
+    pending_executions: HashMap<String, CellId>,
+    // Task for receiving kernel messages
+    _message_task: Option<Task<()>>,
 }
 
 impl NotebookEditor {
@@ -127,7 +140,7 @@ impl NotebookEditor {
         let this = cx.entity();
         let cell_list = ListState::new(cell_count, gpui::ListAlignment::Top, px(1000.));
 
-        Self {
+        let mut editor = Self {
             project,
             languages: languages.clone(),
             focus_handle,
@@ -137,7 +150,16 @@ impl NotebookEditor {
             selected_cell_index: 0,
             cell_order: cell_order.clone(),
             cell_map: cell_map.clone(),
-        }
+            kernel: Kernel::Shutdown,
+            kernel_specification: None,
+            pending_executions: HashMap::default(),
+            _message_task: None,
+        };
+
+        // Try to initialize kernel
+        editor.initialize_kernel(window, cx);
+
+        editor
     }
 
     fn has_outputs(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -161,7 +183,72 @@ impl NotebookEditor {
     }
 
     fn run_cells(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        println!("Cells would all run here, if that was implemented!");
+        // Check if kernel is running
+        if !matches!(self.kernel, Kernel::RunningKernel(_)) {
+            eprintln!("Cannot run cells: kernel is not running (status: {:?})", self.kernel.status());
+            return;
+        }
+
+        // Execute all code cells in order
+        for cell_id in self.cell_order.clone() {
+            if let Some(Cell::Code(code_cell)) = self.cell_map.get(&cell_id) {
+                self.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
+            }
+        }
+    }
+
+    fn run_selected_cell(&mut self, _: &RunSelectedCell, window: &mut Window, cx: &mut Context<Self>) {
+        // Check if kernel is running
+        if !matches!(self.kernel, Kernel::RunningKernel(_)) {
+            eprintln!("Cannot run cell: kernel is not running");
+            return;
+        }
+
+        // Get the selected cell
+        let selected_index = self.selected_cell_index;
+        if let Some(cell_id) = self.cell_order.get(selected_index) {
+            if let Some(Cell::Code(code_cell)) = self.cell_map.get(cell_id) {
+                self.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
+            }
+        }
+    }
+
+    fn execute_cell(
+        &mut self,
+        cell_id: CellId,
+        code_cell: Entity<super::CodeCell>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Kernel::RunningKernel(ref kernel) = self.kernel else {
+            eprintln!("Cannot execute cell: kernel not running");
+            return;
+        };
+
+        // Get the code from the cell
+        let code = code_cell.read(cx).source().clone();
+
+        if code.trim().is_empty() {
+            return;
+        }
+
+        // Create execute request
+        let execute_request = ExecuteRequest {
+            code,
+            ..ExecuteRequest::default()
+        };
+
+        let message: JupyterMessage = execute_request.into();
+        let msg_id = message.header.msg_id.clone();
+
+        // Track this execution
+        self.pending_executions.insert(msg_id.clone(), cell_id);
+
+        // Send to kernel
+        if let Err(e) = kernel.request_tx().try_send(message) {
+            eprintln!("Failed to send execute request: {:?}", e);
+            self.pending_executions.remove(&msg_id);
+        }
     }
 
     fn open_notebook(&mut self, _: &OpenNotebook, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -182,6 +269,130 @@ impl NotebookEditor {
 
     fn add_code_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         println!("Add code block triggered");
+    }
+
+    fn initialize_kernel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Get kernel specification from notebook metadata or use default Python
+        let kernel_spec = self.get_kernel_specification(cx);
+
+        if let Some(kernel_spec) = kernel_spec {
+            self.kernel_specification = Some(kernel_spec.clone());
+            self.start_kernel(kernel_spec, window, cx);
+        }
+    }
+
+    fn get_kernel_specification(&self, cx: &App) -> Option<KernelSpecification> {
+        // For now, we'll try to get the kernelspec from the notebook metadata
+        // In the future, this could present a picker to the user
+        let notebook_item = self.notebook_item.read(cx);
+        let kernelspec = notebook_item.notebook.metadata.kernelspec.as_ref()?;
+
+        // Create a local kernel specification from the notebook's kernelspec
+        // This is a simplified approach - in production you'd want to:
+        // 1. Check available kernels on the system
+        // 2. Match the notebook's kernelspec to an available kernel
+        // 3. Fall back to a default or prompt the user
+
+        // For now, just create a basic spec
+        use crate::kernels::LocalKernelSpecification;
+        use std::path::PathBuf;
+
+        Some(KernelSpecification::Jupyter(LocalKernelSpecification {
+            name: kernelspec.name.clone(),
+            path: PathBuf::from("jupyter"), // This would need to be resolved properly
+            kernelspec: jupyter_protocol::JupyterKernelspec {
+                argv: vec![
+                    "python".to_string(),
+                    "-m".to_string(),
+                    "ipykernel_launcher".to_string(),
+                    "-f".to_string(),
+                    "{connection_file}".to_string(),
+                ],
+                display_name: kernelspec.display_name.clone(),
+                language: kernelspec.language.clone().unwrap_or_else(|| "python".to_string()),
+                interrupt_mode: None,
+                metadata: None,
+                env: None,
+            },
+        }))
+    }
+
+    fn start_kernel(
+        &mut self,
+        kernel_spec: KernelSpecification,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::kernels::{NativeRunningKernel, RemoteRunningKernel};
+        use std::env::temp_dir;
+
+        let fs = self.project.read(cx).fs().clone();
+        let entity_id = cx.entity().entity_id();
+
+        // Get working directory from notebook path or use temp
+        let working_directory = self.notebook_item
+            .read(cx)
+            .path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(temp_dir);
+
+        let notebook_handle = cx.entity();
+
+        // Start the kernel based on type
+        let kernel = match kernel_spec.clone() {
+            KernelSpecification::Jupyter(kernel_specification)
+            | KernelSpecification::PythonEnv(kernel_specification) => NativeRunningKernel::new(
+                kernel_specification,
+                entity_id,
+                working_directory,
+                fs,
+                notebook_handle.clone(),
+                window,
+                cx,
+            ),
+            KernelSpecification::Remote(remote_kernel_specification) => RemoteRunningKernel::new(
+                remote_kernel_specification,
+                working_directory,
+                notebook_handle.clone(),
+                window,
+                cx,
+            ),
+        };
+
+        let pending_kernel = cx
+            .spawn(async move |this, cx| {
+                let kernel = kernel.await;
+
+                match kernel {
+                    Ok(kernel) => {
+                        this.update(cx, |notebook, cx| {
+                            notebook.kernel = Kernel::RunningKernel(kernel);
+                            notebook.start_message_handler(cx);
+                            cx.notify();
+                        })
+                        .ok();
+                    }
+                    Err(err) => {
+                        this.update(cx, |notebook, cx| {
+                            notebook.kernel = Kernel::ErroredLaunch(err.to_string());
+                            cx.notify();
+                        })
+                        .ok();
+                    }
+                }
+            })
+            .shared();
+
+        self.kernel = Kernel::StartingKernel(pending_kernel);
+        cx.notify();
+    }
+
+    fn start_message_handler(&mut self, cx: &mut Context<Self>) {
+        // This will handle incoming messages from the kernel
+        // For now, just a placeholder
+        // In the real implementation, we'd subscribe to the kernel's message channel
+        println!("Message handler started - kernel is running");
     }
 
     fn cell_count(&self) -> usize {
@@ -484,6 +695,7 @@ impl Render for NotebookEditor {
                 cx.listener(|this, &ClearOutputs, window, cx| this.clear_outputs(window, cx)),
             )
             .on_action(cx.listener(|this, &RunAll, window, cx| this.run_cells(window, cx)))
+            .on_action(cx.listener(Self::run_selected_cell))
             .on_action(cx.listener(|this, &MoveCellUp, window, cx| this.move_cell_up(window, cx)))
             .on_action(
                 cx.listener(|this, &MoveCellDown, window, cx| this.move_cell_down(window, cx)),
