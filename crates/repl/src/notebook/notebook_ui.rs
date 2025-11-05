@@ -834,19 +834,19 @@ impl Render for NotebookEditor {
                     .id("notebook-cells")
                     .flex_1()
                     .h_full()
-                    .min_h(px(400.))  // Force minimum height to ensure list can render
                     .overflow_y_scroll()
-                    .child(list(
-                        self.cell_list.clone(),
-                        cx.processor(|this, ix, window, cx| {
-                            log::trace!("List processor called for cell index {}", ix);
-                            this.cell_order
-                                .get(ix)
-                                .and_then(|cell_id| this.cell_map.get(cell_id))
-                                .map(|cell| this.render_cell(ix, cell, window, cx))
-                                .unwrap_or_else(|| div().into_any())
-                        }),
-                    )),
+                    .gap_4()
+                    .children(
+                        self.cell_order
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(ix, cell_id)| {
+                                log::trace!("Directly rendering cell at index {}", ix);
+                                self.cell_map
+                                    .get(cell_id)
+                                    .map(|cell| self.render_cell(ix, cell, window, cx))
+                            })
+                    ),
             )
             .child(self.render_notebook_controls(window, cx))
     }
