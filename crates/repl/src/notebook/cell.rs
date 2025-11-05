@@ -205,12 +205,13 @@ impl Cell {
                 });
 
                 let buffer = buffer.clone();
-                let language_task = cx.spawn_in(window, async move |this, cx| {
+                let language_task = cx.spawn_in(window, async move |_this, cx| {
                     let language = notebook_language.await;
 
                     buffer.update(cx, |buffer, cx| {
                         buffer.set_language(language.clone(), cx);
-                    });
+                    })
+                    .log_err();
                 });
 
                 CodeCell {
@@ -332,15 +333,15 @@ pub trait RunnableCell: RenderableCell {
 }
 
 pub struct MarkdownCell {
-    id: CellId,
-    metadata: CellMetadata,
-    image_cache: Entity<RetainAllImageCache>,
-    source: String,
+    pub(crate) id: CellId,
+    pub(crate) metadata: CellMetadata,
+    pub(crate) image_cache: Entity<RetainAllImageCache>,
+    pub(crate) source: String,
     pub(crate) parsed_markdown: Option<markdown_preview::markdown_elements::ParsedMarkdown>,
-    markdown_parsing_task: Task<()>,
-    selected: bool,
-    cell_position: Option<CellPosition>,
-    languages: Arc<LanguageRegistry>,
+    pub(crate) markdown_parsing_task: Task<()>,
+    pub(crate) selected: bool,
+    pub(crate) cell_position: Option<CellPosition>,
+    pub(crate) languages: Arc<LanguageRegistry>,
 }
 
 impl RenderableCell for MarkdownCell {
@@ -428,15 +429,15 @@ impl Render for MarkdownCell {
 }
 
 pub struct CodeCell {
-    id: CellId,
-    metadata: CellMetadata,
-    execution_count: Option<i32>,
-    source: String,
-    editor: Entity<editor::Editor>,
-    outputs: Vec<Output>,
-    selected: bool,
-    cell_position: Option<CellPosition>,
-    language_task: Task<()>,
+    pub(crate) id: CellId,
+    pub(crate) metadata: CellMetadata,
+    pub(crate) execution_count: Option<i32>,
+    pub(crate) source: String,
+    pub(crate) editor: Entity<editor::Editor>,
+    pub(crate) outputs: Vec<Output>,
+    pub(crate) selected: bool,
+    pub(crate) cell_position: Option<CellPosition>,
+    pub(crate) language_task: Task<()>,
 }
 
 impl CodeCell {

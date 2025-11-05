@@ -394,12 +394,13 @@ impl NotebookEditor {
                 editor
             });
 
-            let language_task = cx.spawn_in(window, async move |this, cx| {
+            let language_task = cx.spawn_in(window, async move |_this, cx| {
                 let language = notebook_language.await;
 
                 buffer.update(cx, |buffer, cx| {
                     buffer.set_language(language.clone(), cx);
-                });
+                })
+                .log_err();
             });
 
             CodeCell {
