@@ -834,10 +834,12 @@ impl Render for NotebookEditor {
                     .id("notebook-cells")
                     .flex_1()
                     .h_full()
+                    .min_h(px(400.))  // Force minimum height to ensure list can render
                     .overflow_y_scroll()
                     .child(list(
                         self.cell_list.clone(),
                         cx.processor(|this, ix, window, cx| {
+                            log::trace!("List processor called for cell index {}", ix);
                             this.cell_order
                                 .get(ix)
                                 .and_then(|cell_id| this.cell_map.get(cell_id))
