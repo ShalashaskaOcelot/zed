@@ -601,6 +601,7 @@ impl Render for CodeCell {
                                 .flex()
                                 .w_full()
                                 .flex_1()
+                                .min_h(px(30.))  // Ensure editor has minimum visible height
                                 .py_3()
                                 .px_5()
                                 .rounded_lg()
