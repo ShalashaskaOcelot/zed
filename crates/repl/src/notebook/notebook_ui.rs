@@ -8,11 +8,12 @@ use feature_flags::{FeatureFlagAppExt as _, NotebookFeatureFlag};
 use futures::FutureExt;
 use gpui::{
     AnyElement, App, Entity, EventEmitter, FocusHandle, Focusable, ListState,
-    Point, Task, actions, list, prelude::*,
+    Point, RetainAllImageCache, Task, TextStyleRefinement, actions, list, prelude::*,
 };
 use language::{Language, LanguageRegistry};
 use project::{Project, ProjectEntryId, ProjectPath};
 use ui::{Tooltip, prelude::*};
+use util::ResultExt;
 use workspace::item::{SaveOptions, TabContentParams};
 use workspace::searchable::SearchableItemHandle;
 use workspace::{Item, Pane, ProjectItem};
@@ -228,8 +229,8 @@ impl NotebookEditor {
             return;
         };
 
-        // Get the code from the cell
-        let code = code_cell.read(cx).source().clone();
+        // Get the code from the cell's editor buffer (which reflects current edits)
+        let code = code_cell.read(cx).editor.read(cx).text(cx);
 
         if code.trim().is_empty() {
             return;
@@ -259,19 +260,172 @@ impl NotebookEditor {
     }
 
     fn move_cell_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        println!("Move cell up triggered");
+        let current_index = self.selected_cell_index;
+
+        // Can't move the first cell up
+        if current_index == 0 {
+            return;
+        }
+
+        // Swap with the cell above
+        self.cell_order.swap(current_index, current_index - 1);
+        self.selected_cell_index = current_index - 1;
+
+        cx.notify();
     }
 
     fn move_cell_down(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        println!("Move cell down triggered");
+        let current_index = self.selected_cell_index;
+        let cell_count = self.cell_count();
+
+        // Can't move the last cell down
+        if current_index >= cell_count - 1 {
+            return;
+        }
+
+        // Swap with the cell below
+        self.cell_order.swap(current_index, current_index + 1);
+        self.selected_cell_index = current_index + 1;
+
+        cx.notify();
     }
 
     fn add_markdown_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        println!("Add markdown block triggered");
+        use super::cell::MarkdownCell;
+        use nbformat::v4::CellMetadata;
+        use uuid::Uuid;
+
+        let cell_id = CellId::from(Uuid::new_v4().to_string());
+        let source = String::new();
+
+        let markdown_cell = cx.new(|cx| {
+            let markdown_parsing_task = {
+                let languages = self.languages.clone();
+                let source = source.clone();
+
+                cx.spawn_in(window, async move |this, cx| {
+                    let parsed_markdown = cx
+                        .background_spawn(async move {
+                            markdown_preview::markdown_parser::parse_markdown(&source, None, Some(languages)).await
+                        })
+                        .await;
+
+                    this.update(cx, |cell: &mut MarkdownCell, _| {
+                        cell.parsed_markdown = Some(parsed_markdown);
+                    })
+                    .log_err();
+                })
+            };
+
+            MarkdownCell {
+                markdown_parsing_task,
+                image_cache: RetainAllImageCache::new(cx),
+                languages: self.languages.clone(),
+                id: cell_id.clone(),
+                metadata: CellMetadata::default(),
+                source: source.clone(),
+                parsed_markdown: None,
+                selected: false,
+                cell_position: None,
+            }
+        });
+
+        // Insert after the selected cell
+        let insert_index = self.selected_cell_index + 1;
+        self.cell_order.insert(insert_index, cell_id.clone());
+        self.cell_map.insert(cell_id, Cell::Markdown(markdown_cell));
+
+        // Update list state with new count
+        self.cell_list.reset(self.cell_order.len());
+
+        // Select the newly added cell
+        self.selected_cell_index = insert_index;
+
+        cx.notify();
     }
 
     fn add_code_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        println!("Add code block triggered");
+        use super::cell::CodeCell;
+        use editor::{Editor, EditorMode, MultiBuffer};
+        use language::Buffer;
+        use nbformat::v4::CellMetadata;
+        use theme::ThemeSettings;
+        use uuid::Uuid;
+
+        let cell_id = CellId::from(Uuid::new_v4().to_string());
+        let text = String::new();
+
+        let notebook_language = self.notebook_item.read(cx).notebook_language();
+        let notebook_language = cx
+            .spawn_in(window, async move |_, _| notebook_language.await)
+            .shared();
+
+        let code_cell = cx.new(|cx| {
+            let buffer = cx.new(|cx| Buffer::local(text.clone(), cx));
+            let multi_buffer = cx.new(|cx| MultiBuffer::singleton(buffer.clone(), cx));
+
+            let editor_view = cx.new(|cx| {
+                let mut editor = Editor::new(
+                    EditorMode::AutoHeight {
+                        min_lines: 1,
+                        max_lines: Some(1024),
+                    },
+                    multi_buffer,
+                    None,
+                    window,
+                    cx,
+                );
+
+                let theme = ThemeSettings::get_global(cx);
+
+                let refinement = TextStyleRefinement {
+                    font_family: Some(theme.buffer_font.family.clone()),
+                    font_size: Some(theme.buffer_font_size(cx).into()),
+                    color: Some(cx.theme().colors().editor_foreground),
+                    background_color: Some(gpui::transparent_black()),
+                    ..Default::default()
+                };
+
+                editor.set_text(text.clone(), window, cx);
+                editor.set_show_gutter(false, cx);
+                editor.set_text_style_refinement(refinement);
+
+                editor
+            });
+
+            let language_task = cx.spawn_in(window, async move |this, cx| {
+                let language = notebook_language.await;
+
+                buffer.update(cx, |buffer, cx| {
+                    buffer.set_language(language.clone(), cx);
+                });
+            });
+
+            CodeCell {
+                id: cell_id.clone(),
+                metadata: CellMetadata::default(),
+                execution_count: None,
+                source: text,
+                editor: editor_view,
+                outputs: vec![],
+                selected: false,
+                cell_position: None,
+                language_task,
+            }
+        });
+
+        // Insert after the selected cell
+        let insert_index = self.selected_cell_index + 1;
+        self.cell_order.insert(insert_index, cell_id.clone());
+        self.cell_map.insert(cell_id, Cell::Code(code_cell));
+
+        // Update list state with new count
+        self.cell_list.reset(self.cell_order.len());
+
+        // Select the newly added cell
+        self.selected_cell_index = insert_index;
+
+        cx.notify();
     }
 
     fn initialize_kernel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -834,18 +988,18 @@ impl Render for NotebookEditor {
                     .id("notebook-cells")
                     .flex_1()
                     .h_full()
-                    .overflow_y_scroll()
-                    .gap_4()
-                    .children(
-                        self.cell_order
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(ix, cell_id)| {
-                                log::trace!("Directly rendering cell at index {}", ix);
-                                self.cell_map
-                                    .get(cell_id)
-                                    .map(|cell| self.render_cell(ix, cell, window, cx))
-                            })
+                    .child(
+                        list(
+                            self.cell_list.clone(),
+                            cx.processor(|this, ix, window, cx| {
+                                this.cell_order
+                                    .get(ix)
+                                    .and_then(|cell_id| this.cell_map.get(cell_id))
+                                    .map(|cell| this.render_cell(ix, cell, window, cx))
+                                    .unwrap_or_else(|| div().into_any())
+                            }),
+                        )
+                        .size_full()
                     ),
             )
             .child(self.render_notebook_controls(window, cx))
