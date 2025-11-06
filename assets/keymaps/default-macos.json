@@ -1432,13 +1432,13 @@
     "bindings": {
       "up": "menu::SelectPrevious",
       "down": "menu::SelectNext",
-      "cmd-shift-up": "repl::MoveCellUp",
-      "cmd-shift-down": "repl::MoveCellDown",
-      "cmd-shift-enter": "repl::RunAll",
-      "shift-enter": "repl::RunSelectedCell",
-      "cmd-shift-c": "repl::AddCodeBlock",
-      "cmd-shift-m": "repl::AddMarkdownBlock",
-      "cmd-shift-x": "repl::ClearOutputs"
+      "cmd-shift-up": "notebook::MoveCellUp",
+      "cmd-shift-down": "notebook::MoveCellDown",
+      "cmd-shift-enter": "notebook::RunAll",
+      "shift-enter": "notebook::RunSelectedCell",
+      "cmd-shift-c": "notebook::AddCodeBlock",
+      "cmd-shift-m": "notebook::AddMarkdownBlock",
+      "cmd-shift-x": "notebook::ClearOutputs"
     }
   }
 ]

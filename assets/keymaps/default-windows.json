@@ -1354,13 +1354,13 @@
     "bindings": {
       "up": "menu::SelectPrevious",
       "down": "menu::SelectNext",
-      "ctrl-shift-up": "repl::MoveCellUp",
-      "ctrl-shift-down": "repl::MoveCellDown",
-      "ctrl-shift-enter": "repl::RunAll",
-      "shift-enter": "repl::RunSelectedCell",
-      "alt-shift-c": "repl::AddCodeBlock",
-      "alt-shift-m": "repl::AddMarkdownBlock",
-      "ctrl-shift-x": "repl::ClearOutputs"
+      "ctrl-shift-up": "notebook::MoveCellUp",
+      "ctrl-shift-down": "notebook::MoveCellDown",
+      "ctrl-shift-enter": "notebook::RunAll",
+      "shift-enter": "notebook::RunSelectedCell",
+      "alt-shift-c": "notebook::AddCodeBlock",
+      "alt-shift-m": "notebook::AddMarkdownBlock",
+      "ctrl-shift-x": "notebook::ClearOutputs"
     }
   }
 ]
