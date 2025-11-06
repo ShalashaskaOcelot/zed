@@ -255,16 +255,24 @@ impl NotebookEditor {
     }
 
     fn key_down(&mut self, event: &gpui::KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        log::info!("NotebookEditor::key_down: key='{}', ctrl={}, shift={}, alt={}",
+                   event.keystroke.key,
+                   event.keystroke.modifiers.control,
+                   event.keystroke.modifiers.shift,
+                   event.keystroke.modifiers.alt);
+
         // Check if Ctrl+Enter or Shift+Enter was pressed
         let is_ctrl_enter = event.keystroke.key == "enter" && event.keystroke.modifiers.control;
         let is_shift_enter = event.keystroke.key == "enter" && event.keystroke.modifiers.shift;
 
         if is_ctrl_enter || is_shift_enter {
+            log::info!("NotebookEditor::key_down: Matched Ctrl/Shift+Enter, looking for focused cell");
             // Find which cell's editor is focused
             for (cell_id, cell) in &self.cell_map {
                 if let Cell::Code(code_cell) = cell {
                     let editor = code_cell.read(cx).editor.clone();
                     if editor.read(cx).focus_handle(cx).is_focused(window) {
+                        log::info!("NotebookEditor::key_down: Found focused cell, executing");
                         // Run this cell
                         self.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
                         cx.stop_propagation();
@@ -272,6 +280,7 @@ impl NotebookEditor {
                     }
                 }
             }
+            log::info!("NotebookEditor::key_down: No focused cell found");
         }
     }
 
