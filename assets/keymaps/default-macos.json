@@ -1428,6 +1428,13 @@
     }
   },
   {
+    "context": "NotebookEditor > Editor",
+    "bindings": {
+      "cmd-enter": "notebook::RunSelectedCell",
+      "shift-enter": "notebook::RunSelectedCell"
+    }
+  },
+  {
     "context": "NotebookEditor",
     "bindings": {
       "up": "menu::SelectPrevious",

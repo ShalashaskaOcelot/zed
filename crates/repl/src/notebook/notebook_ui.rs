@@ -27,6 +27,31 @@ use super::{Cell, CellPosition, RenderableCell, RunnableCell};
 
 use nbformat::v4::CellId;
 
+/// Setup actions on cell editors to handle keyboard shortcuts
+pub fn setup_cell_editor_actions(
+    editor: &mut editor::Editor,
+    cell_id: CellId,
+    notebook_handle: gpui::WeakEntity<NotebookEditor>,
+) {
+    // Register Ctrl+Enter / Cmd+Enter to run the current cell
+    editor
+        .register_action({
+            let notebook_handle = notebook_handle.clone();
+            let cell_id = cell_id.clone();
+            move |_: &RunSelectedCell, window, cx| {
+                if let Some(notebook) = notebook_handle.upgrade() {
+                    notebook.update(cx, |notebook, cx| {
+                        // Find the cell and run it
+                        if let Some(Cell::Code(code_cell)) = notebook.cell_map.get(&cell_id) {
+                            notebook.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
+                        }
+                    });
+                }
+            }
+        })
+        .detach();
+}
+
 actions!(
     notebook,
     [
@@ -137,6 +162,17 @@ impl NotebookEditor {
         let notebook_handle = cx.entity().downgrade();
         let cell_count = cell_order.len();
 
+        // Setup editor actions on all code cells
+        for (cell_id, cell) in &cell_map {
+            if let Cell::Code(code_cell) = cell {
+                let cell_id = cell_id.clone();
+                let notebook_handle = notebook_handle.clone();
+                code_cell.read(cx).editor.update(cx, |editor, _cx| {
+                    setup_cell_editor_actions(editor, cell_id, notebook_handle);
+                });
+            }
+        }
+
         log::info!("NotebookEditor::new - loaded {} cells", cell_count);
 
         let this = cx.entity();
@@ -228,6 +264,11 @@ impl NotebookEditor {
             eprintln!("Cannot execute cell: kernel not running");
             return;
         };
+
+        // Clear previous outputs before execution
+        code_cell.update(cx, |cell, _cx| {
+            cell.clear_outputs();
+        });
 
         // Get the code from the cell's editor buffer (which reflects current edits)
         let code = code_cell.read(cx).text(cx);
@@ -414,6 +455,13 @@ impl NotebookEditor {
                 cell_position: None,
                 language_task,
             }
+        });
+
+        // Setup editor actions on the new cell
+        let notebook_handle = cx.entity().downgrade();
+        let cell_id_for_action = cell_id.clone();
+        code_cell.read(cx).editor.update(cx, |editor, _cx| {
+            setup_cell_editor_actions(editor, cell_id_for_action, notebook_handle);
         });
 
         // Insert after the selected cell
