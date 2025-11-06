@@ -1069,11 +1069,12 @@ impl NotebookEditor {
             }
         };
 
-        // Wrap in a div with click handler to select the cell
+        // Wrap in a div with mouse_down handler to select the cell before any clicks
         div()
             .id(("cell-wrapper", index))
             .w_full()
-            .on_click(cx.listener(move |this, _event, _window, cx| {
+            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
+                log::info!("Cell wrapper mouse_down: selecting cell {}", index);
                 this.selected_cell_index = index;
                 cx.notify();
             }))
