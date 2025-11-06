@@ -167,7 +167,8 @@ impl NotebookEditor {
             if let Cell::Code(code_cell) = cell {
                 let cell_id = cell_id.clone();
                 let notebook_handle = notebook_handle.clone();
-                code_cell.read(cx).editor.update(cx, |editor, _cx| {
+                let editor = code_cell.read(cx).editor.clone();
+                editor.update(cx, |editor, _cx| {
                     setup_cell_editor_actions(editor, cell_id, notebook_handle);
                 });
             }
@@ -460,7 +461,8 @@ impl NotebookEditor {
         // Setup editor actions on the new cell
         let notebook_handle = cx.entity().downgrade();
         let cell_id_for_action = cell_id.clone();
-        code_cell.read(cx).editor.update(cx, |editor, _cx| {
+        let editor = code_cell.read(cx).editor.clone();
+        editor.update(cx, |editor, _cx| {
             setup_cell_editor_actions(editor, cell_id_for_action, notebook_handle);
         });
 
