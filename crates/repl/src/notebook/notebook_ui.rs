@@ -1036,7 +1036,7 @@ impl NotebookEditor {
 
         let is_selected = index == self.selected_cell_index;
 
-        match cell {
+        let cell_element = match cell {
             Cell::Code(cell) => {
                 cell.update(cx, |cell, _cx| {
                     cell.set_selected(is_selected)
@@ -1058,7 +1058,17 @@ impl NotebookEditor {
                 });
                 cell.clone().into_any_element()
             }
-        }
+        };
+
+        // Wrap in a div with click handler to select the cell
+        div()
+            .w_full()
+            .on_click(cx.listener(move |this, _event, _window, cx| {
+                this.selected_cell_index = index;
+                cx.notify();
+            }))
+            .child(cell_element)
+            .into_any_element()
     }
 }
 
