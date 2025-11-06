@@ -670,13 +670,19 @@ impl NotebookEditor {
     }
 
     fn has_focused_editor(&self, window: &Window, cx: &App) -> bool {
-        self.cell_map.values().any(|cell| {
+        let result = self.cell_map.values().any(|cell| {
             if let Cell::Code(code_cell) = cell {
-                code_cell.read(cx).editor.read(cx).focus_handle(cx).is_focused(window)
+                let is_focused = code_cell.read(cx).editor.read(cx).focus_handle(cx).is_focused(window);
+                if is_focused {
+                    log::debug!("Editor in cell is focused");
+                }
+                is_focused
             } else {
                 false
             }
-        })
+        });
+        log::debug!("has_focused_editor returning: {}", result);
+        result
     }
 
     pub fn set_selected_index(
@@ -704,7 +710,10 @@ impl NotebookEditor {
         cx: &mut Context<Self>,
     ) {
         // Don't move selection if an editor has focus
-        if self.has_focused_editor(window, cx) {
+        let has_focus = self.has_focused_editor(window, cx);
+        log::debug!("select_next: has_focused_editor={}, current_index={}", has_focus, self.selected_cell_index);
+
+        if has_focus {
             return;
         }
 
@@ -716,6 +725,7 @@ impl NotebookEditor {
             } else {
                 index + 1
             };
+            log::debug!("select_next: moving from {} to {}", index, ix);
             self.set_selected_index(ix, true, window, cx);
             cx.notify();
         }
