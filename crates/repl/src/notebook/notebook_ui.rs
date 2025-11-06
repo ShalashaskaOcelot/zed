@@ -254,6 +254,27 @@ impl NotebookEditor {
         }
     }
 
+    fn key_down(&mut self, event: &gpui::KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // Check if Ctrl+Enter or Shift+Enter was pressed
+        let is_ctrl_enter = event.keystroke.key == "enter" && event.keystroke.modifiers.control;
+        let is_shift_enter = event.keystroke.key == "enter" && event.keystroke.modifiers.shift;
+
+        if is_ctrl_enter || is_shift_enter {
+            // Find which cell's editor is focused
+            for (cell_id, cell) in &self.cell_map {
+                if let Cell::Code(code_cell) = cell {
+                    let editor = code_cell.read(cx).editor.clone();
+                    if editor.read(cx).focus_handle(cx).is_focused(window) {
+                        // Run this cell
+                        self.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
+                        cx.stop_propagation();
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
     fn execute_cell(
         &mut self,
         cell_id: CellId,
@@ -1061,6 +1082,7 @@ impl Render for NotebookEditor {
         div()
             .key_context("notebook")
             .track_focus(&self.focus_handle)
+            .on_key_down(cx.listener(Self::key_down))
             .on_action(cx.listener(|this, &OpenNotebook, window, cx| {
                 this.open_notebook(&OpenNotebook, window, cx)
             }))
