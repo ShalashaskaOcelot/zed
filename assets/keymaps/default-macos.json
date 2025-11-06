@@ -1426,5 +1426,19 @@
       "alt-left": "dev::Zeta2ContextGoBack",
       "alt-right": "dev::Zeta2ContextGoForward"
     }
+  },
+  {
+    "context": "NotebookEditor",
+    "bindings": {
+      "up": "menu::SelectPrevious",
+      "down": "menu::SelectNext",
+      "cmd-shift-up": "repl::MoveCellUp",
+      "cmd-shift-down": "repl::MoveCellDown",
+      "cmd-shift-enter": "repl::RunAll",
+      "shift-enter": "repl::RunSelectedCell",
+      "cmd-shift-c": "repl::AddCodeBlock",
+      "cmd-shift-m": "repl::AddMarkdownBlock",
+      "cmd-shift-x": "repl::ClearOutputs"
+    }
   }
 ]
