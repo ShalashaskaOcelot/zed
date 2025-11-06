@@ -703,6 +703,11 @@ impl NotebookEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Don't move selection if an editor has focus
+        if self.has_focused_editor(window, cx) {
+            return;
+        }
+
         let count = self.cell_count();
         if count > 0 {
             let index = self.selected_index();
@@ -722,6 +727,11 @@ impl NotebookEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Don't move selection if an editor has focus
+        if self.has_focused_editor(window, cx) {
+            return;
+        }
+
         let count = self.cell_count();
         if count > 0 {
             let index = self.selected_index();
@@ -737,6 +747,11 @@ impl NotebookEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Don't move selection if an editor has focus
+        if self.has_focused_editor(window, cx) {
+            return;
+        }
+
         let count = self.cell_count();
         if count > 0 {
             self.set_selected_index(0, true, window, cx);
@@ -750,6 +765,11 @@ impl NotebookEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Don't move selection if an editor has focus
+        if self.has_focused_editor(window, cx) {
+            return;
+        }
+
         let count = self.cell_count();
         if count > 0 {
             self.set_selected_index(count - 1, true, window, cx);
@@ -999,14 +1019,10 @@ impl Render for NotebookEditor {
             .on_action(
                 cx.listener(|this, &AddCodeBlock, window, cx| this.add_code_block(window, cx)),
             )
-            // Only handle navigation keys when no editor is focused
-            // This prevents conflicts where arrow keys move both cursor and selection
-            .when(!self.has_focused_editor(window, cx), |this| {
-                this.on_action(cx.listener(Self::select_next))
-                    .on_action(cx.listener(Self::select_previous))
-                    .on_action(cx.listener(Self::select_first))
-                    .on_action(cx.listener(Self::select_last))
-            })
+            .on_action(cx.listener(Self::select_next))
+            .on_action(cx.listener(Self::select_previous))
+            .on_action(cx.listener(Self::select_first))
+            .on_action(cx.listener(Self::select_last))
             .size_full()
             .flex()
             .flex_row()
