@@ -1062,6 +1062,7 @@ impl NotebookEditor {
 
         // Wrap in a div with click handler to select the cell
         div()
+            .id(("cell-wrapper", index))
             .w_full()
             .on_click(cx.listener(move |this, _event, _window, cx| {
                 this.selected_cell_index = index;
