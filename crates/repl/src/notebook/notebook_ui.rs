@@ -568,16 +568,18 @@ impl NotebookEditor {
     }
 
     /// Route incoming Jupyter messages to the appropriate cell
-    pub fn route(&mut self, message: &JupyterMessage, window: &mut Window, cx: &mut Context<Self>) {
+    /// Internal implementation that works with &mut App
+    fn route_internal(&mut self, message: &JupyterMessage, window: &mut Window, cx: &mut App) {
         // Handle status messages
         match &message.content {
             JupyterMessageContent::Status(status) => {
                 self.kernel.set_execution_state(&status.execution_state);
-                cx.notify();
+                // Note: caller needs to notify
                 return;
             }
             JupyterMessageContent::KernelInfoReply(reply) => {
                 self.kernel.set_kernel_info(reply);
+                // Note: caller needs to notify
                 return;
             }
             _ => {}
@@ -610,7 +612,7 @@ impl NotebookEditor {
 
                 // Remove from pending executions
                 self.pending_executions.remove(parent_message_id);
-                cx.notify();
+                // Note: caller needs to notify
             }
             JupyterMessageContent::ExecuteResult(result) => {
                 // Add output to cell
@@ -618,7 +620,7 @@ impl NotebookEditor {
                 cell.update(cx, |cell, _cx| {
                     cell.add_output(output);
                 });
-                cx.notify();
+                // Note: caller needs to notify
             }
             JupyterMessageContent::DisplayData(display_data) => {
                 // Add output to cell
@@ -626,7 +628,7 @@ impl NotebookEditor {
                 cell.update(cx, |cell, _cx| {
                     cell.add_output(output);
                 });
-                cx.notify();
+                // Note: caller needs to notify
             }
             JupyterMessageContent::StreamContent(stream) => {
                 // Add stream output
@@ -638,7 +640,7 @@ impl NotebookEditor {
                 cell.update(cx, |cell, _cx| {
                     cell.add_output(output);
                 });
-                cx.notify();
+                // Note: caller needs to notify
             }
             JupyterMessageContent::ErrorOutput(error) => {
                 // Add error output
@@ -655,7 +657,7 @@ impl NotebookEditor {
                 cell.update(cx, |cell, _cx| {
                     cell.add_output(output);
                 });
-                cx.notify();
+                // Note: caller needs to notify
             }
             _ => {}
         }
@@ -991,18 +993,16 @@ impl NotebookEditor {
 
 impl crate::kernels::MessageRouter for NotebookEditor {
     fn route(&mut self, message: &JupyterMessage, window: &mut Window, cx: &mut App) {
-        // SAFETY: This cast is safe because this method is only ever called from within
-        // an Entity<NotebookEditor>::update_in closure, where cx is actually &mut Context<NotebookEditor>.
-        // The MessageRouter trait requires &mut App to be generic, but the implementation
-        // knows it's actually Context<Self>.
-        let cx = unsafe { &mut *(cx as *mut App as *mut Context<Self>) };
-        NotebookEditor::route(self, message, window, cx);
+        // Call the internal implementation that works with &mut App
+        self.route_internal(message, window, cx);
+        // Note: We can't call cx.notify() here because we only have &mut App
+        // The notification must happen in the update_in closure that calls this
     }
 
-    fn kernel_errored(&mut self, error_message: String, _window: &mut Window, cx: &mut App) {
-        let cx = unsafe { &mut *(cx as *mut App as *mut Context<Self>) };
+    fn kernel_errored(&mut self, error_message: String, _window: &mut Window, _cx: &mut App) {
         self.kernel = crate::Kernel::ErroredLaunch(error_message);
-        cx.notify();
+        // Note: We can't call cx.notify() here because we only have &mut App
+        // The notification must happen in the update_in closure that calls this
     }
 }
 

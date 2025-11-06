@@ -199,6 +199,7 @@ impl RemoteRunningKernel {
                                 router
                                     .update_in(cx, |router, window, cx| {
                                         router.route(&message, window, cx);
+                                        cx.notify();
                                     })
                                     .ok();
                             }

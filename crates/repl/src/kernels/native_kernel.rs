@@ -176,6 +176,7 @@ impl NativeRunningKernel {
                         router
                             .update_in(cx, |router, window, cx| {
                                 router.route(&message, window, cx);
+                                cx.notify();
                             })
                             .ok();
                     }
@@ -193,6 +194,7 @@ impl NativeRunningKernel {
                         router
                             .update_in(cx, |router, window, cx| {
                                 router.route(&message, window, cx);
+                                cx.notify();
                             })
                             .ok();
                     }
@@ -298,7 +300,7 @@ impl NativeRunningKernel {
                                         window,
                                         cx,
                                     );
-                                    cx.notify();
+                                    cx.notify();  // Already present, good!
                                 })
                                 .ok();
                         }
@@ -331,7 +333,7 @@ impl NativeRunningKernel {
                     router
                         .update_in(cx, |router, window, cx| {
                             router.kernel_errored(error_message, window, cx);
-                            cx.notify();
+                            cx.notify();  // Already present, good!
                         })
                         .ok();
                 }
