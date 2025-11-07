@@ -27,18 +27,14 @@ use super::{Cell, CellPosition, RenderableCell, RunnableCell};
 
 use nbformat::v4::CellId;
 
-/// Setup actions on cell editors to handle keyboard shortcuts
-/// Note: We intentionally don't register RunSelectedCell handlers on individual editors.
-/// Instead, the notebook-level handler (in key_down) handles Ctrl+Enter / Shift+Enter
-/// by finding which editor is focused or using the selected cell.
-/// This prevents issues where clicking a run button while another cell is focused
-/// would execute the wrong cell.
+/// Setup cell editor (currently unused but kept for future extensions)
 pub fn setup_cell_editor_actions(
     _editor: &mut editor::Editor,
     _cell_id: CellId,
     _notebook_handle: gpui::WeakEntity<NotebookEditor>,
 ) {
-    // Intentionally empty - see comment above
+    // No per-editor handlers needed currently
+    // The notebook handles focus changes in its render method
 }
 
 actions!(
@@ -1102,6 +1098,20 @@ impl crate::kernels::MessageRouter for NotebookEditor {
 
 impl Render for NotebookEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Check if any cell editor is focused and select that cell
+        for (index, cell_id) in self.cell_order.iter().enumerate() {
+            if let Some(Cell::Code(code_cell)) = self.cell_map.get(cell_id) {
+                let editor = code_cell.read(cx).editor.clone();
+                if editor.read(cx).focus_handle(cx).is_focused(window) {
+                    if self.selected_cell_index != index {
+                        self.selected_cell_index = index;
+                        // Don't notify here as we're already in render
+                    }
+                    break;
+                }
+            }
+        }
+
         div()
             .key_context("notebook")
             .track_focus(&self.focus_handle)
