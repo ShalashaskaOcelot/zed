@@ -28,28 +28,17 @@ use super::{Cell, CellPosition, RenderableCell, RunnableCell};
 use nbformat::v4::CellId;
 
 /// Setup actions on cell editors to handle keyboard shortcuts
+/// Note: We intentionally don't register RunSelectedCell handlers on individual editors.
+/// Instead, the notebook-level handler (in key_down) handles Ctrl+Enter / Shift+Enter
+/// by finding which editor is focused or using the selected cell.
+/// This prevents issues where clicking a run button while another cell is focused
+/// would execute the wrong cell.
 pub fn setup_cell_editor_actions(
-    editor: &mut editor::Editor,
-    cell_id: CellId,
-    notebook_handle: gpui::WeakEntity<NotebookEditor>,
+    _editor: &mut editor::Editor,
+    _cell_id: CellId,
+    _notebook_handle: gpui::WeakEntity<NotebookEditor>,
 ) {
-    // Register Ctrl+Enter / Cmd+Enter to run the current cell
-    editor
-        .register_action({
-            let notebook_handle = notebook_handle.clone();
-            let cell_id = cell_id.clone();
-            move |_: &RunSelectedCell, window, cx| {
-                if let Some(notebook) = notebook_handle.upgrade() {
-                    notebook.update(cx, |notebook, cx| {
-                        // Find the cell and run it
-                        if let Some(Cell::Code(code_cell)) = notebook.cell_map.get(&cell_id) {
-                            notebook.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
-                        }
-                    });
-                }
-            }
-        })
-        .detach();
+    // Intentionally empty - see comment above
 }
 
 actions!(
@@ -266,21 +255,30 @@ impl NotebookEditor {
         let is_shift_enter = event.keystroke.key == "enter" && event.keystroke.modifiers.shift;
 
         if is_ctrl_enter || is_shift_enter {
-            log::info!("NotebookEditor::key_down: Matched Ctrl/Shift+Enter, looking for focused cell");
-            // Find which cell's editor is focused
+            log::info!("NotebookEditor::key_down: Matched Ctrl/Shift+Enter");
+
+            // First, try to find which cell's editor is focused
             for (cell_id, cell) in &self.cell_map {
                 if let Cell::Code(code_cell) = cell {
                     let editor = code_cell.read(cx).editor.clone();
                     if editor.read(cx).focus_handle(cx).is_focused(window) {
                         log::info!("NotebookEditor::key_down: Found focused cell, executing");
-                        // Run this cell
                         self.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
                         cx.stop_propagation();
                         return;
                     }
                 }
             }
-            log::info!("NotebookEditor::key_down: No focused cell found");
+
+            // If no cell editor is focused, run the selected cell
+            log::info!("NotebookEditor::key_down: No focused cell, running selected cell {}", self.selected_cell_index);
+            let selected_index = self.selected_cell_index;
+            if let Some(cell_id) = self.cell_order.get(selected_index) {
+                if let Some(Cell::Code(code_cell)) = self.cell_map.get(cell_id) {
+                    self.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
+                    cx.stop_propagation();
+                }
+            }
         }
     }
 
@@ -1073,12 +1071,12 @@ impl NotebookEditor {
         div()
             .id(("cell-wrapper", index))
             .w_full()
-            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, window, cx| {
+            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
                 log::info!("Cell wrapper mouse_down: selecting cell {}", index);
-                // Focus the notebook to blur any focused editors
-                // This ensures that when the run button is clicked, the notebook's
-                // action handler is used instead of the focused editor's handler
-                window.focus(&this.focus_handle);
+                // Just select the cell - don't change focus
+                // If the user clicks on the editor, it will naturally get focus
+                // If the user clicks elsewhere (like the run button), focus stays where it is
+                // The keyboard shortcuts and run button will work with the selected cell
                 this.selected_cell_index = index;
                 cx.notify();
             }))
