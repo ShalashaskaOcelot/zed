@@ -162,7 +162,7 @@
     }
   },
   {
-    "context": "Editor && mode == auto_height",
+    "context": "Editor && mode == auto_height && !NotebookEditor",
     "bindings": {
       "ctrl-enter": "editor::Newline",
       "shift-enter": "editor::Newline",

@@ -196,7 +196,7 @@
     }
   },
   {
-    "context": "Editor && mode == auto_height",
+    "context": "Editor && mode == auto_height && !NotebookEditor",
     "use_key_equivalents": true,
     "bindings": {
       "ctrl-enter": "editor::Newline",
