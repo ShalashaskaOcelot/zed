@@ -1428,10 +1428,12 @@
     }
   },
   {
-    "context": "NotebookEditor > Editor",
+    "context": "NotebookEditor > Editor && mode == auto_height",
     "bindings": {
       "cmd-enter": "notebook::RunSelectedCell",
-      "shift-enter": "notebook::RunSelectedCell"
+      "shift-enter": "notebook::RunSelectedCell",
+      "enter": "editor::Newline",
+      "escape": "editor::Cancel"
     }
   },
   {

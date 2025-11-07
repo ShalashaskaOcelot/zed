@@ -1322,10 +1322,12 @@
     }
   },
   {
-    "context": "NotebookEditor > Editor",
+    "context": "NotebookEditor > Editor && mode == auto_height",
     "bindings": {
       "ctrl-enter": "notebook::RunSelectedCell",
-      "shift-enter": "notebook::RunSelectedCell"
+      "shift-enter": "notebook::RunSelectedCell",
+      "enter": "editor::Newline",
+      "escape": "editor::Cancel"
     }
   },
   {
