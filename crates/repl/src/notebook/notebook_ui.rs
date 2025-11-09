@@ -91,6 +91,8 @@ actions!(
         RunSelectedCell,
         /// Runs the currently selected cell and moves to the next cell.
         RunSelectedCellAndMoveNext,
+        /// Enters edit mode for the selected cell.
+        EnterEditMode,
         /// Clears all cell outputs.
         ClearOutputs,
         /// Moves the current cell up.
@@ -299,6 +301,17 @@ impl NotebookEditor {
             // Focus notebook to exit edit mode
             window.focus(&self.focus_handle);
             cx.notify();
+        }
+    }
+
+    fn enter_edit_mode(&mut self, _: &EnterEditMode, window: &mut Window, cx: &mut Context<Self>) {
+        // Focus the selected cell's editor if it's a code cell
+        let selected_index = self.selected_cell_index;
+        if let Some(cell_id) = self.cell_order.get(selected_index) {
+            if let Some(Cell::Code(code_cell)) = self.cell_map.get(cell_id) {
+                let editor = code_cell.read(cx).editor.clone();
+                window.focus(&editor.read(cx).focus_handle(cx));
+            }
         }
     }
 
@@ -1210,6 +1223,7 @@ impl Render for NotebookEditor {
             .on_action(cx.listener(|this, &RunAll, window, cx| this.run_cells(window, cx)))
             .on_action(cx.listener(Self::run_selected_cell))
             .on_action(cx.listener(Self::run_selected_cell_and_move_next))
+            .on_action(cx.listener(Self::enter_edit_mode))
             .on_action(cx.listener(|this, &BlurAllEditors, window, cx| {
                 // Focus the notebook to blur all editors
                 window.focus(&this.focus_handle);

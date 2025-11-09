@@ -1340,6 +1340,7 @@
       "ctrl-shift-enter": "notebook::RunAll",
       "ctrl-enter": "notebook::RunSelectedCell",
       "shift-enter": "notebook::RunSelectedCellAndMoveNext",
+      "enter": "notebook::EnterEditMode",
       "alt-shift-c": "notebook::AddCodeBlock",
       "alt-shift-m": "notebook::AddMarkdownBlock",
       "ctrl-shift-x": "notebook::ClearOutputs"
