@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use editor::{Editor, EditorMode, MultiBuffer};
 use futures::future::Shared;
@@ -17,6 +18,14 @@ use crate::{
     notebook::{CODE_BLOCK_INSET, GUTTER_WIDTH},
     outputs::{Output, plain::TerminalOutput, user_error::ErrorView},
 };
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ExecutionStatus {
+    Idle,
+    Running,
+    Success,
+    Error,
+}
 
 #[derive(Copy, Clone, PartialEq, PartialOrd)]
 pub enum CellPosition {
@@ -257,6 +266,9 @@ impl Cell {
                     selected: false,
                     language_task,
                     cell_position: None,
+                    execution_status: ExecutionStatus::Idle,
+                    execution_start_time: None,
+                    execution_duration: None,
                 }
             })),
             nbformat::v4::Cell::Raw {
@@ -478,6 +490,9 @@ pub struct CodeCell {
     pub(crate) selected: bool,
     pub(crate) cell_position: Option<CellPosition>,
     pub(crate) language_task: Task<()>,
+    pub(crate) execution_status: ExecutionStatus,
+    pub(crate) execution_start_time: Option<Instant>,
+    pub(crate) execution_duration: Option<Duration>,
 }
 
 impl CodeCell {
@@ -506,6 +521,75 @@ impl CodeCell {
             Some(CellControlType::ClearCell)
         } else {
             None
+        }
+    }
+
+    fn render_status_indicator(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        match self.execution_status {
+            ExecutionStatus::Running => {
+                let elapsed = self.execution_start_time
+                    .map(|start| start.elapsed().as_secs_f64())
+                    .unwrap_or(0.0);
+                Some(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .px_2()
+                        .py_1()
+                        .text_xs()
+                        .text_color(cx.theme().colors().text_muted)
+                        .child(
+                            div()
+                                .w_2()
+                                .h_2()
+                                .rounded_full()
+                                .bg(cx.theme().colors().created)
+                        )
+                        .child(format!("Running {:.1}s", elapsed))
+                )
+            }
+            ExecutionStatus::Success => {
+                self.execution_duration.map(|duration| {
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .px_2()
+                        .py_1()
+                        .text_xs()
+                        .text_color(cx.theme().colors().text_muted)
+                        .child(
+                            div()
+                                .w_2()
+                                .h_2()
+                                .rounded_full()
+                                .bg(cx.theme().colors().created)
+                        )
+                        .child(format!("Completed in {:.2}s", duration.as_secs_f64()))
+                })
+            }
+            ExecutionStatus::Error => {
+                self.execution_duration.map(|duration| {
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .px_2()
+                        .py_1()
+                        .text_xs()
+                        .text_color(cx.theme().colors().error)
+                        .child(
+                            div()
+                                .w_2()
+                                .h_2()
+                                .rounded_full()
+                                .bg(cx.theme().colors().error)
+                        )
+                        .child(format!("Failed after {:.2}s", duration.as_secs_f64()))
+                })
+            }
+            ExecutionStatus::Idle => None,
         }
     }
 
@@ -646,7 +730,8 @@ impl Render for CodeCell {
                     .bg(self.selected_bg_color(window, cx))
                     .child(self.gutter(window, cx))
                     .child(
-                        div().py_1p5().w_full().child(
+                        div().py_1p5().w_full()
+                            .child(
                                 div()
                                     .flex()
                                     .w_full()
@@ -659,7 +744,8 @@ impl Render for CodeCell {
                                     .border_color(cx.theme().colors().border)
                                     .bg(cx.theme().colors().editor_background)
                                     .child(div().w_full().child(self.editor.clone())),
-                            ),
+                            )
+                            .children(self.render_status_indicator(cx)),
                     ),
             )
             // Output portion

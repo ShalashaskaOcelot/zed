@@ -414,9 +414,13 @@ impl NotebookEditor {
             return;
         };
 
-        // Clear previous outputs before execution
-        code_cell.update(cx, |cell, _cx| {
+        // Clear previous outputs and set to running status
+        code_cell.update(cx, |cell, cx| {
             cell.clear_outputs();
+            cell.execution_status = super::cell::ExecutionStatus::Running;
+            cell.execution_start_time = Some(std::time::Instant::now());
+            cell.execution_duration = None;
+            cx.notify();
         });
 
         // Get the code from the cell's editor buffer (which reflects current edits)
@@ -442,6 +446,14 @@ impl NotebookEditor {
         if let Err(e) = kernel.request_tx().try_send(message) {
             eprintln!("Failed to send execute request: {:?}", e);
             self.pending_executions.remove(&msg_id);
+            // Set error status if send fails
+            code_cell.update(cx, |cell, cx| {
+                cell.execution_status = super::cell::ExecutionStatus::Error;
+                if let Some(start_time) = cell.execution_start_time {
+                    cell.execution_duration = Some(start_time.elapsed());
+                }
+                cx.notify();
+            });
         }
     }
 
@@ -633,6 +645,9 @@ impl NotebookEditor {
                 selected: false,
                 cell_position: None,
                 language_task,
+                execution_status: super::cell::ExecutionStatus::Idle,
+                execution_start_time: None,
+                execution_duration: None,
             }
         });
 
@@ -833,9 +848,27 @@ impl NotebookEditor {
         // Handle different message types
         match &message.content {
             JupyterMessageContent::ExecuteReply(reply) => {
-                // Update execution count
-                cell.update(cx, |cell, _cx| {
+                // Update execution count and status
+                cell.update(cx, |cell, cx| {
                     cell.set_execution_count(reply.execution_count.0 as i32);
+
+                    // Set status based on reply status
+                    match reply.status.as_str() {
+                        "ok" => {
+                            cell.execution_status = super::cell::ExecutionStatus::Success;
+                        }
+                        "error" => {
+                            cell.execution_status = super::cell::ExecutionStatus::Error;
+                        }
+                        _ => {}
+                    }
+
+                    // Calculate duration
+                    if let Some(start_time) = cell.execution_start_time {
+                        cell.execution_duration = Some(start_time.elapsed());
+                    }
+
+                    cx.notify();
                 });
 
                 // Remove from pending executions
@@ -871,7 +904,7 @@ impl NotebookEditor {
                 // Note: caller needs to notify
             }
             JupyterMessageContent::ErrorOutput(error) => {
-                // Add error output
+                // Add error output and set error status
                 use crate::outputs::{plain::TerminalOutput, user_error::ErrorView};
                 let traceback = cx.new(|cx| {
                     TerminalOutput::from(&error.traceback.join("\n"), window, cx)
@@ -882,8 +915,13 @@ impl NotebookEditor {
                     traceback,
                 };
                 let output = Output::ErrorOutput(error_view);
-                cell.update(cx, |cell, _cx| {
+                cell.update(cx, |cell, cx| {
                     cell.add_output(output);
+                    cell.execution_status = super::cell::ExecutionStatus::Error;
+                    if let Some(start_time) = cell.execution_start_time {
+                        cell.execution_duration = Some(start_time.elapsed());
+                    }
+                    cx.notify();
                 });
                 // Note: caller needs to notify
             }
