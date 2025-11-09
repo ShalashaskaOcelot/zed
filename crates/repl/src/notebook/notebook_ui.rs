@@ -27,14 +27,31 @@ use super::{Cell, CellPosition, RenderableCell, RunnableCell};
 
 use nbformat::v4::CellId;
 
-/// Setup cell editor (currently unused but kept for future extensions)
+/// Setup keyboard shortcut handlers on cell editors
+/// Each editor needs to handle Ctrl+Enter / Shift+Enter to run its own cell
+/// Otherwise keyboard shortcuts don't work when an editor is focused
 pub fn setup_cell_editor_actions(
-    _editor: &mut editor::Editor,
-    _cell_id: CellId,
-    _notebook_handle: gpui::WeakEntity<NotebookEditor>,
+    editor: &mut editor::Editor,
+    cell_id: CellId,
+    notebook_handle: gpui::WeakEntity<NotebookEditor>,
 ) {
-    // No per-editor handlers needed currently
-    // The notebook handles focus changes in its render method
+    // Register Ctrl+Enter / Shift+Enter to run this specific cell
+    editor
+        .register_action({
+            let notebook_handle = notebook_handle.clone();
+            let cell_id = cell_id.clone();
+            move |_: &RunSelectedCell, window, cx| {
+                if let Some(notebook) = notebook_handle.upgrade() {
+                    notebook.update(cx, |notebook, cx| {
+                        // Find this cell and run it
+                        if let Some(Cell::Code(code_cell)) = notebook.cell_map.get(&cell_id) {
+                            notebook.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
+                        }
+                    });
+                }
+            }
+        })
+        .detach();
 }
 
 actions!(
@@ -239,43 +256,10 @@ impl NotebookEditor {
         }
     }
 
-    fn key_down(&mut self, event: &gpui::KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        log::info!("NotebookEditor::key_down: key='{}', ctrl={}, shift={}, alt={}",
-                   event.keystroke.key,
-                   event.keystroke.modifiers.control,
-                   event.keystroke.modifiers.shift,
-                   event.keystroke.modifiers.alt);
-
-        // Check if Ctrl+Enter or Shift+Enter was pressed
-        let is_ctrl_enter = event.keystroke.key == "enter" && event.keystroke.modifiers.control;
-        let is_shift_enter = event.keystroke.key == "enter" && event.keystroke.modifiers.shift;
-
-        if is_ctrl_enter || is_shift_enter {
-            log::info!("NotebookEditor::key_down: Matched Ctrl/Shift+Enter");
-
-            // First, try to find which cell's editor is focused
-            for (cell_id, cell) in &self.cell_map {
-                if let Cell::Code(code_cell) = cell {
-                    let editor = code_cell.read(cx).editor.clone();
-                    if editor.read(cx).focus_handle(cx).is_focused(window) {
-                        log::info!("NotebookEditor::key_down: Found focused cell, executing");
-                        self.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
-                        cx.stop_propagation();
-                        return;
-                    }
-                }
-            }
-
-            // If no cell editor is focused, run the selected cell
-            log::info!("NotebookEditor::key_down: No focused cell, running selected cell {}", self.selected_cell_index);
-            let selected_index = self.selected_cell_index;
-            if let Some(cell_id) = self.cell_order.get(selected_index) {
-                if let Some(Cell::Code(code_cell)) = self.cell_map.get(cell_id) {
-                    self.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
-                    cx.stop_propagation();
-                }
-            }
-        }
+    fn key_down(&mut self, _event: &gpui::KeyDownEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+        // Key handling is done via actions (RunSelectedCell, etc.)
+        // - If an editor is focused: the editor's action handler runs its cell
+        // - If no editor is focused: the notebook's action handler runs the selected cell
     }
 
     fn execute_cell(
@@ -1067,12 +1051,14 @@ impl NotebookEditor {
         div()
             .id(("cell-wrapper", index))
             .w_full()
-            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
-                log::info!("Cell wrapper mouse_down: selecting cell {}", index);
-                // Just select the cell - don't change focus
-                // If the user clicks on the editor, it will naturally get focus
-                // If the user clicks elsewhere (like the run button), focus stays where it is
-                // The keyboard shortcuts and run button will work with the selected cell
+            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, window, cx| {
+                log::info!("Cell wrapper mouse_down: selecting cell {} and blurring editors", index);
+                // Focus the notebook to blur any focused editors
+                // This ensures that:
+                // 1. Clicking the run button will use the notebook's handler (runs selected cell)
+                // 2. Clicking elsewhere on the cell deselects any editing cell
+                // If the user clicks on the editor specifically, the editor will re-focus itself
+                window.focus(&this.focus_handle);
                 this.selected_cell_index = index;
                 cx.notify();
             }))
@@ -1098,20 +1084,6 @@ impl crate::kernels::MessageRouter for NotebookEditor {
 
 impl Render for NotebookEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Check if any cell editor is focused and select that cell
-        for (index, cell_id) in self.cell_order.iter().enumerate() {
-            if let Some(Cell::Code(code_cell)) = self.cell_map.get(cell_id) {
-                let editor = code_cell.read(cx).editor.clone();
-                if editor.read(cx).focus_handle(cx).is_focused(window) {
-                    if self.selected_cell_index != index {
-                        self.selected_cell_index = index;
-                        // Don't notify here as we're already in render
-                    }
-                    break;
-                }
-            }
-        }
-
         div()
             .key_context("notebook")
             .track_focus(&self.focus_handle)
