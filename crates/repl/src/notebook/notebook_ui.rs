@@ -27,31 +27,14 @@ use super::{Cell, CellPosition, RenderableCell, RunnableCell};
 
 use nbformat::v4::CellId;
 
-/// Setup keyboard shortcut handlers on cell editors
-/// Each editor needs to handle Ctrl+Enter / Shift+Enter to run its own cell
-/// Otherwise keyboard shortcuts don't work when an editor is focused
+/// Setup cell editor - currently unused but kept for future extensions
 pub fn setup_cell_editor_actions(
-    editor: &mut editor::Editor,
-    cell_id: CellId,
-    notebook_handle: gpui::WeakEntity<NotebookEditor>,
+    _editor: &mut editor::Editor,
+    _cell_id: CellId,
+    _notebook_handle: gpui::WeakEntity<NotebookEditor>,
 ) {
-    // Register Ctrl+Enter / Shift+Enter to run this specific cell
-    editor
-        .register_action({
-            let notebook_handle = notebook_handle.clone();
-            let cell_id = cell_id.clone();
-            move |_: &RunSelectedCell, window, cx| {
-                if let Some(notebook) = notebook_handle.upgrade() {
-                    notebook.update(cx, |notebook, cx| {
-                        // Find this cell and run it
-                        if let Some(Cell::Code(code_cell)) = notebook.cell_map.get(&cell_id) {
-                            notebook.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
-                        }
-                    });
-                }
-            }
-        })
-        .detach();
+    // Keyboard shortcuts are handled by the notebook's key_down handler
+    // This function is kept for potential future per-editor customizations
 }
 
 actions!(
@@ -256,10 +239,39 @@ impl NotebookEditor {
         }
     }
 
-    fn key_down(&mut self, _event: &gpui::KeyDownEvent, _window: &mut Window, _cx: &mut Context<Self>) {
-        // Key handling is done via actions (RunSelectedCell, etc.)
-        // - If an editor is focused: the editor's action handler runs its cell
-        // - If no editor is focused: the notebook's action handler runs the selected cell
+    fn key_down(&mut self, event: &gpui::KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // Check if Ctrl+Enter or Shift+Enter was pressed
+        let is_ctrl_enter = event.keystroke.key == "enter" && event.keystroke.modifiers.control;
+        let is_shift_enter = event.keystroke.key == "enter" && event.keystroke.modifiers.shift;
+
+        if is_ctrl_enter || is_shift_enter {
+            log::info!("NotebookEditor::key_down: Matched Ctrl/Shift+Enter");
+
+            // Find which cell's editor is focused and run it
+            for (cell_id, cell) in &self.cell_map {
+                if let Cell::Code(code_cell) = cell {
+                    let editor = code_cell.read(cx).editor.clone();
+                    if editor.read(cx).focus_handle(cx).is_focused(window) {
+                        log::info!("NotebookEditor::key_down: Found focused cell, executing");
+                        self.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
+                        cx.stop_propagation();
+                        return;
+                    }
+                }
+            }
+
+            // If no cell editor is focused, run the selected cell
+            log::info!("NotebookEditor::key_down: No focused cell, running selected cell {}", self.selected_cell_index);
+            let selected_index = self.selected_cell_index;
+            if let Some(cell_id) = self.cell_order.get(selected_index) {
+                if let Some(Cell::Code(code_cell)) = self.cell_map.get(cell_id) {
+                    self.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
+                    cx.stop_propagation();
+                }
+            }
+        }
+
+        // Don't stop propagation for regular Enter - let it go to the editor
     }
 
     fn execute_cell(
@@ -1084,6 +1096,22 @@ impl crate::kernels::MessageRouter for NotebookEditor {
 
 impl Render for NotebookEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Auto-select cell when its editor is focused
+        // This runs on every render, so when you click an editor and it gets focus,
+        // the next render will select that cell
+        for (index, cell_id) in self.cell_order.iter().enumerate() {
+            if let Some(Cell::Code(code_cell)) = self.cell_map.get(cell_id) {
+                let editor = code_cell.read(cx).editor.clone();
+                if editor.read(cx).focus_handle(cx).is_focused(window) {
+                    // Only update if different to avoid interfering with manual selection
+                    if self.selected_cell_index != index {
+                        self.selected_cell_index = index;
+                    }
+                    break;
+                }
+            }
+        }
+
         div()
             .key_context("notebook")
             .track_focus(&self.focus_handle)
