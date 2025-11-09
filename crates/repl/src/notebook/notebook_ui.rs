@@ -61,14 +61,22 @@ pub fn setup_cell_editor_actions(
                 notebook.update(cx, |notebook, cx| {
                     // Find this cell and run it
                     if let Some(Cell::Code(code_cell)) = notebook.cell_map.get(&cell_id) {
-                        notebook.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
-                        // Move to next cell and scroll
+                        // Calculate next index before executing
                         let cell_index = notebook.cell_order.iter().position(|id| id == &cell_id);
                         if let Some(index) = cell_index {
                             let next_index = (index + 1).min(notebook.cell_count() - 1);
+
+                            // Execute the cell
+                            notebook.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
+
+                            // Move selection and schedule scroll after execution
                             if next_index != index {
+                                // Find the message ID for the cell we just executed
+                                if let Some((msg_id, _)) = notebook.pending_executions.iter().find(|(_, id)| **id == cell_id) {
+                                    notebook.scroll_to_cell_after_execution = Some((msg_id.clone(), next_index));
+                                }
+
                                 notebook.selected_cell_index = next_index;
-                                notebook.cell_list.scroll_to_reveal_item(next_index);
                                 window.focus(&notebook.focus_handle);
                                 cx.notify();
                             }
@@ -153,6 +161,8 @@ pub struct NotebookEditor {
     kernel_specification: Option<KernelSpecification>,
     // Map message IDs to cell IDs for tracking execution responses
     pending_executions: HashMap<String, CellId>,
+    // Track which cell to scroll to after execution completes (for Shift+Enter behavior)
+    scroll_to_cell_after_execution: Option<(String, usize)>, // (msg_id, cell_index)
     // Task for receiving kernel messages
     _message_task: Option<Task<()>>,
 }
@@ -228,6 +238,7 @@ impl NotebookEditor {
             kernel: Kernel::Shutdown,
             kernel_specification: None,
             pending_executions: HashMap::default(),
+            scroll_to_cell_after_execution: None,
             _message_task: None,
         };
 
@@ -289,15 +300,26 @@ impl NotebookEditor {
     }
 
     fn run_selected_cell_and_move_next(&mut self, _: &RunSelectedCellAndMoveNext, window: &mut Window, cx: &mut Context<Self>) {
-        // Run the cell first
+        // Calculate next cell index before running
+        let next_index = (self.selected_cell_index + 1).min(self.cell_count() - 1);
+
+        // Run the cell first - this will set up the pending_executions map
         self.run_selected_cell(&RunSelectedCell, window, cx);
 
-        // Then move to next cell
-        let next_index = (self.selected_cell_index + 1).min(self.cell_count() - 1);
+        // Schedule scroll to next cell after execution completes
+        // We need to get the message ID from the last execution we just started
         if next_index != self.selected_cell_index {
+            // Find the message ID for the cell we just executed
+            let current_cell_id = self.cell_order.get(self.selected_cell_index).cloned();
+            if let Some(cell_id) = current_cell_id {
+                // Find the message ID associated with this cell
+                if let Some((msg_id, _)) = self.pending_executions.iter().find(|(_, id)| **id == cell_id) {
+                    self.scroll_to_cell_after_execution = Some((msg_id.clone(), next_index));
+                }
+            }
+
+            // Also move selection immediately
             self.selected_cell_index = next_index;
-            // Scroll to reveal the newly selected cell
-            self.cell_list.scroll_to_reveal_item(next_index);
             // Focus notebook to exit edit mode
             window.focus(&self.focus_handle);
             cx.notify();
@@ -870,6 +892,15 @@ impl NotebookEditor {
 
                     cx.notify();
                 });
+
+                // Check if we should scroll after this execution completes
+                if let Some((scroll_msg_id, scroll_index)) = &self.scroll_to_cell_after_execution {
+                    if scroll_msg_id == parent_message_id {
+                        // Scroll to the target cell now that execution is complete
+                        self.cell_list.scroll_to_reveal_item(*scroll_index);
+                        self.scroll_to_cell_after_execution = None;
+                    }
+                }
 
                 // Remove from pending executions
                 self.pending_executions.remove(parent_message_id);
