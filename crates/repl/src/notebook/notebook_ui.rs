@@ -1311,7 +1311,23 @@ impl project::ProjectItem for NotebookItem {
 
                 // Handle empty files by creating a default notebook
                 let notebook = if file_content.trim().is_empty() {
-                    nbformat::v4::new_notebook()
+                    // Create an empty notebook with default metadata
+                    nbformat::v4::Notebook {
+                        cells: vec![],
+                        metadata: serde_json::json!({
+                            "kernelspec": {
+                                "display_name": "Python 3",
+                                "language": "python",
+                                "name": "python3"
+                            },
+                            "language_info": {
+                                "name": "python",
+                                "version": "3.0.0"
+                            }
+                        }).as_object().unwrap().clone(),
+                        nbformat: 4,
+                        nbformat_minor: 5,
+                    }
                 } else {
                     let parsed_notebook = nbformat::parse_notebook(&file_content);
                     match parsed_notebook {
@@ -1559,9 +1575,9 @@ impl Item for NotebookEditor {
                     Cell::Raw(raw_cell) => {
                         let raw_cell = raw_cell.read(cx);
                         let cell_data = nbformat::v4::Cell::Raw {
-                            id: raw_cell.id.clone(),
-                            metadata: raw_cell.metadata.clone(),
-                            source: raw_cell.source.lines().map(|s| s.to_string()).collect(),
+                            id: raw_cell.id().clone(),
+                            metadata: raw_cell.metadata().clone(),
+                            source: raw_cell.source().lines().map(|s| s.to_string()).collect(),
                         };
                         cells.push(cell_data);
                     }
