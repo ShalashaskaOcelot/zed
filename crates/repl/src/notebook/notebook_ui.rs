@@ -1515,22 +1515,84 @@ impl Item for NotebookEditor {
         // TODO
     }
 
-    // TODO
     fn can_save(&self, _cx: &App) -> bool {
-        false
+        true  // Always allow saving notebooks
     }
-    // TODO
+
     fn save(
         &mut self,
         _options: SaveOptions,
-        _project: Entity<Project>,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
+        project: Entity<Project>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
-        unimplemented!("save() must be implemented if can_save() returns true")
+        let notebook_item = self.notebook_item.clone();
+        let fs = project.read(cx).fs().clone();
+
+        // Collect cell data from editors
+        let mut cells = Vec::new();
+        for cell_id in &self.cell_order {
+            if let Some(cell) = self.cell_map.get(cell_id) {
+                match cell {
+                    Cell::Code(code_cell) => {
+                        let code_cell = code_cell.read(cx);
+                        let source = code_cell.text(cx);
+                        let cell_data = nbformat::v4::Cell::Code {
+                            id: code_cell.id.clone(),
+                            metadata: code_cell.metadata.clone(),
+                            execution_count: code_cell.execution_count,
+                            source: source.lines().map(|s| s.to_string()).collect(),
+                            outputs: vec![], // We don't save outputs for now
+                        };
+                        cells.push(cell_data);
+                    }
+                    Cell::Markdown(md_cell) => {
+                        let md_cell = md_cell.read(cx);
+                        let cell_data = nbformat::v4::Cell::Markdown {
+                            id: md_cell.id.clone(),
+                            metadata: md_cell.metadata.clone(),
+                            source: md_cell.source.lines().map(|s| s.to_string()).collect(),
+                            attachments: None,
+                        };
+                        cells.push(cell_data);
+                    }
+                    Cell::Raw(raw_cell) => {
+                        let raw_cell = raw_cell.read(cx);
+                        let cell_data = nbformat::v4::Cell::Raw {
+                            id: raw_cell.id.clone(),
+                            metadata: raw_cell.metadata.clone(),
+                            source: raw_cell.source.lines().map(|s| s.to_string()).collect(),
+                        };
+                        cells.push(cell_data);
+                    }
+                }
+            }
+        }
+
+        cx.spawn(async move |_, cx| {
+            let path = notebook_item.read_with(cx, |item, _| item.path.clone())?;
+            let metadata = notebook_item.read_with(cx, |item, _| item.notebook.metadata.clone())?;
+            let nbformat_version = notebook_item.read_with(cx, |item, _| item.notebook.nbformat)?;
+            let nbformat_minor = notebook_item.read_with(cx, |item, _| item.notebook.nbformat_minor)?;
+
+            // Create updated notebook
+            let updated_notebook = nbformat::v4::Notebook {
+                cells,
+                metadata,
+                nbformat: nbformat_version,
+                nbformat_minor,
+            };
+
+            // Serialize to JSON
+            let json = serde_json::to_string_pretty(&updated_notebook)?;
+
+            // Write to file
+            fs.save(&path, &json.into(), Default::default()).await?;
+
+            Ok(())
+        })
     }
 
-    // TODO
     fn save_as(
         &mut self,
         _project: Entity<Project>,
@@ -1538,16 +1600,16 @@ impl Item for NotebookEditor {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
-        unimplemented!("save_as() must be implemented if can_save() returns true")
+        Task::ready(Err(anyhow::anyhow!("save_as not yet implemented for notebooks")))
     }
-    // TODO
+
     fn reload(
         &mut self,
         _project: Entity<Project>,
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
-        unimplemented!("reload() must be implemented if can_save() returns true")
+        Task::ready(Err(anyhow::anyhow!("reload not yet implemented for notebooks")))
     }
 
     fn is_dirty(&self, cx: &App) -> bool {
