@@ -1102,18 +1102,15 @@ impl NotebookEditor {
             }
         };
 
-        // Wrap in a div with mouse_down handler to select the cell before any clicks
+        // Wrap in a div with mouse_down handler to select the cell
         div()
             .id(("cell-wrapper", index))
             .w_full()
-            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, window, cx| {
-                log::info!("Cell wrapper mouse_down: selecting cell {} and blurring editors", index);
-                // Focus the notebook to blur any focused editors
-                // This ensures that:
-                // 1. Clicking the run button will use the notebook's handler (runs selected cell)
-                // 2. Clicking elsewhere on the cell deselects any editing cell
-                // If the user clicks on the editor specifically, the editor will re-focus itself
-                window.focus(&this.focus_handle);
+            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
+                log::info!("Cell wrapper mouse_down: selecting cell {}", index);
+                // Just select the cell - don't force focus changes
+                // If the user clicks on the editor, it will naturally get focus
+                // If they click elsewhere (margins, buttons), those handlers can manage focus
                 this.selected_cell_index = index;
                 cx.notify();
             }))
