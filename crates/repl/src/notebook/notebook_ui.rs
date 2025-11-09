@@ -1314,7 +1314,12 @@ impl project::ProjectItem for NotebookItem {
                     // Create an empty notebook with default metadata
                     nbformat::v4::Notebook {
                         cells: vec![],
-                        metadata: serde_json::Map::new(),
+                        metadata: nbformat::v4::Metadata {
+                            kernelspec: None,
+                            language_info: None,
+                            authors: None,
+                            additional: std::collections::HashMap::new(),
+                        },
                         nbformat: 4,
                         nbformat_minor: 5,
                     }
