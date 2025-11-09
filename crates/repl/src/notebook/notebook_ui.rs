@@ -163,6 +163,8 @@ pub struct NotebookEditor {
     pending_executions: HashMap<String, CellId>,
     // Track which cell to scroll to after execution completes (for Shift+Enter behavior)
     scroll_to_cell_after_execution: Option<(String, usize)>, // (msg_id, cell_index)
+    // Track cells queued for "run all" - stops on first error
+    run_all_queue: Vec<CellId>,
     // Task for receiving kernel messages
     _message_task: Option<Task<()>>,
 }
@@ -239,6 +241,7 @@ impl NotebookEditor {
             kernel_specification: None,
             pending_executions: HashMap::default(),
             scroll_to_cell_after_execution: None,
+            run_all_queue: Vec::new(),
             _message_task: None,
         };
 
@@ -275,10 +278,21 @@ impl NotebookEditor {
             return;
         }
 
-        // Execute all code cells in order
+        // Clear any previous run all queue
+        self.run_all_queue.clear();
+
+        // Populate queue with all code cells
         for cell_id in self.cell_order.clone() {
+            if let Some(Cell::Code(_)) = self.cell_map.get(&cell_id) {
+                self.run_all_queue.push(cell_id);
+            }
+        }
+
+        // Execute the first cell if queue is not empty
+        if !self.run_all_queue.is_empty() {
+            let cell_id = self.run_all_queue.remove(0);
             if let Some(Cell::Code(code_cell)) = self.cell_map.get(&cell_id) {
-                self.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
+                self.execute_cell(cell_id, code_cell.clone(), window, cx);
             }
         }
     }
@@ -870,6 +884,8 @@ impl NotebookEditor {
         // Handle different message types
         match &message.content {
             JupyterMessageContent::ExecuteReply(reply) => {
+                let execution_successful = reply.status.as_str() == "ok";
+
                 // Update execution count and status
                 cell.update(cx, |cell, cx| {
                     cell.set_execution_count(reply.execution_count.0 as i32);
@@ -892,6 +908,18 @@ impl NotebookEditor {
 
                     cx.notify();
                 });
+
+                // Handle "run all" queue
+                if execution_successful && !self.run_all_queue.is_empty() {
+                    // Continue with next cell in queue
+                    let next_cell_id = self.run_all_queue.remove(0);
+                    if let Some(Cell::Code(code_cell)) = self.cell_map.get(&next_cell_id) {
+                        self.execute_cell(next_cell_id, code_cell.clone(), window, cx);
+                    }
+                } else if !execution_successful {
+                    // Stop run all on error
+                    self.run_all_queue.clear();
+                }
 
                 // Check if we should scroll after this execution completes
                 if let Some((scroll_msg_id, scroll_index)) = &self.scroll_to_cell_after_execution {
