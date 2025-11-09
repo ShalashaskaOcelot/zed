@@ -544,7 +544,7 @@ impl NotebookEditor {
 
         // Create editor for markdown
         let buffer = cx.new(|cx| {
-            let mut buffer = Buffer::local(source.clone(), cx);
+            let buffer = Buffer::local(source.clone(), cx);
             buffer.set_language_registry(self.languages.clone());
             buffer
         });
