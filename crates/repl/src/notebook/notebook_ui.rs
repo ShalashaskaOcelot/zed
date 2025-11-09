@@ -305,12 +305,24 @@ impl NotebookEditor {
     }
 
     fn enter_edit_mode(&mut self, _: &EnterEditMode, window: &mut Window, cx: &mut Context<Self>) {
-        // Focus the selected cell's editor if it's a code cell
+        // Focus the selected cell's editor
         let selected_index = self.selected_cell_index;
         if let Some(cell_id) = self.cell_order.get(selected_index) {
-            if let Some(Cell::Code(code_cell)) = self.cell_map.get(cell_id) {
-                let editor = code_cell.read(cx).editor.clone();
-                window.focus(&editor.read(cx).focus_handle(cx));
+            match self.cell_map.get(cell_id) {
+                Some(Cell::Code(code_cell)) => {
+                    let editor = code_cell.read(cx).editor.clone();
+                    window.focus(&editor.read(cx).focus_handle(cx));
+                }
+                Some(Cell::Markdown(markdown_cell)) => {
+                    // Enter edit mode for markdown cell
+                    markdown_cell.update(cx, |cell, cx| {
+                        cell.edit_mode = true;
+                        cx.notify();
+                    });
+                    let editor = markdown_cell.read(cx).editor.clone();
+                    window.focus(&editor.read(cx).focus_handle(cx));
+                }
+                _ => {}
             }
         }
     }
@@ -470,11 +482,39 @@ impl NotebookEditor {
 
     fn add_markdown_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use super::cell::MarkdownCell;
+        use editor::{Editor, EditorMode, MultiBuffer};
+        use language::Buffer;
+        use theme::ThemeSettings;
         use uuid::Uuid;
 
         let cell_id = CellId::from(Uuid::new_v4());
         let source = String::new();
         let metadata = serde_json::from_str("{}").unwrap();
+
+        // Create editor for markdown
+        let buffer = cx.new(|cx| {
+            let mut buffer = Buffer::local(source.clone(), cx);
+            buffer.set_language_registry(self.languages.clone());
+            buffer
+        });
+
+        let editor = cx.new(|cx| {
+            let multibuffer = cx.new(|cx| MultiBuffer::singleton(buffer.clone(), cx));
+            let mut editor = Editor::for_multibuffer(multibuffer, Some(self.project.clone()), true, cx);
+            editor.set_soft_wrap_mode(language::language_settings::SoftWrap::EditorWidth, cx);
+            editor.set_show_line_numbers(false, cx);
+            editor.set_show_git_diff_gutter(false, cx);
+            editor.set_show_code_actions(false, cx);
+            editor.set_show_runnables(false, cx);
+            editor.set_show_wrap_guides(false, cx);
+            editor.set_show_indent_guides(false, cx);
+
+            let font_size = ThemeSettings::get_global(cx).buffer_font_size(cx);
+            editor.set_px_line_height(
+                gpui::LineHeightStyle::UiFont(font_size).height(&cx.text_system()),
+            );
+            editor
+        });
 
         let markdown_cell = cx.new(|cx| {
             let markdown_parsing_task = {
@@ -506,6 +546,8 @@ impl NotebookEditor {
                 parsed_markdown: None,
                 selected: false,
                 cell_position: None,
+                editor,
+                edit_mode: true, // Start in edit mode for new cells
             }
         });
 
@@ -1225,6 +1267,40 @@ impl Render for NotebookEditor {
             .on_action(cx.listener(Self::run_selected_cell_and_move_next))
             .on_action(cx.listener(Self::enter_edit_mode))
             .on_action(cx.listener(|this, &BlurAllEditors, window, cx| {
+                // Exit edit mode for all markdown cells and update their content
+                for cell_id in &this.cell_order {
+                    if let Some(Cell::Markdown(markdown_cell)) = this.cell_map.get(cell_id) {
+                        if markdown_cell.read(cx).edit_mode {
+                            let updated_source = markdown_cell.read(cx).editor.read(cx).text(cx);
+                            let languages = this.languages.clone();
+
+                            markdown_cell.update(cx, |cell, cx| {
+                                cell.edit_mode = false;
+                                cell.source = updated_source.clone();
+
+                                // Re-parse markdown
+                                let languages = languages.clone();
+                                let source = updated_source.clone();
+                                cell.markdown_parsing_task = cx.spawn_in(window, async move |this, cx| {
+                                    let parsed_markdown = cx
+                                        .background_spawn(async move {
+                                            markdown_preview::markdown_parser::parse_markdown(&source, None, Some(languages)).await
+                                        })
+                                        .await;
+
+                                    this.update(cx, |cell, cx| {
+                                        cell.parsed_markdown = Some(parsed_markdown);
+                                        cx.notify();
+                                    })
+                                    .log_err();
+                                });
+
+                                cx.notify();
+                            });
+                        }
+                    }
+                }
+
                 // Focus the notebook to blur all editors
                 window.focus(&this.focus_handle);
             }))
@@ -1559,10 +1635,16 @@ impl Item for NotebookEditor {
                     }
                     Cell::Markdown(md_cell) => {
                         let md_cell = md_cell.read(cx);
+                        // If in edit mode, get content from editor; otherwise use source
+                        let source = if md_cell.edit_mode {
+                            md_cell.editor.read(cx).text(cx)
+                        } else {
+                            md_cell.source.clone()
+                        };
                         let cell_data = nbformat::v4::Cell::Markdown {
                             id: md_cell.id.clone(),
                             metadata: md_cell.metadata.clone(),
-                            source: md_cell.source.lines().map(|s| s.to_string()).collect(),
+                            source: source.lines().map(|s| s.to_string()).collect(),
                             attachments: None,
                         };
                         cells.push(cell_data);

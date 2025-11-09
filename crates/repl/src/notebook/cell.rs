@@ -129,6 +129,37 @@ impl Cell {
                 let source = source.join("");
 
                 let entity = cx.new(|cx| {
+                    // Create editor for markdown
+                    let buffer = cx.new(|cx| Buffer::local(source.clone(), cx));
+                    let multi_buffer = cx.new(|cx| MultiBuffer::singleton(buffer.clone(), cx));
+
+                    let editor = cx.new(|cx| {
+                        let mut editor = Editor::new(
+                            EditorMode::AutoHeight {
+                                min_lines: 1,
+                                max_lines: Some(1024),
+                            },
+                            multi_buffer,
+                            None,
+                            window,
+                            cx,
+                        );
+
+                        let theme = ThemeSettings::get_global(cx);
+                        let refinement = TextStyleRefinement {
+                            font_family: Some(theme.buffer_font.family.clone()),
+                            font_size: Some(theme.buffer_font_size(cx).into()),
+                            color: Some(cx.theme().colors().editor_foreground),
+                            background_color: Some(gpui::transparent_black()),
+                            ..Default::default()
+                        };
+
+                        editor.set_text(source.clone(), window, cx);
+                        editor.set_show_gutter(false, cx);
+                        editor.set_text_style_refinement(refinement);
+                        editor
+                    });
+
                     let markdown_parsing_task = {
                         let languages = languages.clone();
                         let source = source.clone();
@@ -157,6 +188,8 @@ impl Cell {
                         parsed_markdown: None,
                         selected: false,
                         cell_position: None,
+                        editor,
+                        edit_mode: false, // Start in view mode for existing cells
                     }
                 });
 
@@ -342,6 +375,8 @@ pub struct MarkdownCell {
     pub(crate) selected: bool,
     pub(crate) cell_position: Option<CellPosition>,
     pub(crate) languages: Arc<LanguageRegistry>,
+    pub(crate) editor: Entity<Editor>,
+    pub(crate) edit_mode: bool,
 }
 
 impl RenderableCell for MarkdownCell {
@@ -388,16 +423,8 @@ impl RenderableCell for MarkdownCell {
 
 impl Render for MarkdownCell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(parsed) = self.parsed_markdown.as_ref() else {
-            return div();
-        };
-
-        let mut markdown_render_context =
-            markdown_preview::markdown_renderer::RenderContext::new(None, window, cx);
-
         v_flex()
             .w_full()
-            // TODO: Move base cell render into trait impl so we don't have to repeat this
             .children(self.cell_position_spacer(true, window, cx))
             .child(
                 h_flex()
@@ -410,20 +437,33 @@ impl Render for MarkdownCell {
                     .child(self.gutter(window, cx))
                     .child(
                         v_flex()
-                            .image_cache(self.image_cache.clone())
                             .size_full()
                             .flex_1()
-                            .p_3()
-                            .font_ui(cx)
-                            .text_size(TextSize::Default.rems(cx))
-                            .children(parsed.children.iter().map(|child| {
-                                div().relative().child(div().relative().child(
-                                    render_markdown_block(child, &mut markdown_render_context),
-                                ))
-                            })),
+                            .when(self.edit_mode, |this| {
+                                // Show editor in edit mode
+                                this.child(self.editor.clone())
+                            })
+                            .when(!self.edit_mode, |this| {
+                                // Show rendered markdown when not editing
+                                let Some(parsed) = self.parsed_markdown.as_ref() else {
+                                    return this.child(div());
+                                };
+
+                                let mut markdown_render_context =
+                                    markdown_preview::markdown_renderer::RenderContext::new(None, window, cx);
+
+                                this.image_cache(self.image_cache.clone())
+                                    .p_3()
+                                    .font_ui(cx)
+                                    .text_size(TextSize::Default.rems(cx))
+                                    .children(parsed.children.iter().map(|child| {
+                                        div().relative().child(div().relative().child(
+                                            render_markdown_block(child, &mut markdown_render_context),
+                                        ))
+                                    }))
+                            }),
                     ),
             )
-            // TODO: Move base cell render into trait impl so we don't have to repeat this
             .children(self.cell_position_spacer(false, window, cx))
     }
 }
