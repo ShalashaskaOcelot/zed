@@ -1314,17 +1314,7 @@ impl project::ProjectItem for NotebookItem {
                     // Create an empty notebook with default metadata
                     nbformat::v4::Notebook {
                         cells: vec![],
-                        metadata: serde_json::json!({
-                            "kernelspec": {
-                                "display_name": "Python 3",
-                                "language": "python",
-                                "name": "python3"
-                            },
-                            "language_info": {
-                                "name": "python",
-                                "version": "3.0.0"
-                            }
-                        }).as_object().unwrap().clone(),
+                        metadata: nbformat::v4::Metadata::default(),
                         nbformat: 4,
                         nbformat_minor: 5,
                     }
