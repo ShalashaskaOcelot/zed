@@ -165,6 +165,8 @@ pub struct NotebookEditor {
     scroll_to_cell_after_execution: Option<(String, usize)>, // (msg_id, cell_index)
     // Track cells queued for "run all" - stops on first error
     run_all_queue: Vec<CellId>,
+    // Cell ID to execute next (set during message handling, executed after)
+    execute_next_cell: Option<CellId>,
     // Task for receiving kernel messages
     _message_task: Option<Task<()>>,
 }
@@ -242,6 +244,7 @@ impl NotebookEditor {
             pending_executions: HashMap::default(),
             scroll_to_cell_after_execution: None,
             run_all_queue: Vec::new(),
+            execute_next_cell: None,
             _message_task: None,
         };
 
@@ -530,7 +533,7 @@ impl NotebookEditor {
 
     fn add_markdown_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use super::cell::MarkdownCell;
-        use editor::{Editor, EditorMode, MultiBuffer};
+        use editor::{Editor, MultiBuffer};
         use language::Buffer;
         use theme::ThemeSettings;
         use uuid::Uuid;
@@ -548,19 +551,29 @@ impl NotebookEditor {
 
         let editor = cx.new(|cx| {
             let multibuffer = cx.new(|cx| MultiBuffer::singleton(buffer.clone(), cx));
-            let mut editor = Editor::for_multibuffer(multibuffer, Some(self.project.clone()), true, cx);
-            editor.set_soft_wrap_mode(language::language_settings::SoftWrap::EditorWidth, cx);
-            editor.set_show_line_numbers(false, cx);
-            editor.set_show_git_diff_gutter(false, cx);
-            editor.set_show_code_actions(false, cx);
-            editor.set_show_runnables(false, cx);
-            editor.set_show_wrap_guides(false, cx);
-            editor.set_show_indent_guides(false, cx);
-
-            let font_size = ThemeSettings::get_global(cx).buffer_font_size(cx);
-            editor.set_px_line_height(
-                gpui::LineHeightStyle::UiFont(font_size).height(&cx.text_system()),
+            let mut editor = Editor::new(
+                editor::EditorMode::AutoHeight {
+                    min_lines: 1,
+                    max_lines: Some(1024),
+                },
+                multibuffer,
+                None,
+                window,
+                cx,
             );
+
+            let theme = ThemeSettings::get_global(cx);
+            let refinement = TextStyleRefinement {
+                font_family: Some(theme.buffer_font.family.clone()),
+                font_size: Some(theme.buffer_font_size(cx).into()),
+                color: Some(cx.theme().colors().editor_foreground),
+                background_color: Some(gpui::transparent_black()),
+                ..Default::default()
+            };
+
+            editor.set_text(source.clone(), window, cx);
+            editor.set_show_gutter(false, cx);
+            editor.set_text_style_refinement(refinement);
             editor
         });
 
@@ -884,18 +897,18 @@ impl NotebookEditor {
         // Handle different message types
         match &message.content {
             JupyterMessageContent::ExecuteReply(reply) => {
-                let execution_successful = reply.status.as_str() == "ok";
+                let execution_successful = matches!(reply.status, runtimelib::ReplyStatus::Ok);
 
                 // Update execution count and status
                 cell.update(cx, |cell, cx| {
                     cell.set_execution_count(reply.execution_count.0 as i32);
 
                     // Set status based on reply status
-                    match reply.status.as_str() {
-                        "ok" => {
+                    match reply.status {
+                        runtimelib::ReplyStatus::Ok => {
                             cell.execution_status = super::cell::ExecutionStatus::Success;
                         }
-                        "error" => {
+                        runtimelib::ReplyStatus::Error => {
                             cell.execution_status = super::cell::ExecutionStatus::Error;
                         }
                         _ => {}
@@ -913,9 +926,8 @@ impl NotebookEditor {
                 if execution_successful && !self.run_all_queue.is_empty() {
                     // Continue with next cell in queue
                     let next_cell_id = self.run_all_queue.remove(0);
-                    if let Some(Cell::Code(code_cell)) = self.cell_map.get(&next_cell_id) {
-                        self.execute_cell(next_cell_id, code_cell.clone(), window, cx);
-                    }
+                    // Mark this cell to be executed after route returns
+                    self.execute_next_cell = Some(next_cell_id);
                 } else if !execution_successful {
                     // Stop run all on error
                     self.run_all_queue.clear();
@@ -1336,6 +1348,63 @@ impl crate::kernels::MessageRouter for NotebookEditor {
     fn route(&mut self, message: &JupyterMessage, window: &mut Window, cx: &mut App) {
         // Call the internal implementation that works with &mut App
         self.route_internal(message, window, cx);
+
+        // If there's a cell queued for execution (from run_all), execute it now
+        if let Some(cell_id) = self.execute_next_cell.take() {
+            if let Some(Cell::Code(code_cell)) = self.cell_map.get(&cell_id) {
+                let code_cell = code_cell.clone();
+
+                // We need to execute the cell, but we have &mut App here, not &mut Context<Self>
+                // So we need to call execute_cell in a way that gets proper context
+                // The execute_cell method needs window and cx, which we have access to here
+
+                // Actually, let's inline what execute_cell does but adapted for &mut App
+                let Kernel::RunningKernel(ref kernel) = self.kernel else {
+                    return;
+                };
+
+                // Clear previous outputs and set to running status
+                code_cell.update(cx, |cell, cx| {
+                    cell.clear_outputs();
+                    cell.execution_status = super::cell::ExecutionStatus::Running;
+                    cell.execution_start_time = Some(std::time::Instant::now());
+                    cell.execution_duration = None;
+                    cx.notify();
+                });
+
+                // Get the code from the cell's editor buffer
+                let code = code_cell.read(cx).text(cx);
+
+                if !code.trim().is_empty() {
+                    // Create execute request
+                    let execute_request = ExecuteRequest {
+                        code,
+                        ..ExecuteRequest::default()
+                    };
+
+                    let message: JupyterMessage = execute_request.into();
+                    let msg_id = message.header.msg_id.clone();
+
+                    // Track this execution
+                    self.pending_executions.insert(msg_id.clone(), cell_id);
+
+                    // Send to kernel
+                    if let Err(e) = kernel.request_tx().try_send(message) {
+                        eprintln!("Failed to send execute request: {:?}", e);
+                        self.pending_executions.remove(&msg_id);
+                        // Set error status if send fails
+                        code_cell.update(cx, |cell, cx| {
+                            cell.execution_status = super::cell::ExecutionStatus::Error;
+                            if let Some(start_time) = cell.execution_start_time {
+                                cell.execution_duration = Some(start_time.elapsed());
+                            }
+                            cx.notify();
+                        });
+                    }
+                }
+            }
+        }
+
         // Note: We can't call cx.notify() here because we only have &mut App
         // The notification must happen in the update_in closure that calls this
     }
