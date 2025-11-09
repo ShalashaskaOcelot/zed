@@ -531,16 +531,20 @@ impl RenderableCell for CodeCell {
     }
 
     fn control(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<CellControl> {
-        use crate::notebook::notebook_ui::RunSelectedCell;
+        use crate::notebook::notebook_ui::{RunSelectedCell, BlurAllEditors};
 
         let cell_control = if self.has_outputs() {
             CellControl::new("rerun-cell", CellControlType::RerunCell)
                 .on_click(move |_, window, cx| {
+                    // Blur all editors first to ensure we run the selected cell, not a focused one
+                    window.dispatch_action(Box::new(BlurAllEditors), cx);
                     window.dispatch_action(Box::new(RunSelectedCell), cx);
                 })
         } else {
             CellControl::new("run-cell", CellControlType::RunCell)
                 .on_click(move |_, window, cx| {
+                    // Blur all editors first to ensure we run the selected cell, not a focused one
+                    window.dispatch_action(Box::new(BlurAllEditors), cx);
                     window.dispatch_action(Box::new(RunSelectedCell), cx);
                 })
         };
@@ -585,6 +589,8 @@ impl RunnableCell for CodeCell {
 
 impl Render for CodeCell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let cell_id = self.id.clone();
+
         v_flex()
             .w_full()
             // TODO: Move base cell render into trait impl so we don't have to repeat this
@@ -600,20 +606,49 @@ impl Render for CodeCell {
                     .bg(self.selected_bg_color(window, cx))
                     .child(self.gutter(window, cx))
                     .child(
-                        div().py_1p5().w_full().child(
-                            div()
-                                .flex()
-                                .w_full()
-                                .flex_1()
-                                .min_h(px(30.))  // Ensure editor has minimum visible height
-                                .py_3()
-                                .px_5()
-                                .rounded_lg()
-                                .border_1()
-                                .border_color(cx.theme().colors().border)
-                                .bg(cx.theme().colors().editor_background)
-                                .child(div().w_full().child(self.editor.clone())),
-                        ),
+                        div()
+                            .py_1p5()
+                            .w_full()
+                            // Intercept keys BEFORE editor sees them
+                            .on_key_down(cx.listener(move |this, event: &gpui::KeyDownEvent, window, cx| {
+                                let is_ctrl_enter = event.keystroke.key == "enter" && event.keystroke.modifiers.control;
+                                let is_shift_enter = event.keystroke.key == "enter" && event.keystroke.modifiers.shift;
+                                let is_escape = event.keystroke.key == "escape";
+
+                                if is_ctrl_enter || is_shift_enter {
+                                    // Stop propagation to prevent editor from adding newline
+                                    cx.stop_propagation();
+
+                                    // Dispatch RunSelectedCell action
+                                    window.dispatch_action(
+                                        Box::new(crate::notebook::notebook_ui::RunSelectedCell),
+                                        cx
+                                    );
+                                } else if is_escape {
+                                    // Dispatch action to blur all editors
+                                    cx.stop_propagation();
+                                    window.dispatch_action(
+                                        Box::new(crate::notebook::notebook_ui::BlurAllEditors),
+                                        cx
+                                    );
+                                }
+                                // For other keys (including regular Enter), don't stop propagation
+                                // so they reach the editor normally
+                            }))
+                            .child(
+                                div()
+                                    .flex()
+                                    .w_full()
+                                    .flex_1()
+                                    .min_h(px(30.))  // Ensure editor has minimum visible height
+                                    .py_3()
+                                    .px_5()
+                                    .rounded_lg()
+                                    .border_1()
+                                    .border_color(cx.theme().colors().border)
+                                    .bg(cx.theme().colors().editor_background)
+                                    .child(div().w_full().child(self.editor.clone())),
+                            ),
                     ),
             )
             // Output portion

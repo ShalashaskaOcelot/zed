@@ -56,6 +56,8 @@ actions!(
         AddMarkdownBlock,
         /// Adds a new code cell.
         AddCodeBlock,
+        /// Blurs all editors to exit edit mode.
+        BlurAllEditors,
     ]
 );
 
@@ -306,13 +308,10 @@ impl NotebookEditor {
 
         self.selected_cell_index = index;
 
-        // Focus the cell's editor if it's a code cell
-        if let Some(cell_id) = self.cell_order.get(index) {
-            if let Some(Cell::Code(code_cell)) = self.cell_map.get(cell_id) {
-                let editor = code_cell.read(cx).editor.clone();
-                window.focus(&editor.read(cx).focus_handle(cx));
-            }
-        }
+        // Don't focus the editor - just select the cell
+        // This way Shift+Enter moves selection without entering edit mode
+        // Focus the notebook instead to blur any editors
+        window.focus(&self.focus_handle);
 
         cx.notify();
     }
@@ -1164,6 +1163,10 @@ impl Render for NotebookEditor {
             )
             .on_action(cx.listener(|this, &RunAll, window, cx| this.run_cells(window, cx)))
             .on_action(cx.listener(Self::run_selected_cell))
+            .on_action(cx.listener(|this, &BlurAllEditors, window, cx| {
+                // Focus the notebook to blur all editors
+                window.focus(&this.focus_handle);
+            }))
             .on_action(cx.listener(|this, &MoveCellUp, window, cx| this.move_cell_up(window, cx)))
             .on_action(
                 cx.listener(|this, &MoveCellDown, window, cx| this.move_cell_down(window, cx)),
