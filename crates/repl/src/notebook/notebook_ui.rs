@@ -240,38 +240,81 @@ impl NotebookEditor {
     }
 
     fn key_down(&mut self, event: &gpui::KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        // Check if Ctrl+Enter or Shift+Enter was pressed
         let is_ctrl_enter = event.keystroke.key == "enter" && event.keystroke.modifiers.control;
         let is_shift_enter = event.keystroke.key == "enter" && event.keystroke.modifiers.shift;
 
-        if is_ctrl_enter || is_shift_enter {
-            log::info!("NotebookEditor::key_down: Matched Ctrl/Shift+Enter");
-
-            // Find which cell's editor is focused and run it
-            for (cell_id, cell) in &self.cell_map {
-                if let Cell::Code(code_cell) = cell {
-                    let editor = code_cell.read(cx).editor.clone();
-                    if editor.read(cx).focus_handle(cx).is_focused(window) {
-                        log::info!("NotebookEditor::key_down: Found focused cell, executing");
-                        self.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
-                        cx.stop_propagation();
-                        return;
-                    }
-                }
-            }
-
-            // If no cell editor is focused, run the selected cell
-            log::info!("NotebookEditor::key_down: No focused cell, running selected cell {}", self.selected_cell_index);
-            let selected_index = self.selected_cell_index;
-            if let Some(cell_id) = self.cell_order.get(selected_index) {
-                if let Some(Cell::Code(code_cell)) = self.cell_map.get(cell_id) {
-                    self.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
-                    cx.stop_propagation();
+        // Find which cell's editor is focused (if any)
+        let mut focused_cell_info: Option<(CellId, usize)> = None;
+        for (index, cell_id) in self.cell_order.iter().enumerate() {
+            if let Some(Cell::Code(code_cell)) = self.cell_map.get(cell_id) {
+                let editor = code_cell.read(cx).editor.clone();
+                if editor.read(cx).focus_handle(cx).is_focused(window) {
+                    focused_cell_info = Some((cell_id.clone(), index));
+                    break;
                 }
             }
         }
 
-        // Don't stop propagation for regular Enter - let it go to the editor
+        if is_ctrl_enter || is_shift_enter {
+            log::info!("NotebookEditor::key_down: Matched Ctrl/Shift+Enter");
+
+            // Stop propagation immediately to prevent editor from adding newline
+            cx.stop_propagation();
+
+            if let Some((cell_id, cell_index)) = focused_cell_info {
+                // An editor is focused - run that cell
+                log::info!("NotebookEditor::key_down: Running focused cell at index {}", cell_index);
+                if let Some(Cell::Code(code_cell)) = self.cell_map.get(&cell_id) {
+                    self.execute_cell(cell_id, code_cell.clone(), window, cx);
+
+                    // Shift+Enter moves to next cell
+                    if is_shift_enter {
+                        let next_index = (cell_index + 1).min(self.cell_count() - 1);
+                        if next_index != cell_index {
+                            log::info!("NotebookEditor::key_down: Moving focus to next cell {}", next_index);
+                            self.focus_cell(next_index, window, cx);
+                        }
+                    }
+                }
+            } else {
+                // No editor focused - run selected cell
+                log::info!("NotebookEditor::key_down: Running selected cell {}", self.selected_cell_index);
+                let selected_index = self.selected_cell_index;
+                if let Some(cell_id) = self.cell_order.get(selected_index) {
+                    if let Some(Cell::Code(code_cell)) = self.cell_map.get(cell_id) {
+                        self.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
+
+                        // Shift+Enter moves to next cell
+                        if is_shift_enter {
+                            let next_index = (selected_index + 1).min(self.cell_count() - 1);
+                            if next_index != selected_index {
+                                log::info!("NotebookEditor::key_down: Moving focus to next cell {}", next_index);
+                                self.focus_cell(next_index, window, cx);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // For regular Enter, don't stop propagation - let it reach the editor for newlines
+    }
+
+    fn focus_cell(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if index >= self.cell_count() {
+            return;
+        }
+
+        self.selected_cell_index = index;
+
+        // Focus the cell's editor if it's a code cell
+        if let Some(cell_id) = self.cell_order.get(index) {
+            if let Some(Cell::Code(code_cell)) = self.cell_map.get(cell_id) {
+                let editor = code_cell.read(cx).editor.clone();
+                window.focus(&editor.read(cx).focus_handle(cx));
+            }
+        }
+
+        cx.notify();
     }
 
     fn execute_cell(
