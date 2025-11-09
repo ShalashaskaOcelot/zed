@@ -1325,9 +1325,9 @@
     "context": "NotebookEditor > Editor && mode == auto_height",
     "bindings": {
       "ctrl-enter": "notebook::RunSelectedCell",
-      "shift-enter": "notebook::RunSelectedCell",
+      "shift-enter": "notebook::RunSelectedCellAndMoveNext",
       "enter": "editor::Newline",
-      "escape": "editor::Cancel"
+      "escape": "notebook::BlurAllEditors"
     }
   },
   {
@@ -1338,7 +1338,8 @@
       "ctrl-shift-up": "notebook::MoveCellUp",
       "ctrl-shift-down": "notebook::MoveCellDown",
       "ctrl-shift-enter": "notebook::RunAll",
-      "shift-enter": "notebook::RunSelectedCell",
+      "ctrl-enter": "notebook::RunSelectedCell",
+      "shift-enter": "notebook::RunSelectedCellAndMoveNext",
       "alt-shift-c": "notebook::AddCodeBlock",
       "alt-shift-m": "notebook::AddMarkdownBlock",
       "ctrl-shift-x": "notebook::ClearOutputs"

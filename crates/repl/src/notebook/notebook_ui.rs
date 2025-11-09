@@ -27,14 +27,57 @@ use super::{Cell, CellPosition, RenderableCell, RunnableCell};
 
 use nbformat::v4::CellId;
 
-/// Setup cell editor - currently unused but kept for future extensions
+/// Setup keyboard shortcut handlers on each cell editor
+/// These handlers intercept keys BEFORE the editor's default handlers
 pub fn setup_cell_editor_actions(
-    _editor: &mut editor::Editor,
-    _cell_id: CellId,
-    _notebook_handle: gpui::WeakEntity<NotebookEditor>,
+    editor: &mut editor::Editor,
+    cell_id: CellId,
+    notebook_handle: gpui::WeakEntity<NotebookEditor>,
 ) {
-    // Keyboard shortcuts are handled by the notebook's key_down handler
-    // This function is kept for potential future per-editor customizations
+    // Register handler for Ctrl+Enter
+    editor.register_action({
+        let notebook_handle = notebook_handle.clone();
+        let cell_id = cell_id.clone();
+        move |_: &RunSelectedCell, window, cx| {
+            log::info!("Editor action: RunSelectedCell triggered");
+            if let Some(notebook) = notebook_handle.upgrade() {
+                notebook.update(cx, |notebook, cx| {
+                    // Find this cell and run it
+                    if let Some(Cell::Code(code_cell)) = notebook.cell_map.get(&cell_id) {
+                        notebook.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
+                    }
+                });
+            }
+        }
+    }).detach();
+
+    // Register handler for Shift+Enter
+    editor.register_action({
+        let notebook_handle = notebook_handle.clone();
+        let cell_id = cell_id.clone();
+        move |_: &RunSelectedCellAndMoveNext, window, cx| {
+            log::info!("Editor action: RunSelectedCellAndMoveNext triggered");
+            if let Some(notebook) = notebook_handle.upgrade() {
+                notebook.update(cx, |notebook, cx| {
+                    // Find this cell and run it
+                    if let Some(Cell::Code(code_cell)) = notebook.cell_map.get(&cell_id) {
+                        notebook.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
+                        // Move to next cell and scroll
+                        let cell_index = notebook.cell_order.iter().position(|id| id == &cell_id);
+                        if let Some(index) = cell_index {
+                            let next_index = (index + 1).min(notebook.cell_count() - 1);
+                            if next_index != index {
+                                notebook.selected_cell_index = next_index;
+                                notebook.cell_list.scroll_to_reveal_item(next_index);
+                                window.focus(&notebook.focus_handle);
+                                cx.notify();
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    }).detach();
 }
 
 actions!(
@@ -46,6 +89,8 @@ actions!(
         RunAll,
         /// Runs the currently selected cell.
         RunSelectedCell,
+        /// Runs the currently selected cell and moves to the next cell.
+        RunSelectedCellAndMoveNext,
         /// Clears all cell outputs.
         ClearOutputs,
         /// Moves the current cell up.
@@ -238,6 +283,22 @@ impl NotebookEditor {
             if let Some(Cell::Code(code_cell)) = self.cell_map.get(cell_id) {
                 self.execute_cell(cell_id.clone(), code_cell.clone(), window, cx);
             }
+        }
+    }
+
+    fn run_selected_cell_and_move_next(&mut self, _: &RunSelectedCellAndMoveNext, window: &mut Window, cx: &mut Context<Self>) {
+        // Run the cell first
+        self.run_selected_cell(&RunSelectedCell, window, cx);
+
+        // Then move to next cell
+        let next_index = (self.selected_cell_index + 1).min(self.cell_count() - 1);
+        if next_index != self.selected_cell_index {
+            self.selected_cell_index = next_index;
+            // Scroll to reveal the newly selected cell
+            self.cell_list.scroll_to_reveal_item(next_index);
+            // Focus notebook to exit edit mode
+            window.focus(&self.focus_handle);
+            cx.notify();
         }
     }
 
@@ -1105,12 +1166,13 @@ impl NotebookEditor {
         div()
             .id(("cell-wrapper", index))
             .w_full()
-            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
-                log::info!("Cell wrapper mouse_down: selecting cell {}", index);
-                // Just select the cell - don't force focus changes
-                // If the user clicks on the editor, it will naturally get focus
-                // If they click elsewhere (margins, buttons), those handlers can manage focus
+            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, window, cx| {
+                log::info!("Cell wrapper mouse_down: selecting cell {} and focusing notebook", index);
+                // Select the cell and focus the notebook to blur any editors
+                // This ensures run button actions go to the notebook handler
+                // If user clicks the editor, it will re-focus itself immediately after
                 this.selected_cell_index = index;
+                window.focus(&this.focus_handle);
                 cx.notify();
             }))
             .child(cell_element)
@@ -1135,24 +1197,8 @@ impl crate::kernels::MessageRouter for NotebookEditor {
 
 impl Render for NotebookEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Auto-select cell when its editor is focused
-        // This runs on every render, so when you click an editor and it gets focus,
-        // the next render will select that cell
-        for (index, cell_id) in self.cell_order.iter().enumerate() {
-            if let Some(Cell::Code(code_cell)) = self.cell_map.get(cell_id) {
-                let editor = code_cell.read(cx).editor.clone();
-                if editor.read(cx).focus_handle(cx).is_focused(window) {
-                    // Only update if different to avoid interfering with manual selection
-                    if self.selected_cell_index != index {
-                        self.selected_cell_index = index;
-                    }
-                    break;
-                }
-            }
-        }
-
         div()
-            .key_context("notebook")
+            .key_context("NotebookEditor")
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::key_down))
             .on_action(cx.listener(|this, &OpenNotebook, window, cx| {
@@ -1163,6 +1209,7 @@ impl Render for NotebookEditor {
             )
             .on_action(cx.listener(|this, &RunAll, window, cx| this.run_cells(window, cx)))
             .on_action(cx.listener(Self::run_selected_cell))
+            .on_action(cx.listener(Self::run_selected_cell_and_move_next))
             .on_action(cx.listener(|this, &BlurAllEditors, window, cx| {
                 // Focus the notebook to blur all editors
                 window.focus(&this.focus_handle);

@@ -531,20 +531,20 @@ impl RenderableCell for CodeCell {
     }
 
     fn control(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<CellControl> {
-        use crate::notebook::notebook_ui::{RunSelectedCell, BlurAllEditors};
+        use crate::notebook::notebook_ui::RunSelectedCell;
 
         let cell_control = if self.has_outputs() {
             CellControl::new("rerun-cell", CellControlType::RerunCell)
                 .on_click(move |_, window, cx| {
-                    // Blur all editors first to ensure we run the selected cell, not a focused one
-                    window.dispatch_action(Box::new(BlurAllEditors), cx);
+                    // Just run the selected cell - the cell wrapper already selected it
+                    // and keybindings/actions will handle the rest
                     window.dispatch_action(Box::new(RunSelectedCell), cx);
                 })
         } else {
             CellControl::new("run-cell", CellControlType::RunCell)
                 .on_click(move |_, window, cx| {
-                    // Blur all editors first to ensure we run the selected cell, not a focused one
-                    window.dispatch_action(Box::new(BlurAllEditors), cx);
+                    // Just run the selected cell - the cell wrapper already selected it
+                    // and keybindings/actions will handle the rest
                     window.dispatch_action(Box::new(RunSelectedCell), cx);
                 })
         };
@@ -606,36 +606,7 @@ impl Render for CodeCell {
                     .bg(self.selected_bg_color(window, cx))
                     .child(self.gutter(window, cx))
                     .child(
-                        div()
-                            .py_1p5()
-                            .w_full()
-                            // Intercept keys BEFORE editor sees them
-                            .on_key_down(cx.listener(move |this, event: &gpui::KeyDownEvent, window, cx| {
-                                let is_ctrl_enter = event.keystroke.key == "enter" && event.keystroke.modifiers.control;
-                                let is_shift_enter = event.keystroke.key == "enter" && event.keystroke.modifiers.shift;
-                                let is_escape = event.keystroke.key == "escape";
-
-                                if is_ctrl_enter || is_shift_enter {
-                                    // Stop propagation to prevent editor from adding newline
-                                    cx.stop_propagation();
-
-                                    // Dispatch RunSelectedCell action
-                                    window.dispatch_action(
-                                        Box::new(crate::notebook::notebook_ui::RunSelectedCell),
-                                        cx
-                                    );
-                                } else if is_escape {
-                                    // Dispatch action to blur all editors
-                                    cx.stop_propagation();
-                                    window.dispatch_action(
-                                        Box::new(crate::notebook::notebook_ui::BlurAllEditors),
-                                        cx
-                                    );
-                                }
-                                // For other keys (including regular Enter), don't stop propagation
-                                // so they reach the editor normally
-                            }))
-                            .child(
+                        div().py_1p5().w_full().child(
                                 div()
                                     .flex()
                                     .w_full()
