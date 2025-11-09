@@ -1308,20 +1308,24 @@ impl project::ProjectItem for NotebookItem {
 
                 // todo: watch for changes to the file
                 let file_content = fs.load(abs_path.as_path()).await?;
-                let notebook = nbformat::parse_notebook(&file_content);
 
-                let notebook = match notebook {
-                    Ok(nbformat::Notebook::V4(notebook)) => notebook,
-                    // 4.1 - 4.4 are converted to 4.5
-                    Ok(nbformat::Notebook::Legacy(legacy_notebook)) => {
-                        // TODO: Decide if we want to mutate the notebook by including Cell IDs
-                        // and any other conversions
-
-                        nbformat::upgrade_legacy_notebook(legacy_notebook)?
-                    }
-                    // Bad notebooks and notebooks v4.0 and below are not supported
-                    Err(e) => {
-                        anyhow::bail!("Failed to parse notebook: {:?}", e);
+                // Handle empty files by creating a default notebook
+                let notebook = if file_content.trim().is_empty() {
+                    nbformat::v4::new_notebook()
+                } else {
+                    let parsed_notebook = nbformat::parse_notebook(&file_content);
+                    match parsed_notebook {
+                        Ok(nbformat::Notebook::V4(notebook)) => notebook,
+                        // 4.1 - 4.4 are converted to 4.5
+                        Ok(nbformat::Notebook::Legacy(legacy_notebook)) => {
+                            // TODO: Decide if we want to mutate the notebook by including Cell IDs
+                            // and any other conversions
+                            nbformat::upgrade_legacy_notebook(legacy_notebook)?
+                        }
+                        // Bad notebooks and notebooks v4.0 and below are not supported
+                        Err(e) => {
+                            anyhow::bail!("Failed to parse notebook: {:?}", e);
+                        }
                     }
                 };
 
