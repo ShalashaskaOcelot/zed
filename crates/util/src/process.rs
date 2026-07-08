@@ -13,6 +13,8 @@ pub struct Child {
     process: smol::process::Child,
     #[cfg(windows)]
     job: Option<windows_job::JobObject>,
+    #[cfg(windows)]
+    interrupt_event: Option<windows_interrupt::InterruptEvent>,
 }
 
 impl std::ops::Deref for Child {
@@ -32,6 +34,31 @@ impl std::ops::DerefMut for Child {
 impl Child {
     #[cfg(not(windows))]
     pub fn spawn(
+        command: std::process::Command,
+        stdin: Stdio,
+        stdout: Stdio,
+        stderr: Stdio,
+    ) -> Result<Self> {
+        Self::spawn_impl(command, stdin, stdout, stderr)
+    }
+
+    /// Like [`Child::spawn`], but the resulting child can be interrupted with
+    /// [`Child::interrupt`]. On Unix any child can be interrupted (SIGINT to
+    /// its process group), so this is identical to `spawn`; the distinct
+    /// method exists for the Windows path, which must set up an interrupt
+    /// event at spawn time.
+    #[cfg(not(windows))]
+    pub fn spawn_interruptible(
+        command: std::process::Command,
+        stdin: Stdio,
+        stdout: Stdio,
+        stderr: Stdio,
+    ) -> Result<Self> {
+        Self::spawn_impl(command, stdin, stdout, stderr)
+    }
+
+    #[cfg(not(windows))]
+    fn spawn_impl(
         mut command: std::process::Command,
         stdin: Stdio,
         stdout: Stdio,
@@ -60,7 +87,50 @@ impl Child {
         stdout: Stdio,
         stderr: Stdio,
     ) -> Result<Self> {
+        Self::spawn_impl(command, stdin, stdout, stderr, false)
+    }
+
+    /// Like [`Child::spawn`], but the resulting child can be interrupted with
+    /// [`Child::interrupt`]. On Windows this creates an inheritable interrupt
+    /// event and passes it to the child via `JPY_INTERRUPT_EVENT`, which is
+    /// how Jupyter kernels are interrupted on Windows.
+    #[cfg(windows)]
+    pub fn spawn_interruptible(
+        command: std::process::Command,
+        stdin: Stdio,
+        stdout: Stdio,
+        stderr: Stdio,
+    ) -> Result<Self> {
+        Self::spawn_impl(command, stdin, stdout, stderr, true)
+    }
+
+    #[cfg(windows)]
+    fn spawn_impl(
+        command: std::process::Command,
+        stdin: Stdio,
+        stdout: Stdio,
+        stderr: Stdio,
+        interruptible: bool,
+    ) -> Result<Self> {
+        let interrupt_event = if interruptible {
+            match windows_interrupt::InterruptEvent::new() {
+                Ok(event) => Some(event),
+                Err(error) => {
+                    log::error!("failed to create process interrupt event: {error:#}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let mut command = smol::process::Command::from(command);
+        if let Some(event) = &interrupt_event {
+            // The child inherits this event handle with the same numeric value
+            // because it is created inheritable; ipykernel's Windows parent
+            // poller waits on it and raises KeyboardInterrupt when signaled.
+            command.env("JPY_INTERRUPT_EVENT", event.env_value());
+        }
         let process = command
             .stdin(stdin)
             .stdout(stdout)
@@ -98,7 +168,11 @@ impl Child {
             })
             .ok();
 
-        Ok(Self { process, job })
+        Ok(Self {
+            process,
+            job,
+            interrupt_event,
+        })
     }
 
     /// Consumes the child, draining its stdout/stderr and waiting for it to
@@ -127,6 +201,91 @@ impl Child {
         } else {
             self.process.kill()?;
             Ok(())
+        }
+    }
+
+    /// Sends an interrupt to the child without killing it. On Unix this is
+    /// SIGINT to the child's process group (the child starts a new session at
+    /// spawn, so its process-group id equals its pid). On Windows the child
+    /// must have been spawned with [`Child::spawn_interruptible`]; the
+    /// associated interrupt event is signaled. Jupyter kernels turn this into
+    /// a `KeyboardInterrupt`.
+    #[cfg(not(windows))]
+    pub fn interrupt(&self) -> Result<()> {
+        let pid = self.process.id();
+        let result = unsafe { libc::killpg(pid as i32, libc::SIGINT) };
+        if result != 0 {
+            return Err(std::io::Error::last_os_error())
+                .context("failed to send SIGINT to child process group");
+        }
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    pub fn interrupt(&self) -> Result<()> {
+        match &self.interrupt_event {
+            Some(event) => event.signal(),
+            None => anyhow::bail!("process was not spawned with interrupt support"),
+        }
+    }
+}
+
+#[cfg(windows)]
+mod windows_interrupt {
+    use anyhow::{Context as _, Result};
+    use windows::Win32::{
+        Foundation::{CloseHandle, HANDLE},
+        Security::SECURITY_ATTRIBUTES,
+        System::Threading::{CreateEventW, SetEvent},
+    };
+
+    /// A Win32 auto-reset event used to interrupt a locally-spawned Jupyter
+    /// kernel. The handle is created inheritable and its numeric value is
+    /// passed to the kernel via the `JPY_INTERRUPT_EVENT` environment variable;
+    /// ipykernel's Windows parent poller waits on it and raises
+    /// `KeyboardInterrupt` in the kernel when it is signaled. This mirrors how
+    /// jupyter_client interrupts kernels on Windows, where message-based
+    /// interrupts over the control channel are not honored.
+    pub(crate) struct InterruptEvent(HANDLE);
+
+    // SAFETY: event handles can be used from any thread.
+    unsafe impl Send for InterruptEvent {}
+    unsafe impl Sync for InterruptEvent {}
+
+    impl InterruptEvent {
+        pub(crate) fn new() -> Result<Self> {
+            unsafe {
+                let attributes = SECURITY_ATTRIBUTES {
+                    nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+                    lpSecurityDescriptor: std::ptr::null_mut(),
+                    bInheritHandle: true.into(),
+                };
+                let handle = CreateEventW(
+                    Some(&attributes),
+                    false, // auto-reset
+                    false, // initially non-signaled
+                    windows::core::PCWSTR::null(),
+                )
+                .context("failed to create interrupt event")?;
+                Ok(Self(handle))
+            }
+        }
+
+        /// The handle value to hand to the child via `JPY_INTERRUPT_EVENT`.
+        pub(crate) fn env_value(&self) -> String {
+            (self.0.0 as isize).to_string()
+        }
+
+        pub(crate) fn signal(&self) -> Result<()> {
+            unsafe { SetEvent(self.0).context("failed to signal interrupt event") }
+        }
+    }
+
+    impl Drop for InterruptEvent {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0).ok();
+            }
         }
     }
 }

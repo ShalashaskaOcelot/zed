@@ -153,7 +153,7 @@ impl NativeRunningKernel {
             let mut cmd = kernel_specification.command(&connection_path)?;
             cmd.current_dir(&working_directory);
 
-            let mut process = util::process::Child::spawn(
+            let mut process = util::process::Child::spawn_interruptible(
                 cmd,
                 std::process::Stdio::piped(),
                 std::process::Stdio::piped(),
@@ -328,6 +328,19 @@ impl RunningKernel for NativeRunningKernel {
         self.request_tx.close_channel();
         self.stdin_tx.close_channel();
         self.process.kill().ok();
+    }
+
+    fn interrupt(&self) {
+        if let Err(error) = self.process.interrupt() {
+            log::warn!(
+                "failed to interrupt kernel via OS signal ({error:#}); \
+                 falling back to message-based interrupt"
+            );
+            let message: JupyterMessage = runtimelib::InterruptRequest {}.into();
+            if let Err(error) = self.request_tx().try_send(message) {
+                log::error!("failed to send fallback interrupt request: {error}");
+            }
+        }
     }
 }
 

@@ -678,6 +678,19 @@ pub trait RunningKernel: Send + Debug {
     fn set_kernel_info(&mut self, info: KernelInfoReply);
     fn force_shutdown(&mut self, window: &mut Window, cx: &mut App) -> Task<anyhow::Result<()>>;
     fn kill(&mut self);
+
+    /// Interrupt a running computation without shutting the kernel down.
+    ///
+    /// The default implementation sends a message-based `interrupt_request`
+    /// over the control channel. Locally-spawned kernels override this to send
+    /// an OS-level interrupt (SIGINT / Windows interrupt event), because
+    /// ipykernel does not honor message-based interrupts by default.
+    fn interrupt(&self) {
+        let message: JupyterMessage = runtimelib::InterruptRequest {}.into();
+        if let Err(error) = self.request_tx().try_send(message) {
+            log::error!("failed to send interrupt request to kernel: {error}");
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

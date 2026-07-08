@@ -580,11 +580,7 @@ impl NotebookEditor {
     ) {
         match &self.kernel {
             Kernel::RunningKernel(kernel) => {
-                let interrupt_request = runtimelib::InterruptRequest {};
-                let message: JupyterMessage = interrupt_request.into();
-                if let Err(error) = kernel.request_tx().try_send(message) {
-                    log::error!("notebook: failed to send interrupt request to kernel: {error}");
-                }
+                kernel.interrupt();
                 cx.notify();
             }
             _ => {

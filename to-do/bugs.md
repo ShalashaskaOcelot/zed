@@ -6,30 +6,8 @@ Move to `to-do/archive/` only when `fixed - confirmed`.
 
 ---
 
-## 1. Restart kernel kills the kernel but the relaunch fails
-
-- **Status:** fix attempted - untested
-- **Symptom:** Restart button / ctrl-shift-r kills the kernel; it never comes
-  back. Running a cell afterwards reports the kernel is not running.
-- **Analysis:** Restart IS shutdown + relaunch (`notebook_ui.rs:491-502`),
-  but: `force_shutdown().detach()` is fire-and-forget with no await/delay;
-  the connection file path is keyed only on `entity_id`
-  (`native_kernel.rs:144`) so the relaunch reuses the same path while the old
-  kernel's `Drop` deletes it (`native_kernel.rs:300-305`); ephemeral-port
-  TOCTOU (`native_kernel.rs:79-91`). The REPL's restart (`session.rs:873-913`)
-  sequences this correctly (ShutdownRequest{restart:true}, wait, await forced
-  kill, relaunch) — notebook should match.
-- **Fix attempted:** Reworked `restart_kernel` to follow the REPL sequence:
-  send `ShutdownRequest { restart: true }`, 1s grace period, await forced
-  kill, then relaunch. Restart now also clears `execution_requests` and stops
-  cell spinners. Root-cause fix alongside: the kernel's message-handling
-  tasks are now owned by the running kernel instead of detached, so killing/
-  dropping a kernel cancels them — previously the stale recv task errored
-  asynchronously after the kill and clobbered the NEW kernel's state with
-  `ErroredLaunch` (this is very likely why restart appeared to never come
-  back). `kernel_errored` also now ignores errors while Restarting/
-  ShuttingDown. Connection files are unique per launch.
-- **Tested:** no — needs user confirmation on Windows
+(Bug #1 "Restart kernel kills but relaunch fails" — fixed & confirmed
+2026-07-08, moved to `archive/bugs-fixed.md`.)
 
 ## 2. Running a cell with a dead/shutdown kernel does not start the kernel
 
@@ -49,21 +27,36 @@ Move to `to-do/archive/` only when `fixed - confirmed`.
   `test_run_cell_with_missing_interpreter_shows_error`.
 - **Tested:** no — automated test passes; needs user confirmation on Windows
 
-## 3. Interrupt is greyed out / ctrl-c does nothing
+## 3. Interrupt / stop button does not interrupt a running cell
 
 - **Status:** fix attempted - untested
-- **Symptom:** Stop button always disabled; ctrl-c has no effect.
-- **Analysis:** Interrupt is implemented (protocol-level `InterruptRequest`
-  on the control channel, `kernels/mod.rs:156-160`; handler
-  `notebook_ui.rs:504-516`). The button is enabled ONLY when
-  `KernelStatus::Busy` (`notebook_ui.rs:1253-1256`); a kernel that errored or
-  died reports `Error`, so the button greys out exactly when the user wants
-  it. The ctrl-c handler early-returns unless `Kernel::RunningKernel` and
-  swallows send failures with `try_send(...).ok()`.
-- **Fix attempted:** Interrupt button now enabled whenever the kernel is
-  connected (Idle or Busy) instead of Busy-only; send failures are logged
-  instead of swallowed; interrupt with no running kernel logs a warning.
-- **Tested:** no — needs user confirmation on Windows
+- **Symptom:** (Round 1) Stop button always disabled. (Round 2, user
+  2026-07-08) Button is now enabled when idle, but pressing it does not stop
+  a running task.
+- **Analysis:** Round 1 was pure UI enablement (Busy-only gate). Round 2 is
+  the real mechanism: the notebook sent a message-based `interrupt_request`
+  over the control channel, but ipykernel does NOT honor message-based
+  interrupts by default — it expects an OS-level interrupt (SIGINT on Unix, a
+  Windows interrupt event). We know the control channel itself works because
+  `ShutdownRequest` (restart) travels the same channel and succeeds, so the
+  message is delivered but ignored. The user is on Windows, where ipykernel's
+  parent poller waits on a `JPY_INTERRUPT_EVENT` handle.
+- **Fix attempted:**
+  - Round 1: enable the stop button whenever the kernel is connected (Idle or
+    Busy); log send failures; warn when no kernel is running.
+  - Round 2: OS-level interrupt. Added `Child::spawn_interruptible` and
+    `Child::interrupt` in `util::process`. Unix sends `SIGINT` to the kernel's
+    process group (`killpg`). Windows creates an inheritable auto-reset event,
+    passes it to the kernel via `JPY_INTERRUPT_EVENT`, and signals it with
+    `SetEvent` — matching how jupyter_client interrupts kernels on Windows.
+    `RunningKernel::interrupt` defaults to the old message-based path;
+    `NativeRunningKernel` overrides it to use the OS interrupt (with the
+    message send as a fallback). Notebook and REPL both call
+    `kernel.interrupt()`.
+- **Tested:** no — Unix path type-checks locally; Windows path type-checks and
+  clippy-checks against the `x86_64-pc-windows-msvc` target but the actual
+  interrupt behaviour needs user confirmation on Windows (interrupt a
+  long-running cell, e.g. `import time; time.sleep(30)`).
 
 ## 4. "More options" toolbar button opens nothing
 
@@ -124,18 +117,8 @@ Move to `to-do/archive/` only when `fixed - confirmed`.
   too.
 - **Tested:** no — needs user confirmation
 
-## 8. Clean kernel exit leaves stale RunningKernel state
-
-- **Status:** fix attempted - untested
-- **Symptom:** (found in code review) If the kernel process exits with a
-  success status, the UI keeps showing a running kernel.
-- **Analysis:** The process-exit watcher only reports failed exits
-  (`native_kernel.rs:220-242`); a zero-status exit returns silently without
-  a state transition.
-- **Fix attempted:** Added `kernel_exited` to the `KernelSession` trait; the
-  native and WSL process watchers call it on clean exit, transitioning the
-  notebook (and REPL session) to `Shutdown` and stopping cell spinners.
-- **Tested:** no — needs user confirmation (e.g. run `exit()` in a cell)
+(Bug #8 "Clean kernel exit leaves stale RunningKernel state" — fixed &
+confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
 
 ## 9. Notebook never reports itself dirty
 

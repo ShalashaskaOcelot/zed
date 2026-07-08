@@ -35,7 +35,7 @@ use gpui::{
 use language::Point;
 use project::Fs;
 use runtimelib::{
-    ExecuteRequest, ExecutionState, InputReply, InterruptRequest, JupyterMessage,
+    ExecuteRequest, ExecutionState, InputReply, JupyterMessage,
     JupyterMessageContent, KernelInfoRequest, ReplyStatus, ShutdownRequest,
 };
 use settings::Settings as _;
@@ -806,10 +806,10 @@ impl Session {
         }
     }
 
-    pub fn interrupt(&mut self, cx: &mut Context<Self>) {
-        match &mut self.kernel {
-            Kernel::RunningKernel(_kernel) => {
-                self.send(InterruptRequest {}.into(), cx).ok();
+    pub fn interrupt(&mut self, _cx: &mut Context<Self>) {
+        match &self.kernel {
+            Kernel::RunningKernel(kernel) => {
+                kernel.interrupt();
             }
             Kernel::StartingKernel(_task) => {
                 // NOTE: If we switch to a literal queue instead of chaining on to the task, clear all queued executions
