@@ -4,15 +4,15 @@ use std::time::{Duration, Instant};
 use editor::{Editor, EditorMode, MultiBuffer, SizingBehavior};
 use futures::future::Shared;
 use gpui::{
-    App, Entity, EventEmitter, Focusable, Hsla, InteractiveElement, RetainAllImageCache,
-    StatefulInteractiveElement, Task, prelude::*,
+    App, ClipboardItem, Entity, EventEmitter, Focusable, Hsla, InteractiveElement,
+    RetainAllImageCache, StatefulInteractiveElement, Task, prelude::*,
 };
 use language::{Buffer, Language, LanguageRegistry};
 use markdown::{Markdown, MarkdownElement, MarkdownFont, MarkdownStyle};
 use nbformat::v4::{CellId, CellMetadata, CellType};
 use runtimelib::{JupyterMessage, JupyterMessageContent};
 use settings::Settings as _;
-use ui::{CommonAnimationExt, IconButtonShape, prelude::*};
+use ui::{CommonAnimationExt, ContextMenu, IconButtonShape, PopoverMenu, Tooltip, prelude::*};
 use util::ResultExt;
 use zed_actions::notebook::InterruptKernel;
 
@@ -803,6 +803,24 @@ impl CodeCell {
         self.execution_duration = None;
     }
 
+    /// Concatenated plain text of the cell's text-bearing outputs (stdout/plain
+    /// results and error tracebacks), for the "Copy Output" menu action.
+    fn outputs_as_text(&self, cx: &App) -> String {
+        let mut parts = Vec::new();
+        for output in &self.outputs {
+            match output {
+                Output::Plain { content, .. } | Output::Stream { content } => {
+                    parts.push(content.read(cx).full_text(cx));
+                }
+                Output::ErrorOutput(error_view) => {
+                    parts.push(error_view.traceback.read(cx).full_text(cx));
+                }
+                _ => {}
+            }
+        }
+        parts.join("\n")
+    }
+
     pub fn start_execution(&mut self) {
         self.execution_start_time = Some(Instant::now());
         self.execution_duration = None;
@@ -934,7 +952,38 @@ impl CodeCell {
                         .items_center()
                         .justify_center()
                         .bg(cx.theme().colors().tab_bar_background)
-                        .child(IconButton::new("control", IconName::Ellipsis)),
+                        .child(
+                            PopoverMenu::new("cell-output-menu")
+                                .trigger_with_tooltip(
+                                    IconButton::new("control", IconName::Ellipsis)
+                                        .icon_size(IconSize::Small),
+                                    Tooltip::text("Output options"),
+                                )
+                                .menu({
+                                    let cell = cx.entity();
+                                    move |window, cx| {
+                                        let text = cell.read(cx).outputs_as_text(cx);
+                                        let cell = cell.clone();
+                                        Some(ContextMenu::build(window, cx, move |menu, _, _| {
+                                            menu.entry("Copy Output", None, {
+                                                let text = text.clone();
+                                                move |_, cx| {
+                                                    cx.write_to_clipboard(
+                                                        ClipboardItem::new_string(text.clone()),
+                                                    );
+                                                }
+                                            })
+                                            .separator()
+                                            .entry("Clear Output", None, move |_, cx| {
+                                                cell.update(cx, |cell, cx| {
+                                                    cell.clear_outputs();
+                                                    cx.notify();
+                                                });
+                                            })
+                                        }))
+                                    }
+                                }),
+                        ),
                 )
             })
     }

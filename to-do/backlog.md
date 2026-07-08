@@ -3,6 +3,11 @@
 Non-phased suggestions and to-do items. Move an item into a `phase_<n>.md`
 when it is scheduled; never implement directly from here.
 
+- Cell hover controls: VS Code-style per-cell toolbar on the selected/hovered
+  cell (run-above / run-below / delete / add-below), reusing the phase-4
+  actions. Deferred out of phase 4 — the actions, keybinds, and the two
+  ellipsis menus already expose this functionality; the hover toolbar is a
+  convenience layer.
 - Split cell / join cells (user: low priority, rarely used)
 - Cell grouping (user: low priority, rarely used)
 - Copy / cut / paste / duplicate cell actions (with clipboard format

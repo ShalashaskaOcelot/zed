@@ -1558,6 +1558,12 @@
       "enter": "notebook::EnterEditMode",
       "down": "menu::SelectNext",
       "up": "menu::SelectPrevious",
+      "a": "notebook::AddCellAbove",
+      "b": "notebook::AddCellBelow",
+      "x": "notebook::DeleteCell",
+      "d d": "notebook::DeleteCell",
+      "m": "notebook::ConvertToMarkdown",
+      "y": "notebook::ConvertToCode",
     },
   },
   {

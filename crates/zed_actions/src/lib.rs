@@ -932,6 +932,20 @@ pub mod notebook {
             AddMarkdownBlock,
             /// Adds a new code cell.
             AddCodeBlock,
+            /// Adds a new code cell above the current cell.
+            AddCellAbove,
+            /// Adds a new code cell below the current cell.
+            AddCellBelow,
+            /// Deletes the current cell.
+            DeleteCell,
+            /// Runs all cells above the current cell.
+            RunCellsAbove,
+            /// Runs the current cell and all cells below it.
+            RunCellAndBelow,
+            /// Converts the current cell to a code cell.
+            ConvertToCode,
+            /// Converts the current cell to a markdown cell.
+            ConvertToMarkdown,
             /// Restarts the kernel.
             RestartKernel,
             /// Interrupts the current execution.

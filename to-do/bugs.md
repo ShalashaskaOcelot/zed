@@ -126,7 +126,12 @@ confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
 - **Symptom:** (found in code review) Structural/metadata changes (add/move
   cells, outputs) don't mark the notebook modified, so closing may not
   prompt to save.
-- **Analysis:** `NotebookItem::is_dirty` is hardcoded `false` with a TODO
-  (`notebook_ui.rs:1595-1598`).
+- **Analysis:** `NotebookItem::is_dirty` (the ProjectItem impl) is hardcoded
+  `false` with a TODO (`notebook_ui.rs:1921-1924`). NOTE (phase 4): the
+  workspace `Item::is_dirty` for `NotebookEditor` (`notebook_ui.rs:2200`)
+  already returns `has_structural_changes() || has_content_changes()`, so
+  cell add/delete/move/convert and edits DO mark the tab dirty and prompt on
+  close. The remaining `NotebookItem::is_dirty` stub may be dead/irrelevant —
+  confirm whether anything consults it before "fixing" it.
 - **Fix attempted:** none
 - **Tested:** n/a
