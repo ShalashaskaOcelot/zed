@@ -1,6 +1,8 @@
 use std::error::Error;
 use std::sync::{LazyLock, OnceLock};
-use std::{any::type_name, borrow::Cow, mem, pin::Pin, task::Poll, time::Duration};
+use std::{borrow::Cow, mem, pin::Pin, task::Poll, time::Duration};
+
+use gpui_util::defer;
 
 use anyhow::anyhow;
 use bytes::{BufMut, Bytes, BytesMut};
@@ -28,6 +30,15 @@ impl ReqwestClient {
         reqwest::Client::builder()
             .use_rustls_tls()
             .connect_timeout(Duration::from_secs(10))
+            // Detect and drop connections that have silently gone bad on a
+            // flaky path (NAT timeouts, resets) instead of reusing them. A
+            // stale reused HTTP/2 connection is a common source of
+            // `BadRecordMac` TLS errors against long-lived endpoints.
+            .tcp_keepalive(Duration::from_secs(30))
+            .pool_idle_timeout(Duration::from_secs(30))
+            .http2_keep_alive_interval(Duration::from_secs(15))
+            .http2_keep_alive_timeout(Duration::from_secs(10))
+            .http2_keep_alive_while_idle(true)
     }
 
     pub fn new() -> Self {
@@ -80,20 +91,22 @@ impl ReqwestClient {
     }
 }
 
+pub fn runtime() -> &'static tokio::runtime::Runtime {
+    RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            // Since we now have two executors, let's try to keep our footprint small
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("Failed to initialize HTTP client")
+    })
+}
+
 impl From<reqwest::Client> for ReqwestClient {
     fn from(client: reqwest::Client) -> Self {
         let handle = tokio::runtime::Handle::try_current().unwrap_or_else(|_| {
             log::debug!("no tokio runtime found, creating one for Reqwest...");
-            let runtime = RUNTIME.get_or_init(|| {
-                tokio::runtime::Builder::new_multi_thread()
-                    // Since we now have two executors, let's try to keep our footprint small
-                    .worker_threads(1)
-                    .enable_all()
-                    .build()
-                    .expect("Failed to initialize HTTP client")
-            });
-
-            runtime.handle().clone()
+            runtime().handle().clone()
         });
         Self {
             client,
@@ -143,7 +156,11 @@ impl futures::Stream for StreamReader {
         }
 
         match poll_read_buf(&mut reader, cx, &mut this.buf) {
-            Poll::Pending => Poll::Pending,
+            Poll::Pending => {
+                self.reader = Some(reader);
+
+                Poll::Pending
+            }
             Poll::Ready(Err(err)) => {
                 self.reader = None;
 
@@ -164,7 +181,7 @@ impl futures::Stream for StreamReader {
 
 /// Implementation from <https://docs.rs/tokio-util/0.7.12/src/tokio_util/util/poll_buf.rs.html>
 /// Specialized for this use case
-pub fn poll_read_buf(
+fn poll_read_buf(
     io: &mut Pin<Box<dyn futures::AsyncRead + Send + Sync>>,
     cx: &mut std::task::Context<'_>,
     buf: &mut BytesMut,
@@ -177,22 +194,22 @@ pub fn poll_read_buf(
         let dst = buf.chunk_mut();
 
         // Safety: `chunk_mut()` returns a `&mut UninitSlice`, and `UninitSlice` is a
-        // transparent wrapper around `[MaybeUninit<u8>]`.
+        // transparent wrapper around `[std::mem::MaybeUninit<u8>]`.
         let dst = unsafe { &mut *(dst as *mut _ as *mut [std::mem::MaybeUninit<u8>]) };
-        let mut buf = tokio::io::ReadBuf::uninit(dst);
-        let ptr = buf.filled().as_ptr();
-        let unfilled_portion = buf.initialize_unfilled();
+        let mut read_buf = tokio::io::ReadBuf::uninit(dst);
+        let unfilled_portion = read_buf.initialize_unfilled();
         // SAFETY: Pin projection
         let io_pin = unsafe { Pin::new_unchecked(io) };
-        std::task::ready!(io_pin.poll_read(cx, unfilled_portion)?);
-
-        // Ensure the pointer does not change from under us
-        assert_eq!(ptr, buf.filled().as_ptr());
-        buf.filled().len()
+        // `futures::AsyncRead` reports the byte count as the poll's return
+        // value; `read_buf.filled()` stays empty because the reader writes
+        // through the initialized slice without advancing the `ReadBuf`.
+        std::task::ready!(io_pin.poll_read(cx, unfilled_portion)?)
     };
 
-    // Safety: This is guaranteed to be the number of initialized (and read)
-    // bytes due to the invariants provided by `ReadBuf::filled`.
+    // Safety: `initialize_unfilled()` zero-initialized the entire spare
+    // capacity, so the first `n` bytes are initialized no matter how many the
+    // reader actually wrote, and `advance_mut` panics rather than exceeding
+    // the capacity if `n` overstates the slice length.
     unsafe {
         buf.advance_mut(n);
     }
@@ -213,10 +230,6 @@ fn redact_error(mut error: reqwest::Error) -> reqwest::Error {
 impl http_client::HttpClient for ReqwestClient {
     fn proxy(&self) -> Option<&Url> {
         self.proxy.as_ref()
-    }
-
-    fn type_name(&self) -> &'static str {
-        type_name::<Self>()
     }
 
     fn user_agent(&self) -> Option<&HeaderValue> {
@@ -251,10 +264,11 @@ impl http_client::HttpClient for ReqwestClient {
 
         let handle = self.handle.clone();
         async move {
-            let mut response = handle
-                .spawn(async { request.send().await })
-                .await?
-                .map_err(redact_error)?;
+            let join_handle = handle.spawn(async { request.send().await });
+            let abort_handle = join_handle.abort_handle();
+            let _abort_on_drop = defer(move || abort_handle.abort());
+
+            let mut response = join_handle.await?.map_err(redact_error)?;
 
             let headers = mem::take(response.headers_mut());
             let mut builder = http::Response::builder()
@@ -272,33 +286,93 @@ impl http_client::HttpClient for ReqwestClient {
         }
         .boxed()
     }
-
-    fn send_multipart_form<'a>(
-        &'a self,
-        url: &str,
-        form: reqwest::multipart::Form,
-    ) -> futures::future::BoxFuture<'a, anyhow::Result<http_client::Response<http_client::AsyncBody>>>
-    {
-        let response = self.client.post(url).multipart(form).send();
-        self.handle
-            .spawn(async move {
-                let response = response.await?;
-                let mut builder = http::response::Builder::new().status(response.status());
-                for (k, v) in response.headers() {
-                    builder = builder.header(k, v)
-                }
-                Ok(builder.body(response.bytes().await?.into())?)
-            })
-            .map(|e| e?)
-            .boxed()
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use http_client::{HttpClient, Url};
+    use std::io::{Read as _, Write as _};
+    use std::net::TcpListener;
+
+    use http_client::{AsyncBody, HttpClient, Method, Request as HttpRequest, Url};
 
     use crate::ReqwestClient;
+
+    /// Regression test: `StreamReader::poll_next` used to drop the reader it
+    /// `take()`s whenever the reader returned `Poll::Pending`, so the next
+    /// poll reported end-of-stream and streamed request bodies were silently
+    /// truncated. Readers backed by real I/O (e.g. `async_fs::File`) return
+    /// `Pending` on their very first read, so their uploads sent zero bytes.
+    #[test]
+    fn test_streamed_body_survives_pending_reader() {
+        let payload: Vec<u8> = (0..30_000usize).map(|byte| (byte % 251) as u8).collect();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let expected_payload = payload.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0u8; 8192];
+            loop {
+                let read = stream.read(&mut buffer).unwrap();
+                assert_ne!(read, 0, "client closed the connection mid-request");
+                request.extend_from_slice(&buffer[..read]);
+                if let Some(position) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let body_start = position + 4;
+                    while request.len() - body_start < expected_payload.len() {
+                        let read = stream.read(&mut buffer).unwrap();
+                        assert_ne!(read, 0, "client closed the connection mid-body");
+                        request.extend_from_slice(&buffer[..read]);
+                    }
+                    assert_eq!(&request[body_start..], &expected_payload);
+                    break;
+                }
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+                .unwrap();
+        });
+
+        // A reader that returns `Pending` before every chunk, like a reader
+        // backed by real I/O would.
+        struct PendingFirstReader {
+            data: std::io::Cursor<Vec<u8>>,
+            ready: bool,
+        }
+
+        impl futures::AsyncRead for PendingFirstReader {
+            fn poll_read(
+                mut self: std::pin::Pin<&mut Self>,
+                cx: &mut std::task::Context<'_>,
+                buf: &mut [u8],
+            ) -> std::task::Poll<std::io::Result<usize>> {
+                if self.ready {
+                    self.ready = false;
+                    std::task::Poll::Ready(self.data.read(buf))
+                } else {
+                    self.ready = true;
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            }
+        }
+
+        let reader = PendingFirstReader {
+            data: std::io::Cursor::new(payload.clone()),
+            ready: false,
+        };
+
+        let client = ReqwestClient::new();
+        let request = HttpRequest::builder()
+            .method(Method::PUT)
+            .uri(format!("http://{address}/upload"))
+            .header("Content-Length", payload.len().to_string())
+            .body(AsyncBody::from_reader(reader))
+            .unwrap();
+        let response = futures::executor::block_on(client.send(request)).unwrap();
+        assert!(response.status().is_success());
+        server.join().unwrap();
+    }
 
     #[test]
     fn test_proxy_uri() {

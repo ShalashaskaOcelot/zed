@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use gpui::{
-    AnyElement, App, Bounds, Corner, DismissEvent, DispatchPhase, Element, ElementId, Entity,
+    Anchor, AnyElement, App, Bounds, DismissEvent, DispatchPhase, Element, ElementId, Entity,
     Focusable as _, GlobalElementId, Hitbox, HitboxBehavior, InteractiveElement, IntoElement,
     LayoutId, ManagedView, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, Window,
     anchored, deferred, div, px,
@@ -10,13 +10,21 @@ use gpui::{
 pub struct RightClickMenu<M: ManagedView> {
     id: ElementId,
     child_builder: Option<Box<dyn FnOnce(bool, &mut Window, &mut App) -> AnyElement + 'static>>,
-    menu_builder: Option<Rc<dyn Fn(&mut Window, &mut App) -> Entity<M> + 'static>>,
-    anchor: Option<Corner>,
-    attach: Option<Corner>,
+    menu_builder: Option<Rc<dyn Fn(&mut Window, &mut App) -> Option<Entity<M>> + 'static>>,
+    anchor: Option<Anchor>,
+    attach: Option<Anchor>,
 }
 
 impl<M: ManagedView> RightClickMenu<M> {
     pub fn menu(mut self, f: impl Fn(&mut Window, &mut App) -> Entity<M> + 'static) -> Self {
+        self.menu_builder = Some(Rc::new(move |window, cx| Some(f(window, cx))));
+        self
+    }
+
+    pub fn maybe_menu(
+        mut self,
+        f: impl Fn(&mut Window, &mut App) -> Option<Entity<M>> + 'static,
+    ) -> Self {
         self.menu_builder = Some(Rc::new(f));
         self
     }
@@ -34,13 +42,13 @@ impl<M: ManagedView> RightClickMenu<M> {
 
     /// anchor defines which corner of the menu to anchor to the attachment point
     /// (by default the cursor position, but see attach)
-    pub fn anchor(mut self, anchor: Corner) -> Self {
+    pub fn anchor(mut self, anchor: Anchor) -> Self {
         self.anchor = Some(anchor);
         self
     }
 
     /// attach defines which corner of the handle to attach the menu's anchor to
-    pub fn attach(mut self, attach: Corner) -> Self {
+    pub fn attach(mut self, attach: Anchor) -> Self {
         self.attach = Some(attach);
         self
     }
@@ -223,7 +231,6 @@ impl<M: ManagedView> Element for RightClickMenu<M> {
 
                 if let Some(mut menu) = request_layout.menu_element.take() {
                     menu.paint(window, cx);
-                    return;
                 }
 
                 let Some(builder) = this.menu_builder.take() else {
@@ -244,7 +251,9 @@ impl<M: ManagedView> Element for RightClickMenu<M> {
                         cx.stop_propagation();
                         window.prevent_default();
 
-                        let new_menu = (builder)(window, cx);
+                        let Some(new_menu) = (builder)(window, cx) else {
+                            return;
+                        };
                         let menu2 = menu.clone();
                         let previous_focus_handle = window.focused(cx);
 
@@ -254,13 +263,25 @@ impl<M: ManagedView> Element for RightClickMenu<M> {
                                     && let Some(previous_focus_handle) =
                                         previous_focus_handle.as_ref()
                                 {
-                                    window.focus(previous_focus_handle);
+                                    window.focus(previous_focus_handle, cx);
                                 }
                                 *menu2.borrow_mut() = None;
                                 window.refresh();
                             })
                             .detach();
-                        window.focus(&new_menu.focus_handle(cx));
+
+                        // Since menus are rendered in a deferred fashion, their focus handles are
+                        // not linked in the dispatch tree until after the deferred draw callback
+                        // runs. We need to wait for that to happen before focusing it, so that
+                        // calling `contains_focused` on the parent's focus handle returns `true`
+                        // when the menu is focused. This prevents the pane's tab bar buttons from
+                        // flickering when opening menus.
+                        let focus_handle = new_menu.focus_handle(cx);
+                        window.on_next_frame(move |window, _cx| {
+                            window.on_next_frame(move |window, cx| {
+                                window.focus(&focus_handle, cx);
+                            });
+                        });
                         *menu.borrow_mut() = Some(new_menu);
                         *position.borrow_mut() = if let Some(child_bounds) = child_bounds {
                             if let Some(attach) = attach {

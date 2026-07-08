@@ -3,7 +3,7 @@ use gpui::AnyElement;
 use crate::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BorderPosition {
+pub enum CalloutBorderPosition {
     Top,
     Bottom,
 }
@@ -30,10 +30,11 @@ pub struct Callout {
     icon: Option<IconName>,
     title: Option<SharedString>,
     description: Option<SharedString>,
+    description_slot: Option<AnyElement>,
     actions_slot: Option<AnyElement>,
     dismiss_action: Option<AnyElement>,
     line_height: Option<Pixels>,
-    border_position: BorderPosition,
+    border_position: CalloutBorderPosition,
 }
 
 impl Callout {
@@ -44,10 +45,11 @@ impl Callout {
             icon: None,
             title: None,
             description: None,
+            description_slot: None,
             actions_slot: None,
             dismiss_action: None,
             line_height: None,
-            border_position: BorderPosition::Top,
+            border_position: CalloutBorderPosition::Top,
         }
     }
 
@@ -76,6 +78,13 @@ impl Callout {
         self
     }
 
+    /// Allows for any element—like markdown elements—to fill the description slot of the callout.
+    /// This method wins over `description` if both happen to be set.
+    pub fn description_slot(mut self, description: impl IntoElement) -> Self {
+        self.description_slot = Some(description.into_any_element());
+        self
+    }
+
     /// Sets the primary call-to-action button.
     pub fn actions_slot(mut self, action: impl IntoElement) -> Self {
         self.actions_slot = Some(action.into_any_element());
@@ -96,7 +105,7 @@ impl Callout {
     }
 
     /// Sets the border position in the callout.
-    pub fn border_position(mut self, border_position: BorderPosition) -> Self {
+    pub fn border_position(mut self, border_position: CalloutBorderPosition) -> Self {
         self.border_position = border_position;
         self
     }
@@ -112,7 +121,7 @@ impl RenderOnce for Callout {
             Severity::Info => (
                 IconName::Info,
                 Color::Muted,
-                cx.theme().colors().panel_background.opacity(0.),
+                cx.theme().status().info_background.opacity(0.1),
             ),
             Severity::Success => (
                 IconName::Check,
@@ -138,8 +147,8 @@ impl RenderOnce for Callout {
             .gap_2()
             .items_start()
             .map(|this| match self.border_position {
-                BorderPosition::Top => this.border_t_1(),
-                BorderPosition::Bottom => this.border_b_1(),
+                CalloutBorderPosition::Top => this.border_t_1(),
+                CalloutBorderPosition::Bottom => this.border_b_1(),
             })
             .border_color(cx.theme().colors().border)
             .bg(bg_color)
@@ -155,6 +164,7 @@ impl RenderOnce for Callout {
             .child(
                 v_flex()
                     .min_w_0()
+                    .min_h_0()
                     .w_full()
                     .child(
                         h_flex()
@@ -164,7 +174,12 @@ impl RenderOnce for Callout {
                             .justify_between()
                             .flex_wrap()
                             .when_some(self.title, |this, title| {
-                                this.child(h_flex().child(Label::new(title).size(LabelSize::Small)))
+                                this.child(
+                                    div()
+                                        .min_w_0()
+                                        .flex_1()
+                                        .child(Label::new(title).size(LabelSize::Small)),
+                                )
                             })
                             .when(has_actions, |this| {
                                 this.child(
@@ -179,15 +194,26 @@ impl RenderOnce for Callout {
                                 )
                             }),
                     )
-                    .when_some(self.description, |this, description| {
-                        this.child(
-                            div()
-                                .w_full()
-                                .flex_1()
-                                .text_ui_sm(cx)
-                                .text_color(cx.theme().colors().text_muted)
-                                .child(description),
-                        )
+                    .map(|this| {
+                        let base_desc_container = div()
+                            .id("callout-description-slot")
+                            .w_full()
+                            .max_h_32()
+                            .flex_1()
+                            .overflow_y_scroll()
+                            .text_ui_sm(cx);
+
+                        if let Some(description_slot) = self.description_slot {
+                            this.child(base_desc_container.child(description_slot))
+                        } else if let Some(description) = self.description {
+                            this.child(
+                                base_desc_container
+                                    .text_color(cx.theme().colors().text_muted)
+                                    .child(description),
+                            )
+                        } else {
+                            this
+                        }
                     }),
             )
     }
@@ -198,13 +224,14 @@ impl Component for Callout {
         ComponentScope::DataDisplay
     }
 
-    fn description() -> Option<&'static str> {
-        Some(
-            "Used to display a callout for situations where the user needs to know some information, and likely make a decision. This might be a thread running out of tokens, or running out of prompts on a plan and needing to upgrade.",
-        )
+    fn description() -> &'static str {
+        "Used to display a callout for situations where the user \
+        needs to know some information, and likely make a decision. \
+        This might be a thread running out of tokens, \
+        or running out of prompts on a plan and needing to upgrade."
     }
 
-    fn preview(_window: &mut Window, _cx: &mut App) -> Option<AnyElement> {
+    fn preview(_window: &mut Window, _cx: &mut App) -> AnyElement {
         let single_action = || Button::new("got-it", "Got it").label_size(LabelSize::Small);
         let multiple_actions = || {
             h_flex()
@@ -255,6 +282,39 @@ impl Component for Callout {
                     .into_any_element(),
             )
             .width(px(580.)),
+            single_example(
+                "Scrollable Long Description",
+                Callout::new()
+                    .severity(Severity::Error)
+                    .icon(IconName::XCircle)
+                    .title("Very Long API Error Description")
+                    .description_slot(
+                        v_flex().gap_1().children(
+                            [
+                                "You exceeded your current quota.",
+                                "For more information, visit the docs.",
+                                "Error details:",
+                                "• Quota exceeded for metric",
+                                "• Limit: 0",
+                                "• Model: gemini-3.1-pro",
+                                "Please retry in 26.33s.",
+                                "Additional details:",
+                                "- Request ID: abc123def456",
+                                "- Timestamp: 2024-01-15T10:30:00Z",
+                                "- Region: us-central1",
+                                "- Service: generativelanguage.googleapis.com",
+                                "- Error Code: RESOURCE_EXHAUSTED",
+                                "- Retry After: 26s",
+                                "This error occurs when you have exceeded your API quota.",
+                            ]
+                            .into_iter()
+                            .map(|t| Label::new(t).size(LabelSize::Small).color(Color::Muted)),
+                        ),
+                    )
+                    .actions_slot(single_action())
+                    .into_any_element(),
+            )
+            .width(px(580.)),
         ];
 
         let severity_examples = vec![
@@ -295,12 +355,10 @@ impl Component for Callout {
             ),
         ];
 
-        Some(
-            v_flex()
-                .gap_4()
-                .child(example_group(basic_examples).vertical())
-                .child(example_group_with_title("Severity", severity_examples).vertical())
-                .into_any_element(),
-        )
+        v_flex()
+            .gap_4()
+            .child(example_group(basic_examples).vertical())
+            .child(example_group_with_title("Severity", severity_examples).vertical())
+            .into_any_element()
     }
 }

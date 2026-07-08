@@ -1,14 +1,14 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use client::ExtensionMetadata;
+use cloud_api_types::ExtensionMetadata;
 use extension_host::ExtensionStore;
 use fs::Fs;
 use fuzzy::{StringMatch, StringMatchCandidate, match_strings};
 use gpui::{App, DismissEvent, Entity, EventEmitter, Focusable, Task, WeakEntity, prelude::*};
 use picker::{Picker, PickerDelegate};
 use release_channel::ReleaseChannel;
-use semantic_version::SemanticVersion;
+use semver::Version;
 use settings::update_settings_file;
 use ui::{HighlightedLabel, ListItem, ListItemSpacing, prelude::*};
 use util::ResultExt;
@@ -30,7 +30,7 @@ impl Focusable for ExtensionVersionSelector {
 
 impl Render for ExtensionVersionSelector {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex().w(rems(34.)).child(self.picker.clone())
+        v_flex().child(self.picker.clone())
     }
 }
 
@@ -60,8 +60,8 @@ impl ExtensionVersionSelectorDelegate {
         mut extension_versions: Vec<ExtensionMetadata>,
     ) -> Self {
         extension_versions.sort_unstable_by(|a, b| {
-            let a_version = SemanticVersion::from_str(&a.manifest.version);
-            let b_version = SemanticVersion::from_str(&b.manifest.version);
+            let a_version = Version::from_str(&a.manifest.version);
+            let b_version = Version::from_str(&b.manifest.version);
 
             match (a_version, b_version) {
                 (Ok(a_version), Ok(b_version)) => b_version.cmp(&a_version),
@@ -91,6 +91,10 @@ impl ExtensionVersionSelectorDelegate {
 
 impl PickerDelegate for ExtensionVersionSelectorDelegate {
     type ListItem = ui::ListItem;
+
+    fn name() -> &'static str {
+        "extension version selector"
+    }
 
     fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> Arc<str> {
         "Select extension version...".into()
