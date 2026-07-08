@@ -246,6 +246,58 @@ impl PythonEnvKernelSpecification {
             Some("uv" | "uv (Workspace)")
         )
     }
+
+    /// Build a spec for a Python interpreter at `python_path`, setting `PATH`
+    /// and `VIRTUAL_ENV` so the kernel launches inside that environment. Used
+    /// when creating a new venv (the interpreter isn't discovered yet).
+    pub fn from_python_path(
+        python_path: PathBuf,
+        display_name: String,
+        has_ipykernel: bool,
+        environment_kind: Option<String>,
+    ) -> Self {
+        let python_path_str = python_path.to_string_lossy().to_string();
+
+        let mut env = HashMap::new();
+        if let Some(python_bin_dir) = python_path.parent() {
+            if let Some(path_var) = std::env::var_os("PATH") {
+                let mut paths = std::env::split_paths(&path_var).collect::<Vec<_>>();
+                paths.insert(0, python_bin_dir.to_path_buf());
+                if let Ok(new_path) = std::env::join_paths(paths) {
+                    env.insert("PATH".to_string(), new_path.to_string_lossy().to_string());
+                }
+            }
+            if let Some(venv_root) = python_bin_dir.parent() {
+                env.insert(
+                    "VIRTUAL_ENV".to_string(),
+                    venv_root.to_string_lossy().to_string(),
+                );
+            }
+        }
+
+        let kernelspec = JupyterKernelspec {
+            argv: vec![
+                python_path_str,
+                "-m".to_string(),
+                "ipykernel_launcher".to_string(),
+                "-f".to_string(),
+                "{connection_file}".to_string(),
+            ],
+            display_name: display_name.clone(),
+            language: "python".to_string(),
+            interrupt_mode: None,
+            metadata: None,
+            env: Some(env),
+        };
+
+        Self {
+            name: display_name,
+            path: python_path,
+            kernelspec,
+            has_ipykernel,
+            environment_kind,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

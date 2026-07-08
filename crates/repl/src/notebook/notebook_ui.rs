@@ -21,8 +21,9 @@ use project::{Project, ProjectEntryId, ProjectPath};
 use settings::Settings as _;
 use ui::{CommonAnimationExt, Tooltip, prelude::*};
 use workspace::item::{ItemEvent, SaveOptions, TabContentParams};
+use workspace::notifications::NotificationId;
 use workspace::searchable::SearchableItemHandle;
-use workspace::{Item, ItemHandle, Pane, ProjectItem, ToolbarItemLocation};
+use workspace::{Item, ItemHandle, Pane, ProjectItem, ToolbarItemLocation, Workspace};
 
 use super::{Cell, CellEvent, CellPosition, MarkdownCellEvent, RenderableCell};
 
@@ -34,7 +35,8 @@ use uuid::Uuid;
 use crate::components::{KernelPickerDelegate, KernelSelector};
 use crate::kernels::{
     Kernel, KernelSession, KernelSpecification, KernelStatus, LocalKernelSpecification,
-    NativeRunningKernel, RemoteRunningKernel, SshRunningKernel, WslRunningKernel,
+    NativeRunningKernel, PythonEnvKernelSpecification, RemoteRunningKernel, SshRunningKernel,
+    WslRunningKernel,
 };
 use crate::notebook::MovementDirection;
 use crate::repl_store::ReplStore;
@@ -382,6 +384,171 @@ impl NotebookEditor {
             // kernel. Any cell that triggered this is already queued and will
             // run once a kernel is picked and ready.
             self.kernel_picker_handle.show(window, cx);
+        }
+    }
+
+    /// Create a `.venv` in the worktree root, install ipykernel into it, and
+    /// select it — the "Create Python Environment" flow from the kernel picker.
+    fn create_python_environment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.kernel_picker_handle.hide(cx);
+
+        let Some(worktree_root) = self
+            .project
+            .read(cx)
+            .worktree_for_id(self.worktree_id, cx)
+            .map(|worktree| worktree.read(cx).abs_path().to_path_buf())
+        else {
+            Self::show_env_toast(
+                window,
+                cx,
+                "Cannot create a Python environment: no project folder is open.".to_string(),
+                false,
+            );
+            return;
+        };
+
+        let fs = self.project.read(cx).fs().clone();
+        let venv_dir = worktree_root.join(".venv");
+        let venv_python = if cfg!(windows) {
+            venv_dir.join("Scripts").join("python.exe")
+        } else {
+            venv_dir.join("bin").join("python")
+        };
+
+        struct CreatePythonEnv;
+        let notification_id = NotificationId::unique::<CreatePythonEnv>();
+        let workspace = Workspace::for_window(window, cx);
+        if let Some(workspace) = &workspace {
+            workspace.update(cx, |workspace, cx| {
+                workspace.show_toast(
+                    workspace::Toast::new(
+                        notification_id.clone(),
+                        "Creating .venv and installing ipykernel…".to_string(),
+                    ),
+                    cx,
+                );
+            });
+        }
+        let weak_workspace = workspace.map(|workspace| workspace.downgrade());
+
+        let create_task = cx.background_spawn(async move {
+            // Create the venv unless one already exists (reuse it if so).
+            if !fs.is_file(&venv_python).await {
+                    let mut last_error = String::new();
+                    let mut created = false;
+                    for base_python in ["python3", "python"] {
+                        match util::command::new_command(base_python)
+                            .arg("-m")
+                            .arg("venv")
+                            .arg(&venv_dir)
+                            .output()
+                            .await
+                        {
+                            Ok(output) if output.status.success() => {
+                                created = true;
+                                break;
+                            }
+                            Ok(output) => {
+                                last_error = String::from_utf8_lossy(&output.stderr)
+                                    .lines()
+                                    .last()
+                                    .unwrap_or("")
+                                    .to_string();
+                            }
+                            Err(error) => last_error = error.to_string(),
+                        }
+                    }
+                    anyhow::ensure!(
+                        created,
+                        "could not create .venv (is Python installed and on PATH?): {last_error}"
+                    );
+                }
+
+                let output = util::command::new_command(venv_python.to_string_lossy().as_ref())
+                    .args(["-m", "pip", "install", "ipykernel"])
+                    .output()
+                    .await
+                    .context("failed to run pip install ipykernel")?;
+                anyhow::ensure!(
+                    output.status.success(),
+                    "failed to install ipykernel: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                        .lines()
+                        .last()
+                        .unwrap_or("unknown error")
+                );
+
+            anyhow::Ok(venv_python)
+        });
+
+        cx.spawn_in(window, async move |this, cx| {
+            let result = create_task.await;
+            match result {
+                Ok(venv_python) => {
+                    if let Some(weak_workspace) = &weak_workspace {
+                        weak_workspace
+                            .update(cx, |workspace, cx| {
+                                workspace.dismiss_toast(&notification_id, cx);
+                                workspace.show_toast(
+                                    workspace::Toast::new(
+                                        notification_id.clone(),
+                                        "Created .venv and installed ipykernel".to_string(),
+                                    )
+                                    .autohide(),
+                                    cx,
+                                );
+                            })
+                            .ok();
+                    }
+                    this.update_in(cx, |this, window, cx| {
+                        let spec = KernelSpecification::PythonEnv(
+                            PythonEnvKernelSpecification::from_python_path(
+                                venv_python,
+                                ".venv".to_string(),
+                                true,
+                                Some("venv".to_string()),
+                            ),
+                        );
+                        this.change_kernel(spec, window, cx);
+                        this.refresh_kernelspecs(cx);
+                    })
+                    .ok();
+                }
+                Err(error) => {
+                    if let Some(weak_workspace) = &weak_workspace {
+                        weak_workspace
+                            .update(cx, |workspace, cx| {
+                                workspace.dismiss_toast(&notification_id, cx);
+                                workspace.show_toast(
+                                    workspace::Toast::new(
+                                        notification_id.clone(),
+                                        format!("Failed to create Python environment: {error}"),
+                                    ),
+                                    cx,
+                                );
+                            })
+                            .ok();
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn show_env_toast(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        message: String,
+        autohide: bool,
+    ) {
+        struct CreatePythonEnvError;
+        let notification_id = NotificationId::unique::<CreatePythonEnvError>();
+        if let Some(workspace) = Workspace::for_window(window, cx) {
+            workspace.update(cx, |workspace, cx| {
+                let toast = workspace::Toast::new(notification_id, message);
+                let toast = if autohide { toast.autohide() } else { toast };
+                workspace.show_toast(toast, cx);
+            });
         }
     }
 
@@ -1652,6 +1819,7 @@ impl NotebookEditor {
         let kernel_picker_handle = self.kernel_picker_handle.clone();
         let view = cx.entity().downgrade();
         let view_for_dismiss = view.clone();
+        let view_for_create = view.clone();
 
         h_flex()
             .w_full()
@@ -1688,6 +1856,13 @@ impl NotebookEditor {
                     if let Some(view) = view_for_dismiss.upgrade() {
                         view.update(cx, |this, cx| {
                             this.clear_awaiting_cells(cx);
+                        });
+                    }
+                }))
+                .with_create_env(std::rc::Rc::new(move |window, cx| {
+                    if let Some(view) = view_for_create.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.create_python_environment(window, cx);
                         });
                     }
                 }))

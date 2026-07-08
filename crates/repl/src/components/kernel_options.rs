@@ -10,6 +10,7 @@ use ui::{ListItem, ListItemSpacing, PopoverMenu, PopoverMenuHandle, PopoverTrigg
 
 type OnSelect = Box<dyn Fn(KernelSpecification, &mut Window, &mut App)>;
 type OnDismiss = Box<dyn Fn(&mut Window, &mut App)>;
+type OnCreateEnv = std::rc::Rc<dyn Fn(&mut Window, &mut App)>;
 
 #[derive(Clone)]
 pub enum KernelPickerEntry {
@@ -135,6 +136,7 @@ where
     handle: Option<PopoverMenuHandle<Picker<KernelPickerDelegate>>>,
     on_select: OnSelect,
     on_dismiss: Option<OnDismiss>,
+    on_create_env: Option<OnCreateEnv>,
     trigger: T,
     tooltip: TT,
     info_text: Option<SharedString>,
@@ -148,6 +150,7 @@ pub struct KernelPickerDelegate {
     selected_index: usize,
     on_select: OnSelect,
     on_dismiss: Option<OnDismiss>,
+    on_create_env: Option<OnCreateEnv>,
 }
 
 impl<T, TT> KernelSelector<T, TT>
@@ -159,12 +162,21 @@ where
         KernelSelector {
             on_select,
             on_dismiss: None,
+            on_create_env: None,
             handle: None,
             trigger,
             tooltip,
             info_text: None,
             worktree_id,
         }
+    }
+
+    /// Called when the user chooses "Create Python Environment" in the picker
+    /// footer. The callback is responsible for starting the creation flow and
+    /// dismissing the picker.
+    pub fn with_create_env(mut self, on_create_env: OnCreateEnv) -> Self {
+        self.on_create_env = Some(on_create_env);
+        self
     }
 
     pub fn with_handle(mut self, handle: PopoverMenuHandle<Picker<KernelPickerDelegate>>) -> Self {
@@ -458,6 +470,17 @@ impl PickerDelegate for KernelPickerDelegate {
                         )
                         .on_click(move |_, _, cx| cx.open_url(KERNEL_DOCS_URL)),
                 )
+                .when_some(self.on_create_env.clone(), |this, on_create_env| {
+                    this.child(
+                        Button::new("create-python-env", "Create Python Environment")
+                            .start_icon(
+                                Icon::new(IconName::Plus)
+                                    .size(IconSize::Small)
+                                    .color(Color::Muted),
+                            )
+                            .on_click(move |_, window, cx| on_create_env(window, cx)),
+                    )
+                })
                 .into_any(),
         )
     }
@@ -489,6 +512,7 @@ where
         let delegate = KernelPickerDelegate {
             on_select: self.on_select,
             on_dismiss: self.on_dismiss,
+            on_create_env: self.on_create_env,
             all_entries: all_entries.clone(),
             filtered_entries: all_entries,
             selected_kernelspec,

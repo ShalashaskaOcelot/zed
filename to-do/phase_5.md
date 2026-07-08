@@ -1,35 +1,60 @@
 # Phase 5 — Create Python environments from the kernel picker
 
+> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING (2026-07-08). Compiles,
+> clippy-clean, unit tests pass. Runtime behaviour NOT yet confirmed (needs a
+> real Python on PATH). Do NOT archive until the user confirms.
+>
+> Kind: **new feature** — on confirmation that it creates a venv, installs
+> ipykernel, and selects it, archive; any tweak/defect becomes a new item.
+
 Goal: VS Code-style "create new environment" from the kernel selector: create
 a `.venv` in the project, install ipykernel into it, and select it — without
 leaving Zed.
 
-Primary files: `crates/repl/src/components/kernel_options.rs` (picker),
-`crates/repl/src/repl_editor.rs` (`install_ipykernel_and_assign` — the
-template for the create flow), `crates/repl/src/repl_store.rs`
-(`refresh_python_kernelspecs`), `crates/languages/src/python.rs` (pet-based
-discovery; internal venv creation example at `python.rs:1740-1786`).
+Primary files: `crates/repl/src/components/kernel_options.rs` (picker footer +
+`on_create_env` callback), `crates/repl/src/notebook/notebook_ui.rs`
+(`create_python_environment`), `crates/repl/src/kernels/mod.rs`
+(`PythonEnvKernelSpecification::from_python_path`).
 
-## Tasks
+## Tasks (implemented — ⚠ = needs user confirmation)
 
-- [ ] Add a "Create Python Environment…" entry to the kernel picker (footer
-      or under the "Python Environments" section header).
-- [ ] Flow: pick a base interpreter (from the pet-discovered global pythons),
-      run `python -m venv .venv` in the worktree root (or `uv venv` when uv
-      is available — detection exists, `kernels/mod.rs:237-243`), stream
-      progress via toasts (same UX as `install_ipykernel_and_assign`).
-- [ ] Chain into the existing ipykernel auto-install
-      (`repl_editor.rs:78-202`) and then `assign_kernelspec` so the new env
-      becomes the active kernel immediately.
-- [ ] Refresh kernelspecs afterwards (`refresh_python_kernelspecs`) so the
-      new env appears in the picker with correct labels/recommended state.
-- [ ] Handle failure modes: no base python found, `.venv` already exists
-      (offer to use it), venv creation error (surface stderr in the toast).
-- [ ] Windows check: `Scripts/` vs `bin/` layout (see `BINARY_DIR` handling
-      in `python.rs:1789-1793`).
+- [x] "Create Python Environment" button in the kernel picker footer (next to
+      "Kernel Docs"), wired via a new `on_create_env` callback on
+      `KernelSelector`/`KernelPickerDelegate`. ⚠ untested
+- [x] Flow: `create_python_environment` runs `python3 -m venv .venv` (falls
+      back to `python`) in the worktree root, then installs ipykernel into it,
+      streaming progress via a workspace toast (same UX as
+      `install_ipykernel_and_assign`). ⚠ untested
+- [x] Selects the new env immediately via `change_kernel` using
+      `PythonEnvKernelSpecification::from_python_path` (sets PATH + VIRTUAL_ENV
+      like the pet-discovered specs). ⚠ untested
+- [x] Refreshes kernelspecs afterward so the env also appears in the picker. ⚠ untested
+- [x] Reuses an existing `.venv` if present (skips creation, still installs
+      ipykernel + selects). ⚠ untested
+- [x] Windows `Scripts/python.exe` vs `bin/python` handled via `cfg!(windows)`. ⚠ untested
+- [x] Failure toasts: no project folder, no base Python on PATH, venv/pip
+      errors (surface last stderr line). ⚠ untested
 
-## Notes
+## Known limitations / follow-ups (candidate backlog)
 
-- Conda environment creation is deliberately excluded (backlog) — different
-  tooling and slower creation; venv covers the primary ask.
-- pet re-discovery already finds new `.venv` dirs; no locator changes needed.
+- Base interpreter is chosen automatically (`python3` then `python` on PATH).
+  No UI to pick a specific base interpreter yet — add a base-interpreter
+  sub-picker if users need a non-default Python.
+- Always targets `.venv` in the worktree root; no custom name/location.
+- `uv venv` is not used even when uv is available (the notebook path uses
+  `python -m venv` + `pip`); wire uv for speed as a follow-up.
+- Conda creation remains out of scope (backlog).
+
+## Manual test checklist (for the user)
+
+- [ ] With no `.venv`: "Create Python Environment" creates one, installs
+      ipykernel, and the kernel switches to `.venv` (toast shows progress).
+- [ ] With an existing `.venv`: reuses it (installs ipykernel if missing) and
+      selects it.
+- [ ] No Python on PATH: a clear error toast appears.
+- [ ] The new `.venv` also shows up in the picker list afterward.
+
+## Verification (automated)
+
+- `cargo check -p repl` clean, `./script/clippy -p repl` clean.
+- `cargo test -p repl`: 37 passed, 0 failed.
