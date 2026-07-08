@@ -9,6 +9,7 @@ use std::sync::Arc;
 use ui::{ListItem, ListItemSpacing, PopoverMenu, PopoverMenuHandle, PopoverTrigger, prelude::*};
 
 type OnSelect = Box<dyn Fn(KernelSpecification, &mut Window, &mut App)>;
+type OnDismiss = Box<dyn Fn(&mut Window, &mut App)>;
 
 #[derive(Clone)]
 pub enum KernelPickerEntry {
@@ -133,6 +134,7 @@ where
 {
     handle: Option<PopoverMenuHandle<Picker<KernelPickerDelegate>>>,
     on_select: OnSelect,
+    on_dismiss: Option<OnDismiss>,
     trigger: T,
     tooltip: TT,
     info_text: Option<SharedString>,
@@ -145,6 +147,7 @@ pub struct KernelPickerDelegate {
     selected_kernelspec: Option<KernelSpecification>,
     selected_index: usize,
     on_select: OnSelect,
+    on_dismiss: Option<OnDismiss>,
 }
 
 impl<T, TT> KernelSelector<T, TT>
@@ -155,6 +158,7 @@ where
     pub fn new(on_select: OnSelect, worktree_id: WorktreeId, trigger: T, tooltip: TT) -> Self {
         KernelSelector {
             on_select,
+            on_dismiss: None,
             handle: None,
             trigger,
             tooltip,
@@ -165,6 +169,14 @@ where
 
     pub fn with_handle(mut self, handle: PopoverMenuHandle<Picker<KernelPickerDelegate>>) -> Self {
         self.handle = Some(handle);
+        self
+    }
+
+    /// Called when the picker is dismissed (both on selection and on cancel).
+    /// On selection, `on_select` runs first, so a dismiss handler that clears
+    /// pending state won't undo a just-made selection.
+    pub fn with_dismiss(mut self, on_dismiss: OnDismiss) -> Self {
+        self.on_dismiss = Some(on_dismiss);
         self
     }
 
@@ -306,7 +318,11 @@ impl PickerDelegate for KernelPickerDelegate {
         }
     }
 
-    fn dismissed(&mut self, _window: &mut Window, _cx: &mut Context<Picker<Self>>) {}
+    fn dismissed(&mut self, window: &mut Window, cx: &mut Context<Picker<Self>>) {
+        if let Some(on_dismiss) = &self.on_dismiss {
+            on_dismiss(window, cx);
+        }
+    }
 
     fn render_match(
         &self,
@@ -472,6 +488,7 @@ where
 
         let delegate = KernelPickerDelegate {
             on_select: self.on_select,
+            on_dismiss: self.on_dismiss,
             all_entries: all_entries.clone(),
             filtered_entries: all_entries,
             selected_kernelspec,

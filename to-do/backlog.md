@@ -29,6 +29,11 @@ Scheduled into phases (kept here only as a pointer):
   Dropped when fixing bugs.md #11 (the cell no longer queues on a no-kernel
   run to avoid the stuck-"Running" state); re-add the auto-run once the
   picker-dismiss lifecycle can be tracked cleanly.
+- Reset the per-cell execution counter (the number under each cell's run
+  button) when the kernel is restarted, so a fresh run-through is visually
+  distinct from a session with re-runs. (User 2026-07-08.) The count comes
+  from the kernel's `execute_input.execution_count` (`cell.rs`); on restart,
+  clear each cell's `execution_count` (and probably its outputs' counts).
 - Persist the per-notebook kernel choice across full Zed restarts (currently
   only within a session; user: "not a big deal"). Likely via the saved .ipynb
   metadata match or a persisted `ReplStore`. (Spun off from phase 6.)

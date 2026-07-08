@@ -108,6 +108,10 @@ pub struct NotebookEditor {
     kernel_specification: Option<KernelSpecification>,
     execution_requests: HashMap<String, CellId>,
     pending_executions: Vec<CellId>,
+    /// Cells the user tried to run while no kernel was selected. They are held
+    /// (not spinning) while the kernel picker is open: promoted to
+    /// `pending_executions` if a kernel is chosen, or cleared if it's dismissed.
+    cells_awaiting_kernel_choice: Vec<CellId>,
     kernel_picker_handle: PopoverMenuHandle<Picker<KernelPickerDelegate>>,
 }
 
@@ -220,6 +224,7 @@ impl NotebookEditor {
             kernel_specification: None,
             execution_requests: HashMap::default(),
             pending_executions: Vec::new(),
+            cells_awaiting_kernel_choice: Vec::new(),
             kernel_picker_handle: PopoverMenuHandle::default(),
         };
         // Lazy start: don't launch a kernel on open. Show the remembered
@@ -523,6 +528,10 @@ impl NotebookEditor {
             store.set_active_kernelspec(self.worktree_id, spec.clone(), cx);
         });
 
+        // Any cell the user ran before picking a kernel should now run once
+        // this kernel is ready.
+        self.promote_awaiting_cells();
+
         self.launch_kernel_with_spec(spec, window, cx);
     }
 
@@ -619,13 +628,19 @@ impl NotebookEditor {
 
         enum Disposition {
             Sent(String),
+            /// Queued to run when the (launching/starting) kernel is ready;
+            /// shows the running spinner now. `launch` starts a remembered
+            /// kernel.
             Queued { launch: bool },
-            /// No kernel selected/remembered: prompt the user to pick one and
-            /// do NOT queue or spin the cell, so dismissing the picker leaves
-            /// the cell in its idle initial state.
+            /// No kernel selected: prompt for one. The cell is held in
+            /// `cells_awaiting_kernel_choice` WITHOUT a spinner, so dismissing
+            /// the picker leaves it idle; it runs only if a kernel is chosen.
             Prompt,
             Failed(String),
         }
+
+        // Computed before borrowing `self.kernel` mutably below.
+        let has_remembered_kernel = self.remembered_kernel_spec(cx).is_some();
 
         let disposition = match &mut self.kernel {
             Kernel::RunningKernel(kernel) => {
@@ -642,11 +657,9 @@ impl NotebookEditor {
                     )),
                 }
             }
-            Kernel::StartingKernel(_) | Kernel::Restarting => {
-                Disposition::Queued { launch: false }
-            }
+            Kernel::StartingKernel(_) | Kernel::Restarting => Disposition::Queued { launch: false },
             Kernel::Shutdown | Kernel::ErroredLaunch(_) => {
-                if self.remembered_kernel_spec(cx).is_some() {
+                if has_remembered_kernel {
                     Disposition::Queued { launch: true }
                 } else {
                     Disposition::Prompt
@@ -656,7 +669,11 @@ impl NotebookEditor {
         };
 
         if let Disposition::Prompt = disposition {
-            // Open the kernel picker; leave the cell untouched (idle).
+            // Hold the cell (no spinner) and open the picker. It will run if a
+            // kernel is chosen (see change_kernel), or be cleared on dismiss.
+            if !self.cells_awaiting_kernel_choice.contains(&cell_id) {
+                self.cells_awaiting_kernel_choice.push(cell_id);
+            }
             self.launch_kernel(window, cx);
             return;
         }
@@ -686,12 +703,33 @@ impl NotebookEditor {
 
         match disposition {
             Disposition::Sent(msg_id) => {
+                // No longer pending — it's been submitted to the kernel.
+                self.pending_executions.retain(|id| id != &cell_id);
                 self.execution_requests.insert(msg_id, cell_id);
             }
             Disposition::Queued { .. } | Disposition::Prompt => {}
             Disposition::Failed(error) => {
                 log::error!("notebook: cannot execute cell: {error}");
             }
+        }
+    }
+
+    /// Promote cells that were waiting for a kernel choice into the pending
+    /// queue (they run once the newly-selected kernel is ready).
+    fn promote_awaiting_cells(&mut self) {
+        for cell_id in std::mem::take(&mut self.cells_awaiting_kernel_choice) {
+            if !self.pending_executions.contains(&cell_id) {
+                self.pending_executions.push(cell_id);
+            }
+        }
+    }
+
+    /// Clear cells that were waiting for a kernel choice (picker dismissed
+    /// without selecting). They return to their idle state.
+    fn clear_awaiting_cells(&mut self, cx: &mut Context<Self>) {
+        if !self.cells_awaiting_kernel_choice.is_empty() {
+            self.cells_awaiting_kernel_choice.clear();
+            cx.notify();
         }
     }
 
@@ -1089,6 +1127,8 @@ impl NotebookEditor {
         self.execution_requests
             .retain(|_, mapped| mapped != &cell_id);
         self.pending_executions.retain(|mapped| mapped != &cell_id);
+        self.cells_awaiting_kernel_choice
+            .retain(|mapped| mapped != &cell_id);
         self.cell_list.splice(index..index + 1, 0);
 
         self.selected_cell_index = index.min(self.cell_order.len().saturating_sub(1));
@@ -1140,6 +1180,8 @@ impl NotebookEditor {
         self.execution_requests
             .retain(|_, mapped| mapped != &cell_id);
         self.pending_executions.retain(|mapped| mapped != &cell_id);
+        self.cells_awaiting_kernel_choice
+            .retain(|mapped| mapped != &cell_id);
         self.cell_order[index] = new_cell_id.clone();
         self.cell_map.insert(new_cell_id, new_cell);
         // Length is unchanged, but the row must re-render as the new cell type.
@@ -1609,6 +1651,7 @@ impl NotebookEditor {
         let worktree_id = self.worktree_id;
         let kernel_picker_handle = self.kernel_picker_handle.clone();
         let view = cx.entity().downgrade();
+        let view_for_dismiss = view.clone();
 
         h_flex()
             .w_full()
@@ -1641,6 +1684,13 @@ impl NotebookEditor {
                         kernel_status.to_string()
                     )),
                 )
+                .with_dismiss(Box::new(move |_window, cx| {
+                    if let Some(view) = view_for_dismiss.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.clear_awaiting_cells(cx);
+                        });
+                    }
+                }))
                 .with_handle(kernel_picker_handle),
             )
             .child(

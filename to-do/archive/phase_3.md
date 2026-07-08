@@ -1,12 +1,9 @@
-# Phase 3 — Navigation and scrolling
+# Phase 3 — Navigation and scrolling (COMPLETE, archived 2026-07-08)
 
-> ⚠️ STATUS: PARTIALLY CONFIRMED (2026-07-08). Fit-aware reveal, natural fit,
-> and cursor-follow are CONFIRMED working by the user. Home/End was broken;
-> a fix has been pushed and is AWAITING RE-TEST. Do NOT archive until Home/End
-> is confirmed.
->
-> Kind: **mixed**. The confirmed items are done; Home/End stays open until the
-> re-test confirms it (change/fix — fixed in place, not re-filed).
+> STATUS: CONFIRMED by the user 2026-07-08. Fit-aware reveal, natural fit,
+> cursor-follow, and Home/End (via dedicated `notebook::SelectFirstCell`/
+> `SelectLastCell` actions) all confirmed working. Kind: mixed — all items
+> resolved.
 
 Goal: nav-mode cell navigation and edit-mode cursor movement keep the right
 thing in view.

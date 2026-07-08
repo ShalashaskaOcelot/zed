@@ -159,21 +159,24 @@ confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
 - **Fix attempted:** none (investigated; deferred pending the answers above)
 - **Tested:** n/a
 
-## 11. Kernel-select prompt leaves the cell stuck "Running" on dismiss
+## 11. Kernel-select prompt: cell state on dismiss vs. select
 
-- **Status:** fix attempted - untested
+- **Status:** fix attempted - untested (second attempt)
 - **Symptom:** (user 2026-07-08) Running a cell with no kernel opens the
-  picker; pressing Esc (dismiss) leaves the cell showing "Running…" (really
-  queued) forever instead of resetting to idle.
-- **Analysis:** The lazy-start path queued the cell and showed the running
-  spinner before the kernel was chosen; dismissing left it queued/spinning.
-- **Fix attempted:** `execute_cell` now, when the kernel is shut down/errored
-  and NO kernel is remembered, opens the picker WITHOUT queuing or spinning
-  the cell (new `Disposition::Prompt`). Esc therefore leaves the cell idle.
-  Trade-off: the triggering cell no longer auto-runs after picking a kernel
-  from the prompt — the user picks, then runs again. (Auto-run-after-pick is
-  filed as a backlog enhancement.)
-- **Tested:** no — needs user confirmation.
+  picker. Round 1: Esc left the cell stuck "Running". First fix removed the
+  spinner but ALSO dropped the queue, so selecting a kernel afterwards did
+  nothing (round 2 report). Desired: run → prompt → SELECT → the cell runs;
+  run → prompt → ESC → the cell is fully reset AND the queue cleared.
+- **Fix attempted (round 2):** `execute_cell` now holds a no-kernel run in a
+  separate `cells_awaiting_kernel_choice` list WITHOUT a spinner (new
+  `Disposition::Prompt`) and opens the picker. `change_kernel` promotes those
+  cells into `pending_executions` so they run once the chosen kernel is ready.
+  A new `on_dismiss` callback on the kernel picker clears
+  `cells_awaiting_kernel_choice` when the picker closes — which is harmless
+  after a selection (already promoted) and fully resets the cell on Esc.
+  Delete/convert also drop cells from the awaiting list.
+- **Tested:** no — needs user confirmation of BOTH paths (select runs it; Esc
+  clears it).
 
 ## 12. "Clear all outputs" sometimes needed several presses
 
