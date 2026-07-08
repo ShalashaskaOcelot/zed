@@ -655,6 +655,48 @@ impl ListState {
         state.logical_scroll_top = Some(scroll_top);
     }
 
+    /// Scroll to reveal `ix`, but if the item is taller than the viewport,
+    /// align its top edge to the top of the viewport rather than revealing its
+    /// bottom edge. Items that fit within the viewport use the same minimal
+    /// reveal as [`scroll_to_reveal_item`].
+    ///
+    /// This is useful for cell/section navigation where landing on the top of
+    /// a too-tall item reads better than landing on its bottom.
+    pub fn scroll_to_reveal_item_top_aligned(&self, ix: usize) {
+        let fits = {
+            let state = &*self.0.borrow();
+            let viewport_height = state
+                .last_layout_bounds
+                .map_or(px(0.), |bounds| bounds.size.height);
+            let padding = state.last_padding.unwrap_or_default();
+            let available = (viewport_height - padding.top - padding.bottom).max(px(0.));
+
+            let mut cursor = state.items.cursor::<ListItemSummary>(());
+            cursor.seek(&Count(ix), Bias::Right);
+            let item_top = cursor.start().height;
+            cursor.seek(&Count(ix + 1), Bias::Right);
+            let item_bottom = cursor.start().height;
+            let item_height = item_bottom - item_top;
+
+            // If we have no measurements yet, fall back to the normal reveal.
+            available <= px(0.) || item_height <= available
+        };
+
+        if fits {
+            self.scroll_to_reveal_item(ix);
+            return;
+        }
+
+        // Too tall to fit: pin the item's top to the top of the viewport.
+        let state = &mut *self.0.borrow_mut();
+        let scroll_top = ListOffset {
+            item_ix: ix,
+            offset_in_item: px(0.),
+        };
+        state.rebase_pending_scroll(scroll_top);
+        state.logical_scroll_top = Some(scroll_top);
+    }
+
     /// Get the bounds for the given item in window coordinates, if it's
     /// been rendered.
     pub fn bounds_for_item(&self, ix: usize) -> Option<Bounds<Pixels>> {

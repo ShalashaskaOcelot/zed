@@ -1502,6 +1502,8 @@
       "d d": "notebook::DeleteCell",
       "m": "notebook::ConvertToMarkdown",
       "y": "notebook::ConvertToCode",
+      "home": "menu::SelectFirst",
+      "end": "menu::SelectLast",
     },
   },
   {

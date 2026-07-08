@@ -3,6 +3,11 @@
 > ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING (2026-07-08). Compiles,
 > clippy-clean, unit tests pass. Runtime behaviour NOT yet confirmed. Do NOT
 > archive until the user confirms. Ask periodically.
+>
+> Kind: **change to existing behaviour** — persistence and lazy start modify
+> how kernel selection/startup already works. Keep each item OPEN until the
+> user confirms the new behaviour actually takes effect; if it still behaves
+> the old way, leave the item open and fix in place (do not re-file elsewhere).
 
 Goal: stop forgetting the user's kernel choice, and stop auto-starting a
 (usually wrong) global kernel on open. Match VS Code: no kernel runs until one

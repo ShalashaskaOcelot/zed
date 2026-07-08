@@ -3,6 +3,12 @@
 Non-phased suggestions and to-do items. Move an item into a `phase_<n>.md`
 when it is scheduled; never implement directly from here.
 
+- Bind the "smart arrows" (`NotebookMoveUp`/`NotebookMoveDown`) to up/down in
+  edit mode so arrow travel crosses cell boundaries at the first/last line
+  (Jupyter/VS Code style). Deferred from phase 3: the handlers exist and are
+  registered but unbound; binding up/down in the `NotebookEditor > Editor`
+  context risks overriding completion-menu up/down navigation, which needs
+  runtime testing to get the context precedence right.
 - Cell hover controls: VS Code-style per-cell toolbar on the selected/hovered
   cell (run-above / run-below / delete / add-below), reusing the phase-4
   actions. Deferred out of phase 4 — the actions, keybinds, and the two

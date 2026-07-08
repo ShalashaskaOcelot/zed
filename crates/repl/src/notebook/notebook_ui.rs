@@ -157,9 +157,7 @@ impl NotebookEditor {
                     let cell_id_for_editor = cell_id.clone();
                     let editor = code_cell.read(cx).editor().clone();
                     cx.subscribe(&editor, move |this, _editor, event, cx| {
-                        if let editor::EditorEvent::Focused = event {
-                            this.select_cell_by_id(&cell_id_for_editor, cx);
-                        }
+                        this.on_cell_editor_event(&cell_id_for_editor, event, cx);
                     })
                     .detach();
                 }
@@ -188,9 +186,7 @@ impl NotebookEditor {
                     let cell_id_for_editor = cell_id.clone();
                     let editor = markdown_cell.read(cx).editor().clone();
                     cx.subscribe(&editor, move |this, _editor, event, cx| {
-                        if let editor::EditorEvent::Focused = event {
-                            this.select_cell_by_id(&cell_id_for_editor, cx);
-                        }
+                        this.on_cell_editor_event(&cell_id_for_editor, event, cx);
                     })
                     .detach();
                 }
@@ -938,9 +934,7 @@ impl NotebookEditor {
         let cell_id_for_editor = cell_id;
         let editor = code_cell.read(cx).editor().clone();
         cx.subscribe(&editor, move |this, _editor, event, cx| {
-            if let editor::EditorEvent::Focused = event {
-                this.select_cell_by_id(&cell_id_for_editor, cx);
-            }
+            this.on_cell_editor_event(&cell_id_for_editor, event, cx);
         })
         .detach();
     }
@@ -967,9 +961,7 @@ impl NotebookEditor {
         let cell_id_for_editor = cell_id;
         let editor = markdown_cell.read(cx).editor().clone();
         cx.subscribe(&editor, move |this, _editor, event, cx| {
-            if let editor::EditorEvent::Focused = event {
-                this.select_cell_by_id(&cell_id_for_editor, cx);
-            }
+            this.on_cell_editor_event(&cell_id_for_editor, event, cx);
         })
         .detach();
     }
@@ -1278,8 +1270,84 @@ impl NotebookEditor {
         }
     }
 
+    /// Shared handling for a cell editor's events: track focus for selection,
+    /// and follow the cursor while editing.
+    fn on_cell_editor_event(
+        &mut self,
+        cell_id: &CellId,
+        event: &editor::EditorEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            editor::EditorEvent::Focused => self.select_cell_by_id(cell_id, cx),
+            editor::EditorEvent::SelectionsChanged { .. } => {
+                if self.notebook_mode == NotebookMode::Edit
+                    && let Some(index) = self.cell_order.iter().position(|id| id == cell_id)
+                    && index == self.selected_cell_index
+                {
+                    self.follow_cursor_in_cell(index, cx);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn jump_to_cell(&mut self, index: usize, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.cell_list.scroll_to_reveal_item(index);
+        // Top-align a cell that doesn't fit the viewport (regardless of travel
+        // direction), otherwise minimally reveal it.
+        self.cell_list.scroll_to_reveal_item_top_aligned(index);
+    }
+
+    /// Keep the cursor visible while editing a tall cell: scroll the notebook
+    /// only when the cursor would fall outside the viewport (it does not keep
+    /// the cursor centered). Cell editors are `SizeByContent` and have no
+    /// internal scroll, so the outer list must follow the cursor.
+    fn follow_cursor_in_cell(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(cell) = self
+            .cell_order
+            .get(index)
+            .and_then(|id| self.cell_map.get(id))
+        else {
+            return;
+        };
+        let Some(editor) = cell.editor(cx).cloned() else {
+            return;
+        };
+
+        let (cursor_row, total_rows) = editor.update(cx, |editor, cx| {
+            let snapshot = editor.display_snapshot(cx);
+            let cursor_row = snapshot
+                .max_point()
+                .row()
+                .min(editor.selections.newest_display(&snapshot).head().row());
+            (cursor_row.0, snapshot.max_point().row().0)
+        });
+
+        let Some(cell_bounds) = self.cell_list.bounds_for_item(index) else {
+            // Not currently laid out (e.g. scrolled far away): reveal it.
+            self.cell_list.scroll_to_reveal_item_top_aligned(index);
+            return;
+        };
+        let viewport = self.cell_list.viewport_bounds();
+        if viewport.size.height <= px(0.) {
+            return;
+        }
+
+        // Estimate the cursor's vertical position by its fractional row within
+        // the cell's laid-out height. Approximate (the cell includes non-editor
+        // chrome) but only used to decide when to nudge the viewport.
+        let rows = (total_rows + 1).max(1) as f32;
+        let fraction = (cursor_row as f32 + 0.5) / rows;
+        let cursor_y = cell_bounds.top() + cell_bounds.size.height * fraction;
+
+        let margin = px(24.);
+        if cursor_y < viewport.top() + margin {
+            self.cell_list
+                .scroll_by(cursor_y - (viewport.top() + margin));
+        } else if cursor_y > viewport.bottom() - margin {
+            self.cell_list
+                .scroll_by(cursor_y - (viewport.bottom() - margin));
+        }
     }
 
     fn button_group(window: &mut Window, cx: &mut Context<Self>) -> Div {

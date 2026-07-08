@@ -4,6 +4,11 @@
 > Code is written, compiles, clippy-clean, and unit tests pass, but the
 > runtime behaviour has NOT been confirmed by the user yet. Do NOT archive
 > this phase until the user confirms. Ask periodically.
+>
+> Kind: **new feature** — every item adds functionality that did not exist
+> before. On confirmation that each feature is present and basically works,
+> archive the phase; any tweak or defect becomes a NEW item (backlog/phase for
+> changes, bugs.md for defects), not a reason to keep this phase open.
 
 Goal: bring the per-cell action set up to Jupyter/VS Code conventions and give
 the two dead ellipsis buttons real menus.

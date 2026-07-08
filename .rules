@@ -40,14 +40,46 @@ root. This system must be adhered to religiously.
    sit in the archive in an unfinished state.
 3. **Archive completed work immediately** so it is never accidentally
    re-implemented. When a phase completes, move its file to `to-do/archive/`
-   in the same commit that completes it. **Exception — runtime-testable
-   changes:** if a phase's work needs the user to run the app to confirm it
-   behaves correctly (most notebook/UI/kernel work does), the phase is
-   "implemented" but NOT "complete" until the user confirms. Keep the phase
-   file in `to-do/` with a `⚠️ AWAITING USER TESTING` header and a `⚠ untested`
-   marker next to each unconfirmed item, and periodically ask the user to
-   test. Only move it to `to-do/archive/` (and drop the markers) once the user
-   confirms it works. This mirrors the bug rule below.
+   in the same commit that completes it.
+
+   **Exception — runtime-testable work needs user confirmation before
+   archiving.** Most notebook/UI/kernel work can only be verified by running
+   the app. Such a phase is "implemented" once the code is written and merged,
+   but is NOT archived until the user has reviewed it. Keep it in `to-do/`
+   with a `⚠️ AWAITING USER TESTING` header, a `⚠ untested` marker per
+   unconfirmed item, and a "Kind" line (see below). Ask the user to test
+   periodically. At the confirmation step, resolve each item by its KIND — the
+   goal is to keep moving forward and never keep a "zombie" phase alive with
+   endless back-and-forth:
+
+   - **New feature (something that did not exist before):** once the user
+     confirms it is there and basically works, archive the phase (assuming
+     nothing in it is still unimplemented). Any refinement, tweak, or defect
+     found is a SEPARATE new item — a future phase or `backlog.md` entry for a
+     functionality change, or a `bugs.md` entry for a defect. Do NOT reopen or
+     re-add the same item; the feature was delivered.
+     - Example: "add a button that opens a menu." The button exists but the
+       user wants it moved, or the menu needs another entry, or it renders
+       wrong → archive the phase; file the move/addition as a backlog/phase
+       item and the render glitch as a bug.
+
+   - **Change to existing behaviour (the change itself is the deliverable):**
+     keep the item OPEN until the user confirms the change actually took
+     effect. If it still behaves as before (or worse), the change was not
+     implemented — do NOT archive and re-create the identical item elsewhere;
+     leave it open and fix it in place.
+     - Example: "navigation should always land at the top of a cell." If it
+       still lands at the bottom or skips the cell, the item stays open.
+
+   - **Bug fix:** same as a change — never close-and-reopen. Keep the bug at
+     `fix attempted - untested` until confirmed, then `fixed - confirmed` and
+     archive. The only time a new item is created is when the fix works but
+     introduces a genuinely new, distinct bug as a consequence — that goes in
+     `bugs.md` as its own entry.
+
+   Give every open phase file a `Kind:` line (`new feature` / `change to
+   existing behaviour` / `mixed`) so the right resolution is obvious at
+   confirmation time. For a `mixed` phase, resolve each item by its own kind.
 4. **Bugs:** when a fix is attempted, update the bug's status to
    `fix attempted - untested` with a note describing the fix. **Never attempt
    a further fix for a bug whose last fix is untested** — we don't know yet
