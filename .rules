@@ -1,3 +1,56 @@
+# Project purpose
+
+This fork of Zed exists to improve the current experimental Jupyter Notebook
+functionality and to add new notebook functionality. The notebook
+implementation lives primarily in `crates/repl/` (`src/notebook/`,
+`src/kernels/`, `src/outputs/`, `src/session.rs`). All work in this fork
+should serve that goal: fixing broken notebook behaviour, completing
+half-implemented features, and adding missing features (kernel lifecycle,
+cell-level actions, keyboard shortcuts, navigation/scrolling, environment
+management, etc.).
+
+# Phasing system
+
+All work is planned and tracked through the `to-do/` directory at the repo
+root. This system must be adhered to religiously.
+
+## Structure
+
+- `to-do/phase_<n>.md` — one file per phase. Each phase is a small,
+  self-contained chunk of work with a goal, a task list with checkboxes, and
+  status notes. Large tasks are broken up across phases rather than crammed
+  into one.
+- `to-do/backlog.md` — a simple bullet list of non-phased suggestions and
+  to-do items. Items move from here into a phase when they are scheduled.
+- `to-do/bugs.md` — a list of bugs. Each bug records: description, status
+  (`open` / `fix attempted - untested` / `fixed - confirmed`), what fix was
+  attempted (if any), and whether that fix has been tested by the user.
+- `to-do/archive/` — completed phase files and confirmed-fixed bugs are moved
+  here.
+
+## Rules
+
+1. **Never implement work that is not phased.** The only exception is bug
+   fixes, which are tracked in `bugs.md` instead. If a good idea comes up
+   mid-phase, add it to `backlog.md` or a future phase — do not implement it.
+2. **A phase file is archived only when every task in it is either completed
+   or explicitly re-phased/re-backlogged.** Any task not implemented in a
+   phase must be moved as a bullet to `backlog.md` or into a future
+   `phase_<n>.md` before the phase file is archived. A work item must never
+   sit in the archive in an unfinished state.
+3. **Archive completed work immediately** so it is never accidentally
+   re-implemented. When a phase completes, move its file to `to-do/archive/`
+   in the same commit that completes it.
+4. **Bugs:** when a fix is attempted, update the bug's status to
+   `fix attempted - untested` with a note describing the fix. **Never attempt
+   a further fix for a bug whose last fix is untested** — we don't know yet
+   whether the previous fix worked. Only after the user confirms the fix does
+   the status become `fixed - confirmed` (with a note on what fixed it), and
+   only then is the bug moved to the archive. An unconfirmed bug is never
+   archived.
+5. New bugs discovered at any time are added as line items to `bugs.md`
+   immediately, regardless of the current phase.
+
 # Rust coding guidelines
 
 * Prioritize code correctness and clarity. Speed and efficiency are secondary priorities unless otherwise specified.
