@@ -1,5 +1,6 @@
 #![allow(unused, dead_code)]
 use std::future::Future;
+use std::time::Duration;
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Context as _, Result};
@@ -39,8 +40,9 @@ use crate::notebook::MovementDirection;
 use crate::repl_store::ReplStore;
 
 use picker::Picker;
-use runtimelib::{ExecuteRequest, JupyterMessage, JupyterMessageContent};
+use runtimelib::{ExecuteRequest, JupyterMessage, JupyterMessageContent, ShutdownRequest};
 use ui::PopoverMenuHandle;
+use util::ResultExt as _;
 use zed_actions::editor::{MoveDown, MoveUp};
 use zed_actions::notebook::{
     AddCodeBlock, AddMarkdownBlock, ClearOutputs, EnterCommandMode, EnterEditMode, InterruptKernel,
@@ -104,6 +106,7 @@ pub struct NotebookEditor {
     kernel: Kernel,
     kernel_specification: Option<KernelSpecification>,
     execution_requests: HashMap<String, CellId>,
+    pending_executions: Vec<CellId>,
     kernel_picker_handle: PopoverMenuHandle<Picker<KernelPickerDelegate>>,
 }
 
@@ -219,6 +222,7 @@ impl NotebookEditor {
             kernel: Kernel::Shutdown,
             kernel_specification: None,
             execution_requests: HashMap::default(),
+            pending_executions: Vec::new(),
             kernel_picker_handle: PopoverMenuHandle::default(),
         };
         editor.launch_kernel(window, cx);
@@ -441,22 +445,39 @@ impl NotebookEditor {
         };
 
         let pending_kernel = cx
-            .spawn(async move |this, cx| {
+            .spawn_in(window, async move |this, cx| {
                 let kernel = kernel_task.await;
 
                 match kernel {
                     Ok(kernel) => {
-                        this.update(cx, |editor, cx| {
+                        this.update_in(cx, |editor, window, cx| {
                             editor.kernel = Kernel::RunningKernel(kernel);
                             cx.notify();
+                            for cell_id in std::mem::take(&mut editor.pending_executions) {
+                                editor.execute_cell(cell_id, window, cx);
+                            }
                         })
                         .ok();
                     }
                     Err(err) => {
                         log::error!("Kernel failed to start: {:?}", err);
-                        this.update(cx, |editor, cx| {
-                            editor.kernel = Kernel::ErroredLaunch(err.to_string());
+                        this.update_in(cx, |editor, window, cx| {
+                            let error_message = err.to_string();
+                            editor.kernel = Kernel::ErroredLaunch(error_message.clone());
                             cx.notify();
+                            for cell_id in std::mem::take(&mut editor.pending_executions) {
+                                if let Some(Cell::Code(cell)) = editor.cell_map.get(&cell_id) {
+                                    cell.update(cx, |cell, cx| {
+                                        cell.show_kernel_error(
+                                            &format!(
+                                                "the kernel failed to launch: {error_message}"
+                                            ),
+                                            window,
+                                            cx,
+                                        );
+                                    });
+                                }
+                            }
                         })
                         .ok();
                     }
@@ -484,20 +505,70 @@ impl NotebookEditor {
         }
 
         self.execution_requests.clear();
+        self.stop_executing_cells(cx);
 
         self.launch_kernel_with_spec(spec, window, cx);
     }
 
     fn restart_kernel(&mut self, _: &RestartKernel, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(spec) = self.kernel_specification.clone() {
-            if let Kernel::RunningKernel(kernel) = &mut self.kernel {
-                kernel.force_shutdown(window, cx).detach();
+        let Some(spec) = self.kernel_specification.clone() else {
+            return;
+        };
+
+        let kernel = std::mem::replace(&mut self.kernel, Kernel::Restarting);
+        self.execution_requests.clear();
+        self.stop_executing_cells(cx);
+        cx.notify();
+
+        match kernel {
+            Kernel::Restarting => {}
+            starting @ Kernel::StartingKernel(_) => {
+                // A launch is already in flight; let it finish rather than racing it.
+                self.kernel = starting;
             }
+            Kernel::RunningKernel(mut kernel) => {
+                let mut request_tx = kernel.request_tx();
 
-            self.kernel = Kernel::Restarting;
-            cx.notify();
+                cx.spawn_in(window, async move |this, cx| {
+                    let message: JupyterMessage = ShutdownRequest { restart: true }.into();
+                    request_tx.try_send(message).ok();
 
-            self.launch_kernel_with_spec(spec, window, cx);
+                    // Give the kernel a chance to exit gracefully and release
+                    // its sockets before force-killing and relaunching.
+                    cx.background_executor().timer(Duration::from_secs(1)).await;
+
+                    if let Ok(forced) =
+                        this.update_in(cx, |_, window, cx| kernel.force_shutdown(window, cx))
+                    {
+                        forced.await.log_err();
+                    }
+                    // Dropping the old kernel here cancels its message tasks
+                    // and removes its connection file before the relaunch.
+                    drop(kernel);
+
+                    this.update_in(cx, |this, window, cx| {
+                        this.launch_kernel_with_spec(spec, window, cx);
+                    })
+                    .ok();
+                })
+                .detach();
+            }
+            Kernel::ErroredLaunch(_) | Kernel::ShuttingDown | Kernel::Shutdown => {
+                self.launch_kernel_with_spec(spec, window, cx);
+            }
+        }
+    }
+
+    fn stop_executing_cells(&mut self, cx: &mut Context<Self>) {
+        for cell in self.cell_map.values() {
+            if let Cell::Code(code_cell) = cell {
+                code_cell.update(cx, |cell, cx| {
+                    if cell.is_executing() {
+                        cell.finish_execution();
+                        cx.notify();
+                    }
+                });
+            }
         }
     }
 
@@ -507,11 +578,18 @@ impl NotebookEditor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Kernel::RunningKernel(kernel) = &self.kernel {
-            let interrupt_request = runtimelib::InterruptRequest {};
-            let message: JupyterMessage = interrupt_request.into();
-            kernel.request_tx().try_send(message).ok();
-            cx.notify();
+        match &self.kernel {
+            Kernel::RunningKernel(kernel) => {
+                let interrupt_request = runtimelib::InterruptRequest {};
+                let message: JupyterMessage = interrupt_request.into();
+                if let Err(error) = kernel.request_tx().try_send(message) {
+                    log::error!("notebook: failed to send interrupt request to kernel: {error}");
+                }
+                cx.notify();
+            }
+            _ => {
+                log::warn!("notebook: interrupt requested but no kernel is running");
+            }
         }
     }
 
@@ -527,42 +605,64 @@ impl NotebookEditor {
             return;
         };
 
-        let request = ExecuteRequest {
-            code,
-            ..Default::default()
-        };
-        let message: JupyterMessage = request.into();
-        let msg_id = message.header.msg_id.clone();
+        enum Disposition {
+            Sent(String),
+            Queued { launch: bool },
+            Failed(String),
+        }
 
-        let send_result = match &mut self.kernel {
-            Kernel::RunningKernel(kernel) => kernel
-                .request_tx()
-                .try_send(message)
-                .map_err(|err| format!("failed to send execute request to kernel (the kernel process may have died): {err}")),
-            Kernel::StartingKernel(_) => Err("the kernel is still starting".to_string()),
-            Kernel::ErroredLaunch(error) => Err(format!("the kernel failed to launch: {error}")),
-            Kernel::ShuttingDown | Kernel::Shutdown => Err("the kernel is shut down".to_string()),
-            Kernel::Restarting => Err("the kernel is restarting".to_string()),
+        let disposition = match &mut self.kernel {
+            Kernel::RunningKernel(kernel) => {
+                let request = ExecuteRequest {
+                    code,
+                    ..Default::default()
+                };
+                let message: JupyterMessage = request.into();
+                let msg_id = message.header.msg_id.clone();
+                match kernel.request_tx().try_send(message) {
+                    Ok(()) => Disposition::Sent(msg_id),
+                    Err(err) => Disposition::Failed(format!(
+                        "failed to send execute request to kernel (the kernel process may have died): {err}"
+                    )),
+                }
+            }
+            Kernel::StartingKernel(_) | Kernel::Restarting => {
+                Disposition::Queued { launch: false }
+            }
+            Kernel::Shutdown | Kernel::ErroredLaunch(_) => Disposition::Queued { launch: true },
+            Kernel::ShuttingDown => Disposition::Failed("the kernel is shutting down".to_string()),
         };
+
+        if let Disposition::Queued { launch } = &disposition {
+            if !self.pending_executions.contains(&cell_id) {
+                self.pending_executions.push(cell_id.clone());
+            }
+            if *launch {
+                self.launch_kernel(window, cx);
+            }
+        }
 
         if let Some(Cell::Code(cell)) = self.cell_map.get(&cell_id) {
             cell.update(cx, |cell, cx| {
                 if cell.has_outputs() {
                     cell.clear_outputs();
                 }
-                if let Err(error) = &send_result {
-                    cell.show_kernel_error(error, window, cx);
-                } else {
-                    cell.start_execution();
+                match &disposition {
+                    Disposition::Failed(error) => cell.show_kernel_error(error, window, cx),
+                    Disposition::Sent(_) | Disposition::Queued { .. } => cell.start_execution(),
                 }
                 cx.notify();
             });
         }
 
-        if let Err(error) = send_result {
-            log::error!("notebook: cannot execute cell: {error}");
-        } else {
-            self.execution_requests.insert(msg_id, cell_id.clone());
+        match disposition {
+            Disposition::Sent(msg_id) => {
+                self.execution_requests.insert(msg_id, cell_id);
+            }
+            Disposition::Queued { .. } => {}
+            Disposition::Failed(error) => {
+                log::error!("notebook: cannot execute cell: {error}");
+            }
         }
     }
 
@@ -1253,7 +1353,7 @@ impl NotebookEditor {
                     .child(
                         IconButton::new("interrupt-kernel", IconName::Stop)
                             .icon_size(IconSize::Small)
-                            .disabled(!matches!(kernel_status, KernelStatus::Busy))
+                            .disabled(!kernel_status.is_connected())
                             .tooltip(|window, cx| {
                                 Tooltip::for_action("Interrupt Kernel", &InterruptKernel, cx)
                             })
@@ -1925,7 +2025,25 @@ impl KernelSession for NotebookEditor {
     }
 
     fn kernel_errored(&mut self, error_message: String, cx: &mut Context<Self>) {
+        // Errors from a kernel that is being torn down are expected; don't
+        // clobber the Restarting/ShuttingDown state with ErroredLaunch.
+        if self.kernel.is_shutting_down() {
+            log::info!("notebook: ignoring kernel error during shutdown/restart: {error_message}");
+            return;
+        }
         self.kernel = Kernel::ErroredLaunch(error_message);
+        self.execution_requests.clear();
+        self.stop_executing_cells(cx);
+        cx.notify();
+    }
+
+    fn kernel_exited(&mut self, cx: &mut Context<Self>) {
+        if self.kernel.is_shutting_down() {
+            return;
+        }
+        self.kernel = Kernel::Shutdown;
+        self.execution_requests.clear();
+        self.stop_executing_cells(cx);
         cx.notify();
     }
 }
@@ -2068,6 +2186,14 @@ mod tests {
         editor.update_in(cx, |editor, window, cx| {
             editor.run_current_cell(&Run, window, cx);
         });
+
+        // Running a cell with a dead kernel relaunches it and queues the
+        // execution; wait for that relaunch to fail again.
+        let pending_kernel = editor.read_with(cx, |editor, _| match &editor.kernel {
+            Kernel::StartingKernel(task) => task.clone(),
+            _ => panic!("running a cell after a failed launch should relaunch the kernel"),
+        });
+        pending_kernel.await;
 
         editor.read_with(cx, |editor, cx| {
             let cell_id = editor.cell_order.first().expect("notebook has one cell");

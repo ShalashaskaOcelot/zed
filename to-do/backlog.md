@@ -35,7 +35,10 @@ when it is scheduled; never implement directly from here.
 - Kernel autostart on notebook open (setting-gated), once bug #2 lands
 - Collapse/expand cell input and output (a `CellControlType` scaffold exists)
 - Consider surfacing kernel stderr in the UI on launch failure (the WSL path
-  captures it; native does not)
+  captures it; native now captures it on premature exit — extend to
+  post-connect failures)
+- Replace the fixed 500ms native-launch readiness sleep with a proper
+  kernel_info/heartbeat handshake (follow-up to bug #6 if 10054 persists)
 - Markdown cell rendered-preview toggle improvements (render on exit-edit)
 - Notebook-level "Run all above/below from toolbar" once per-cell variants
   (phase 4) prove out

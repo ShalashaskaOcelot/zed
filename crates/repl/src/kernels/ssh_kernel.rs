@@ -22,6 +22,7 @@ pub struct SshRunningKernel {
     working_directory: PathBuf,
     _ssh_tunnel_process: util::command::Child,
     _local_connection_file: PathBuf,
+    _message_tasks: Option<Task<()>>,
     kernel_id: String,
     project: Entity<Project>,
     project_id: u64,
@@ -237,7 +238,7 @@ impl SshRunningKernel {
             .await
             .context("failed to create stdin connection")?;
 
-            let (request_tx, stdin_tx) = start_kernel_tasks(
+            let (request_tx, stdin_tx, message_tasks) = start_kernel_tasks(
                 session.clone(),
                 output_socket,
                 shell_socket,
@@ -254,6 +255,7 @@ impl SshRunningKernel {
                 working_directory,
                 _ssh_tunnel_process: ssh_tunnel_process,
                 _local_connection_file: local_connection_file,
+                _message_tasks: Some(message_tasks),
                 kernel_id,
                 project,
                 project_id,
@@ -307,6 +309,7 @@ impl RunningKernel for SshRunningKernel {
     }
 
     fn kill(&mut self) {
+        self._message_tasks.take();
         self._ssh_tunnel_process.kill().log_err();
     }
 }

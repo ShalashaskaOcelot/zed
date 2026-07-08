@@ -97,6 +97,7 @@ pub fn start_kernel_tasks<S: KernelSession + 'static>(
 ) -> (
     futures::channel::mpsc::Sender<JupyterMessage>,
     futures::channel::mpsc::Sender<JupyterMessage>,
+    Task<()>,
 ) {
     let (mut shell_send, shell_recv) = shell_socket.split();
     let (mut control_send, control_recv) = control_socket.split();
@@ -173,7 +174,11 @@ pub fn start_kernel_tasks<S: KernelSession + 'static>(
         anyhow::Ok(())
     });
 
-    cx.spawn({
+    // This task must be owned by the running kernel (not detached) so that
+    // dropping a killed kernel cancels its message handling. Otherwise the
+    // stale recv task errors out asynchronously after the kill and clobbers
+    // the state of the replacement kernel with `ErroredLaunch`.
+    let message_tasks = cx.spawn({
         async move |cx| {
             async fn with_name(
                 name: &'static str,
@@ -196,15 +201,16 @@ pub fn start_kernel_tasks<S: KernelSession + 'static>(
                 }
             }
         }
-    })
-    .detach();
+    });
 
-    (request_tx, stdin_tx)
+    (request_tx, stdin_tx, message_tasks)
 }
 
 pub trait KernelSession: Sized {
     fn route(&mut self, message: &JupyterMessage, window: &mut Window, cx: &mut Context<Self>);
     fn kernel_errored(&mut self, error_message: String, cx: &mut Context<Self>);
+    /// The kernel process exited cleanly on its own (e.g. the user ran `exit()`).
+    fn kernel_exited(&mut self, cx: &mut Context<Self>);
 }
 
 #[derive(Debug, Clone)]

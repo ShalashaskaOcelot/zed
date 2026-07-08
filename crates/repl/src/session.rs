@@ -1024,4 +1024,12 @@ impl KernelSession for Session {
     fn kernel_errored(&mut self, error_message: String, cx: &mut Context<Self>) {
         self.kernel_errored(error_message, cx);
     }
+
+    fn kernel_exited(&mut self, cx: &mut Context<Self>) {
+        if self.kernel.is_shutting_down() {
+            return;
+        }
+        self.kernel(Kernel::Shutdown, cx);
+        cx.notify();
+    }
 }

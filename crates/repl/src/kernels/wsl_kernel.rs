@@ -43,6 +43,7 @@ pub struct WslRunningKernel {
     pub process: util::command::Child,
     connection_path: PathBuf,
     _process_status_task: Option<Task<()>>,
+    _message_tasks: Option<Task<()>>,
     pub working_directory: PathBuf,
     pub request_tx: mpsc::Sender<JupyterMessage>,
     pub stdin_tx: mpsc::Sender<JupyterMessage>,
@@ -107,7 +108,13 @@ impl WslRunningKernel {
             fs.create_dir(&runtime_dir)
                 .await
                 .with_context(|| format!("Failed to create jupyter runtime dir {runtime_dir:?}"))?;
-            let connection_path = runtime_dir.join(format!("kernel-zed-wsl-{entity_id}.json"));
+            // The path must be unique per launch, not just per entity: on
+            // restart the old kernel's Drop deletes its connection file, which
+            // would race with a relaunch reusing the same path.
+            let connection_path = runtime_dir.join(format!(
+                "kernel-zed-wsl-{entity_id}-{}.json",
+                uuid::Uuid::new_v4()
+            ));
             let content = serde_json::to_string(&connection_info)?;
             fs.atomic_write(connection_path.clone(), content).await?;
 
@@ -349,7 +356,7 @@ impl WslRunningKernel {
             )
             .await?;
 
-            let (request_tx, stdin_tx) = start_kernel_tasks(
+            let (request_tx, stdin_tx, message_tasks) = start_kernel_tasks(
                 session.clone(),
                 output_socket,
                 shell_socket,
@@ -386,6 +393,10 @@ impl WslRunningKernel {
                 let error_message = match status.await {
                     Ok(status) => {
                         if status.success() {
+                            session.update(cx, |session, cx| {
+                                session.kernel_exited(cx);
+                                cx.notify();
+                            });
                             return;
                         }
 
@@ -409,6 +420,7 @@ impl WslRunningKernel {
                 stdin_tx,
                 working_directory,
                 _process_status_task: Some(process_status_task),
+                _message_tasks: Some(message_tasks),
                 connection_path,
                 execution_state: ExecutionState::Idle,
                 kernel_info: None,
@@ -447,14 +459,13 @@ impl RunningKernel for WslRunningKernel {
     }
 
     fn force_shutdown(&mut self, _window: &mut Window, _cx: &mut App) -> Task<anyhow::Result<()>> {
-        self._process_status_task.take();
-        self.request_tx.close_channel();
-        self.process.kill().ok();
+        self.kill();
         Task::ready(Ok(()))
     }
 
     fn kill(&mut self) {
         self._process_status_task.take();
+        self._message_tasks.take();
         self.request_tx.close_channel();
         self.process.kill().ok();
     }

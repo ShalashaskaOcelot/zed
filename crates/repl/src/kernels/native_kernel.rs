@@ -94,6 +94,7 @@ pub struct NativeRunningKernel {
     pub process: util::process::Child,
     connection_path: PathBuf,
     _process_status_task: Option<Task<()>>,
+    _message_tasks: Option<Task<()>>,
     pub working_directory: PathBuf,
     pub request_tx: mpsc::Sender<JupyterMessage>,
     pub stdin_tx: mpsc::Sender<JupyterMessage>,
@@ -141,7 +142,11 @@ impl NativeRunningKernel {
             fs.create_dir(&runtime_dir)
                 .await
                 .with_context(|| format!("Failed to create jupyter runtime dir {runtime_dir:?}"))?;
-            let connection_path = runtime_dir.join(format!("kernel-zed-{entity_id}.json"));
+            // The path must be unique per launch, not just per entity: on
+            // restart the old kernel's Drop deletes its connection file, which
+            // would race with a relaunch reusing the same path.
+            let connection_path =
+                runtime_dir.join(format!("kernel-zed-{entity_id}-{}.json", Uuid::new_v4()));
             let content = serde_json::to_string(&connection_info)?;
             fs.atomic_write(connection_path.clone(), content).await?;
 
@@ -154,6 +159,29 @@ impl NativeRunningKernel {
                 std::process::Stdio::piped(),
                 std::process::Stdio::piped(),
             )?;
+
+            // A kernel that fails immediately (missing ipykernel, broken
+            // interpreter) would otherwise surface as a cryptic socket error
+            // when we connect below; catch the early exit here so we can
+            // report its stderr instead.
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(500))
+                .await;
+            if let Ok(Some(exit_status)) = process.try_status() {
+                let mut stderr_content = String::new();
+                if let Some(mut stderr) = process.stderr.take() {
+                    let mut bytes = Vec::new();
+                    if futures::AsyncReadExt::read_to_end(&mut stderr, &mut bytes)
+                        .await
+                        .is_ok()
+                    {
+                        stderr_content = String::from_utf8_lossy(&bytes).to_string();
+                    }
+                }
+                anyhow::bail!(
+                    "kernel process exited before connecting (status: {exit_status:?})\n{stderr_content}"
+                );
+            }
 
             let session_id = Uuid::new_v4().to_string();
 
@@ -177,7 +205,7 @@ impl NativeRunningKernel {
             )
             .await?;
 
-            let (request_tx, stdin_tx) = start_kernel_tasks(
+            let (request_tx, stdin_tx, message_tasks) = start_kernel_tasks(
                 session.clone(),
                 iopub_socket,
                 shell_socket,
@@ -222,6 +250,10 @@ impl NativeRunningKernel {
                     Ok(status) => {
                         if status.success() {
                             log::info!("kernel process exited successfully");
+                            session.update(cx, |session, cx| {
+                                session.kernel_exited(cx);
+                                cx.notify();
+                            });
                             return;
                         }
 
@@ -247,6 +279,7 @@ impl NativeRunningKernel {
                 stdin_tx,
                 working_directory,
                 _process_status_task: Some(process_status_task),
+                _message_tasks: Some(message_tasks),
                 connection_path,
                 execution_state: ExecutionState::Idle,
                 kernel_info: None,
@@ -291,6 +324,7 @@ impl RunningKernel for NativeRunningKernel {
 
     fn kill(&mut self) {
         self._process_status_task.take();
+        self._message_tasks.take();
         self.request_tx.close_channel();
         self.stdin_tx.close_channel();
         self.process.kill().ok();

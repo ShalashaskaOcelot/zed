@@ -14,7 +14,11 @@ Primary files: `crates/zed_actions/src/lib.rs` (action definitions),
 ### New actions + handlers
 
 - [ ] `DeleteCell` — remove selected cell (guard: never delete the last
-      remaining cell; select a sensible neighbour after).
+      remaining cell; select a sensible neighbour after). **Top priority in
+      this phase** (user, 2026-07-08): confirmed there is currently NO way to
+      delete a cell anywhere — no action exists, so it isn't in the command
+      palette either; once added a cell can only be removed by editing the
+      raw .ipynb externally.
 - [ ] `AddCellAbove` / `AddCellBelow` — `insert_cell_at_current_position`
       currently hardcodes insert-below (`notebook_ui.rs:763`); parameterise.
 - [ ] `RunCellsAbove` — run all cells above the selected cell.
@@ -52,6 +56,16 @@ Primary files: `crates/zed_actions/src/lib.rs` (action definitions),
 
 ## Notes
 
+- Existing notebook actions (add code/markdown cell, run, move cell, restart,
+  etc.) already show up in the command palette because they are registered
+  `actions!` handled via `.on_action` — any NEW action added in this phase
+  gets command-palette presence for free. There is no hidden delete-cell
+  action to surface; it genuinely does not exist yet.
+- Keybindings are attached to actions, not buttons: adding a keybind for
+  something that today is button-only (e.g. clear-all-outputs, which has no
+  binding) is just a keymap JSON entry dispatching the same action the button
+  dispatches — no new code needed. Note add code/markdown cell DO already
+  have bindings (`ctrl-m` / `ctrl-shift-m`; `cmd-` on macOS).
 - Cell mutations must mark the notebook dirty once bug #9 is fixed — if
   bug #9 isn't fixed yet, fixing it alongside `DeleteCell` is in scope here
   (it's a bug, so allowed regardless of phasing).
