@@ -226,7 +226,11 @@ impl NotebookEditor {
             pending_executions: Vec::new(),
             kernel_picker_handle: PopoverMenuHandle::default(),
         };
-        editor.launch_kernel(window, cx);
+        // Lazy start: don't launch a kernel on open. Show the remembered
+        // kernel's name if we can resolve one now (a real launch happens on
+        // first run or explicit selection); otherwise the status bar shows
+        // "Select Kernel" until the user picks or runs a cell.
+        editor.kernel_specification = editor.remembered_kernel_spec(cx);
         editor.refresh_language(cx);
         editor.refresh_kernelspecs(cx);
 
@@ -340,35 +344,44 @@ impl NotebookEditor {
         cx.notify();
     }
 
+    /// The kernel the notebook should use without any explicit choice yet:
+    /// an active in-session selection, a selection persisted for this worktree,
+    /// or one matching the notebook's saved metadata. Deliberately does NOT
+    /// fall back to the "recommended"/global kernel — an unremembered notebook
+    /// should prompt rather than silently start the wrong interpreter.
+    fn remembered_kernel_spec(&self, cx: &App) -> Option<KernelSpecification> {
+        if let Some(spec) = &self.kernel_specification {
+            return Some(spec.clone());
+        }
+        let store = ReplStore::global(cx);
+        let store = store.read(cx);
+        if let Some(spec) = store.selected_kernel(self.worktree_id) {
+            return Some(spec.clone());
+        }
+        let kernelspec = self
+            .notebook_item
+            .read(cx)
+            .notebook
+            .metadata
+            .kernelspec
+            .as_ref()?;
+        let name = kernelspec.name.clone();
+        store
+            .kernel_specifications_for_worktree(self.worktree_id)
+            .find(|spec| spec.name().as_ref() == name)
+            .cloned()
+    }
+
+    /// Launch the remembered kernel, or prompt for one if none is remembered.
     fn launch_kernel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let spec = self.kernel_specification.clone().or_else(|| {
-            ReplStore::global(cx)
-                .read(cx)
-                .active_kernelspec(self.worktree_id, None, cx)
-        });
-
-        let spec = spec.unwrap_or_else(|| {
-            KernelSpecification::Jupyter(LocalKernelSpecification {
-                name: "python3".to_string(),
-                path: PathBuf::from("python3"),
-                kernelspec: JupyterKernelspec {
-                    argv: vec![
-                        "python3".to_string(),
-                        "-m".to_string(),
-                        "ipykernel_launcher".to_string(),
-                        "-f".to_string(),
-                        "{connection_file}".to_string(),
-                    ],
-                    display_name: "Python 3".to_string(),
-                    language: "python".to_string(),
-                    interrupt_mode: None,
-                    metadata: None,
-                    env: None,
-                },
-            })
-        });
-
-        self.launch_kernel_with_spec(spec, window, cx);
+        if let Some(spec) = self.remembered_kernel_spec(cx) {
+            self.launch_kernel_with_spec(spec, window, cx);
+        } else {
+            // Nothing selected or remembered: prompt the user to choose a
+            // kernel. Any cell that triggered this is already queued and will
+            // run once a kernel is picked and ready.
+            self.kernel_picker_handle.show(window, cx);
+        }
     }
 
     fn launch_kernel_with_spec(
@@ -507,6 +520,12 @@ impl NotebookEditor {
 
         self.execution_requests.clear();
         self.stop_executing_cells(cx);
+
+        // Persist the choice for this worktree so reopening the notebook (or
+        // opening a sibling notebook) uses it instead of the global default.
+        ReplStore::global(cx).update(cx, |store, cx| {
+            store.set_active_kernelspec(self.worktree_id, spec.clone(), cx);
+        });
 
         self.launch_kernel_with_spec(spec, window, cx);
     }
@@ -2392,32 +2411,27 @@ mod tests {
             cx.new(|cx| NotebookEditor::new(project.clone(), notebook_item, window, cx))
         });
 
-        // Creating the editor launches the kernel. Wait for the actual launch
-        // task, which fails because the interpreter cannot be spawned.
-        let pending_kernel = editor.read_with(cx, |editor, _| match &editor.kernel {
-            Kernel::StartingKernel(task) => task.clone(),
-            _ => panic!("kernel should be starting right after the editor is created"),
-        });
-        pending_kernel.await;
-
+        // Lazy start: creating the editor does NOT launch a kernel; it stays
+        // shut down until a cell is run (or a kernel is explicitly selected).
         editor.read_with(cx, |editor, _| {
             assert!(
-                matches!(editor.kernel, Kernel::ErroredLaunch(_)),
-                "kernel launch should fail, instead status is: {}",
+                matches!(editor.kernel, Kernel::Shutdown),
+                "kernel should not start on open, instead status is: {}",
                 editor.kernel.status().to_string()
             );
         });
 
-        // Run the (only) cell via the production action handler.
+        // Run the (only) cell via the production action handler. This launches
+        // the remembered (broken) kernel and queues the execution.
         editor.update_in(cx, |editor, window, cx| {
             editor.run_current_cell(&Run, window, cx);
         });
 
-        // Running a cell with a dead kernel relaunches it and queues the
-        // execution; wait for that relaunch to fail again.
+        // Wait for the launch task, which fails because the interpreter cannot
+        // be spawned.
         let pending_kernel = editor.read_with(cx, |editor, _| match &editor.kernel {
             Kernel::StartingKernel(task) => task.clone(),
-            _ => panic!("running a cell after a failed launch should relaunch the kernel"),
+            _ => panic!("running a cell should launch the remembered kernel"),
         });
         pending_kernel.await;
 
