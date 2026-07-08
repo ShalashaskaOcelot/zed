@@ -58,26 +58,11 @@ Move to `to-do/archive/` only when `fixed - confirmed`.
   interrupt behaviour needs user confirmation on Windows (interrupt a
   long-running cell, e.g. `import time; time.sleep(30)`).
 
-## 4. "More options" toolbar button opens nothing
+(Bug #4 "More options button opens nothing" — fixed & confirmed 2026-07-08
+via phase 4's popover menu; moved to `archive/bugs-fixed.md`.)
 
-- **Status:** open
-- **Symptom:** The Ellipsis button at the bottom of the right toolbar does
-  nothing when clicked.
-- **Analysis:** Dead stub — tooltip only, no `on_click`, no popover
-  (`notebook_ui.rs:1124-1127`). No menu content was ever defined.
-- **Fix attempted:** none
-- **Tested:** n/a
-
-## 5. Output "..." (ellipsis) button next to cell output does nothing
-
-- **Status:** open
-- **Symptom:** Clicking the three-dot button next to a cell's output does
-  nothing.
-- **Analysis:** Bare `IconButton::new("control", IconName::Ellipsis)` with no
-  handler, no tooltip, no menu (`cell.rs:924-939`). The per-output-type copy
-  buttons in `outputs.rs:200-221` are separate and DO work.
-- **Fix attempted:** none
-- **Tested:** n/a
+(Bug #5 "Output ... button does nothing" — fixed & confirmed 2026-07-08 via
+phase 4's output menu; moved to `archive/bugs-fixed.md`.)
 
 ## 6. Native kernel launch is flaky on Windows (os error 10054)
 
@@ -152,16 +137,23 @@ confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
   `kernel_picker_handle.show()` (phase 6 lazy-start) — arrows reach it but
   Confirm does not. NEEDS RUNTIME DEBUGGING; not safe to guess-fix shared
   picker infra.
-- **Update (user 2026-07-08):** Enter fails NO MATTER how the picker is opened
-  (status-bar button and run-prompt alike). This rules out the phase-6
-  lazy-start `.show()` path — it's the popover-hosted `Picker` itself. Next
-  step (needs runtime): compare against another popover-hosted `Picker` (this
-  is the only one using `Picker::list(...).popover()`); check whether the
-  single-line query editor's key context provides `enter → menu::Confirm`
-  inside the popover, or whether the popover/editor is swallowing Enter as a
-  no-op/newline. Do NOT guess-fix shared picker infra without reproducing.
-- **Fix attempted:** none (investigated; still needs runtime reproduction)
-- **Tested:** n/a
+- **ROOT CAUSE (2026-07-08):** the user's diagnosis was right — the focused
+  query editor ate Enter as a newline. The kernel picker's popover is rendered
+  inside the `NotebookEditor` element tree, so its query editor matched the
+  notebook's OWN keymap context `"NotebookEditor > Editor"`, which binds
+  `enter → editor::Newline`. That binding matches at the editor node (deeper)
+  and beat the picker's `"Picker"` context `enter → menu::Confirm`, so Enter
+  inserted a newline instead of confirming. (Zed's GitBranchSelector avoids
+  this by scoping its editor bindings through `> Picker > Editor`.)
+- **Fix attempted:** gave the notebook's CELL editors a distinct
+  `NotebookCellEditor` key context (added to the div wrapping each cell's
+  editor in `cell.rs`) and changed the keymap context from
+  `"NotebookEditor > Editor"` to `"NotebookEditor > NotebookCellEditor >
+  Editor"` in all three keymaps. The picker's query editor is not inside a
+  `NotebookCellEditor`, so it no longer matches — Enter now resolves to the
+  picker's `menu::Confirm`.
+- **Tested:** no — needs user confirmation (Enter selects the kernel; cell
+  editors still get enter=newline / ctrl-enter=run / escape=command mode).
 
 (Bug #11 "Kernel-select prompt: cell state on dismiss vs. select" — fixed &
 confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)

@@ -591,6 +591,7 @@ impl Render for MarkdownCell {
                         .child(self.gutter(window, cx))
                         .child(
                             div()
+                                .key_context("NotebookCellEditor")
                                 .flex_1()
                                 .p_3()
                                 .bg(cx.theme().colors().editor_background)
@@ -1162,7 +1163,12 @@ impl Render for CodeCell {
                                 .border_1()
                                 .border_color(cx.theme().colors().border)
                                 .bg(cx.theme().colors().editor_background)
-                                .child(div().w_full().child(self.editor.clone()))
+                                .child(
+                                    div()
+                                        .key_context("NotebookCellEditor")
+                                        .w_full()
+                                        .child(self.editor.clone()),
+                                )
                                 // lang badge in top-right corner
                                 .when_some(language_name, |this, name| {
                                     this.child(

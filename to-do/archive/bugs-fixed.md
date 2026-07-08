@@ -4,6 +4,19 @@ Confirmed-fixed bugs moved out of `to-do/bugs.md`.
 
 ---
 
+## 4. "More options" toolbar button opens nothing
+
+- **Status:** fixed - confirmed (user 2026-07-08: "More options menu seems to
+  be working").
+- **Fix:** phase 4 wired the right-toolbar Ellipsis button to a `PopoverMenu` +
+  `ContextMenu` of cell actions.
+
+## 5. Output "..." (ellipsis) button next to cell output does nothing
+
+- **Status:** fixed - confirmed (user 2026-07-08: "output menu working").
+- **Fix:** phase 4 wired the per-output Ellipsis to a menu (Copy Output /
+  Clear Output).
+
 ## 11. Kernel-select prompt: cell state on dismiss vs. select
 
 - **Status:** fixed - confirmed (user 2026-07-08: "queued items now run
