@@ -4,6 +4,19 @@ Confirmed-fixed bugs moved out of `to-do/bugs.md`.
 
 ---
 
+## 11. Kernel-select prompt: cell state on dismiss vs. select
+
+- **Status:** fixed - confirmed (user 2026-07-08: "queued items now run
+  successfully on kernel selection and pressing esc does not cause it to keep
+  'running'").
+- **Symptom:** Running a cell with no kernel opened the picker; Esc left the
+  cell stuck "Running", and (after the first fix) selecting a kernel didn't
+  run the queued cell.
+- **Fix:** `execute_cell` holds a no-kernel run in `cells_awaiting_kernel_choice`
+  without a spinner and opens the picker; `change_kernel` promotes those cells
+  to run once the kernel is ready; a new `on_dismiss` picker callback clears
+  them on Esc. (commits b846cbe / 7e77a96 area)
+
 ## 1. Restart kernel kills the kernel but the relaunch fails
 
 - **Status:** fixed - confirmed (user, 2026-07-08: "Restart now working fine")

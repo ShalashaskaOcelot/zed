@@ -1,9 +1,36 @@
 # Phase 10 — Sequential multi-cell execution with stop-on-error
 
-> STATUS: PLANNED — not started. High priority: reported by user 2026-07-08.
+> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING (2026-07-08). Compiles,
+> clippy-clean, unit tests pass. Runtime behaviour NOT yet confirmed. Do NOT
+> archive until the user confirms.
 >
 > Kind: **change to existing behaviour** — changes how "Run all" / "Run cells
-> above" / "Run cell and below" behave when a cell fails.
+> above" / "Run cell and below" behave when a cell fails. Keep OPEN until the
+> user confirms the batch actually stops on failure.
+>
+> ## Implementation summary
+> - Added a `run_queue: Vec<CellId>` + `active_run_cell: Option<CellId>` to
+>   `NotebookEditor`. Batch runs (`run_cells` / `run_cells_above` /
+>   `run_cell_and_below`) now go through `run_cell_batch` → `advance_run_queue`,
+>   which submits ONE code cell at a time and waits.
+> - `route` watches for the active cell's `ExecuteReply`: `ReplyStatus::Ok`
+>   advances to the next queued cell; `ReplyStatus::Error` clears the rest of
+>   the queue (stop-on-error).
+> - `cancel_run_queue` aborts the batch on interrupt, restart, kernel error,
+>   clean exit, launch failure, picker dismiss, and delete/convert of a queued
+>   cell.
+> - Batch + no-kernel: the first cell is held awaiting a kernel choice and the
+>   queue is preserved; `change_kernel` keeps the queue when it's satisfying a
+>   prompt (awaiting non-empty) but cancels it on a deliberate switch.
+> - Single-cell runs keep their direct `execute_cell` path.
+>
+> ## Manual test checklist (for the user)
+> - [ ] Run All with a mid-notebook cell that raises: cells after it do NOT run.
+> - [ ] Run All with a dead kernel: only the first errors; the rest don't run.
+> - [ ] Run All with no errors: all cells run in order.
+> - [ ] Interrupt / restart mid-batch stops the remaining cells.
+> - [ ] Run All with no kernel selected: prompt → pick → whole batch runs;
+>       prompt → Esc → nothing runs.
 
 Goal: when running multiple cells, stop the batch as soon as a cell fails, and
 clear the remaining queued cells — instead of blindly running every cell even

@@ -11,6 +11,13 @@ Scheduled into phases (kept here only as a pointer):
 
 ## Medium priority
 
+- Create new `.ipynb` files (user 2026-07-08 — currently you must duplicate an
+  existing notebook and empty it). Two parts, VS Code parity:
+  1. When a `.ipynb` is created via the file browser (empty file), populate it
+     with a minimal valid nbformat v4 template (one empty code cell) so it
+     opens as a notebook instead of erroring on empty/invalid JSON.
+  2. A "New Jupyter Notebook" command-palette action that opens an untitled,
+     unsaved notebook in the editor.
 - Cell hover controls: VS Code-style per-cell toolbar on the selected/hovered
   cell, reusing the phase-4 actions. USER PREFERENCE (2026-07-08): wants the
   run-above / run-cell-and-below (and likely delete / add) buttons shown

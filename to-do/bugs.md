@@ -152,31 +152,19 @@ confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
   `kernel_picker_handle.show()` (phase 6 lazy-start) — arrows reach it but
   Confirm does not. NEEDS RUNTIME DEBUGGING; not safe to guess-fix shared
   picker infra.
-- **Diagnostic questions for the user:** does Enter fail (a) only after
-  opening via the run-prompt, or also when clicking the kernel button in the
-  status bar? (b) before typing any filter text, or only after? (c) does
-  double-clicking a kernel in the list select it?
-- **Fix attempted:** none (investigated; deferred pending the answers above)
+- **Update (user 2026-07-08):** Enter fails NO MATTER how the picker is opened
+  (status-bar button and run-prompt alike). This rules out the phase-6
+  lazy-start `.show()` path — it's the popover-hosted `Picker` itself. Next
+  step (needs runtime): compare against another popover-hosted `Picker` (this
+  is the only one using `Picker::list(...).popover()`); check whether the
+  single-line query editor's key context provides `enter → menu::Confirm`
+  inside the popover, or whether the popover/editor is swallowing Enter as a
+  no-op/newline. Do NOT guess-fix shared picker infra without reproducing.
+- **Fix attempted:** none (investigated; still needs runtime reproduction)
 - **Tested:** n/a
 
-## 11. Kernel-select prompt: cell state on dismiss vs. select
-
-- **Status:** fix attempted - untested (second attempt)
-- **Symptom:** (user 2026-07-08) Running a cell with no kernel opens the
-  picker. Round 1: Esc left the cell stuck "Running". First fix removed the
-  spinner but ALSO dropped the queue, so selecting a kernel afterwards did
-  nothing (round 2 report). Desired: run → prompt → SELECT → the cell runs;
-  run → prompt → ESC → the cell is fully reset AND the queue cleared.
-- **Fix attempted (round 2):** `execute_cell` now holds a no-kernel run in a
-  separate `cells_awaiting_kernel_choice` list WITHOUT a spinner (new
-  `Disposition::Prompt`) and opens the picker. `change_kernel` promotes those
-  cells into `pending_executions` so they run once the chosen kernel is ready.
-  A new `on_dismiss` callback on the kernel picker clears
-  `cells_awaiting_kernel_choice` when the picker closes — which is harmless
-  after a selection (already promoted) and fully resets the cell on Esc.
-  Delete/convert also drop cells from the awaiting list.
-- **Tested:** no — needs user confirmation of BOTH paths (select runs it; Esc
-  clears it).
+(Bug #11 "Kernel-select prompt: cell state on dismiss vs. select" — fixed &
+confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
 
 ## 12. "Clear all outputs" sometimes needed several presses
 
@@ -184,5 +172,24 @@ confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
 - **Symptom:** (user 2026-07-08) One instance where "Clear all outputs" had to
   be pressed ~5 times before it worked. Not reproducible so far.
 - **Analysis:** none yet. Low-priority note; investigate only if it recurs.
+- **Fix attempted:** none
+- **Tested:** n/a
+
+## 13. After adding a cell with `a`/`b`, Enter sometimes won't enter edit mode
+
+- **Status:** open (intermittent, hard to reproduce)
+- **Symptom:** (user 2026-07-08) Pressed `b` to add a cell; the cell was
+  created and focused but Enter did nothing (repeatedly), and esc→enter,
+  refocusing from an adjacent cell, etc. didn't help. Clicking directly in the
+  cell text area fixed it and it then behaved. On another attempt, `b` created
+  the cell AND went straight into edit mode. Inconsistent.
+- **Analysis:** Likely a focus/mode race in the add-cell path
+  (`add_code_cell_at` → `focus_cell_editor_in_edit_mode` sets
+  `NotebookMode::Edit` and focuses the new editor). When it lands in a bad
+  state, `notebook_mode`/focus and the actual focused element disagree, so the
+  command-mode `enter → EnterEditMode` binding either isn't active or
+  `enter_edit_mode` focuses an editor that isn't the one showing. Overlaps
+  with the backlog item to make `a`/`b` focus in COMMAND mode (which would
+  sidestep this by not auto-entering edit mode). Needs reliable repro.
 - **Fix attempted:** none
 - **Tested:** n/a

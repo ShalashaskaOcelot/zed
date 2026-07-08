@@ -42,7 +42,9 @@ use crate::notebook::MovementDirection;
 use crate::repl_store::ReplStore;
 
 use picker::Picker;
-use runtimelib::{ExecuteRequest, JupyterMessage, JupyterMessageContent, ShutdownRequest};
+use runtimelib::{
+    ExecuteRequest, JupyterMessage, JupyterMessageContent, ReplyStatus, ShutdownRequest,
+};
 use ui::{ContextMenu, PopoverMenu, PopoverMenuHandle};
 use util::ResultExt as _;
 use zed_actions::editor::{MoveDown, MoveUp};
@@ -114,6 +116,12 @@ pub struct NotebookEditor {
     /// (not spinning) while the kernel picker is open: promoted to
     /// `pending_executions` if a kernel is chosen, or cleared if it's dismissed.
     cells_awaiting_kernel_choice: Vec<CellId>,
+    /// Remaining cells of a multi-cell run (Run All / Run Above / Run Below),
+    /// submitted ONE at a time so a failure can stop the rest.
+    run_queue: Vec<CellId>,
+    /// The code cell currently executing as part of a batch; we wait for its
+    /// `ExecuteReply` before submitting the next queued cell.
+    active_run_cell: Option<CellId>,
     kernel_picker_handle: PopoverMenuHandle<Picker<KernelPickerDelegate>>,
 }
 
@@ -227,6 +235,8 @@ impl NotebookEditor {
             execution_requests: HashMap::default(),
             pending_executions: Vec::new(),
             cells_awaiting_kernel_choice: Vec::new(),
+            run_queue: Vec::new(),
+            active_run_cell: None,
             kernel_picker_handle: PopoverMenuHandle::default(),
         };
         // Lazy start: don't launch a kernel on open. Show the remembered
@@ -646,6 +656,8 @@ impl NotebookEditor {
                         this.update_in(cx, |editor, window, cx| {
                             let error_message = err.to_string();
                             editor.kernel = Kernel::ErroredLaunch(error_message.clone());
+                            // The launch failed, so no queued cell can run.
+                            editor.cancel_run_queue();
                             cx.notify();
                             for cell_id in std::mem::take(&mut editor.pending_executions) {
                                 if let Some(Cell::Code(cell)) = editor.cell_map.get(&cell_id) {
@@ -687,6 +699,13 @@ impl NotebookEditor {
         }
 
         self.execution_requests.clear();
+        // If this is a deliberate kernel switch (nothing was waiting on a
+        // kernel choice), abort any in-progress batch. If instead the user is
+        // picking a kernel to satisfy a batch that was waiting for one, keep
+        // the queue so it runs on the new kernel.
+        if self.cells_awaiting_kernel_choice.is_empty() {
+            self.cancel_run_queue();
+        }
         self.stop_executing_cells(cx);
 
         // Persist the choice for this worktree so reopening the notebook (or
@@ -709,6 +728,7 @@ impl NotebookEditor {
 
         let kernel = std::mem::replace(&mut self.kernel, Kernel::Restarting);
         self.execution_requests.clear();
+        self.cancel_run_queue();
         self.stop_executing_cells(cx);
         cx.notify();
 
@@ -770,6 +790,8 @@ impl NotebookEditor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Interrupting stops the whole batch, not just the current cell.
+        self.cancel_run_queue();
         match &self.kernel {
             Kernel::RunningKernel(kernel) => {
                 kernel.interrupt();
@@ -892,10 +914,12 @@ impl NotebookEditor {
     }
 
     /// Clear cells that were waiting for a kernel choice (picker dismissed
-    /// without selecting). They return to their idle state.
+    /// without selecting). They return to their idle state, and any batch that
+    /// was waiting on the kernel choice is aborted.
     fn clear_awaiting_cells(&mut self, cx: &mut Context<Self>) {
         if !self.cells_awaiting_kernel_choice.is_empty() {
             self.cells_awaiting_kernel_choice.clear();
+            self.cancel_run_queue();
             cx.notify();
         }
     }
@@ -929,9 +953,44 @@ impl NotebookEditor {
     }
 
     fn run_cells(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        for cell_id in self.cell_order.clone() {
-            self.execute_cell(cell_id, window, cx);
+        self.run_cell_batch(self.cell_order.clone(), window, cx);
+    }
+
+    /// Run a batch of cells sequentially, stopping the remainder if one fails.
+    fn run_cell_batch(
+        &mut self,
+        cells: Vec<CellId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.run_queue = cells;
+        self.advance_run_queue(window, cx);
+    }
+
+    /// Submit the next queued cell, if nothing from the batch is already
+    /// running. Non-code cells are skipped. The next cell is submitted only
+    /// once the current one's `ExecuteReply` arrives (see `route`), so a
+    /// failure can cancel the rest.
+    fn advance_run_queue(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.active_run_cell.is_some() {
+            return;
         }
+        while !self.run_queue.is_empty() {
+            let cell_id = self.run_queue.remove(0);
+            if matches!(self.cell_map.get(&cell_id), Some(Cell::Code(_))) {
+                self.active_run_cell = Some(cell_id.clone());
+                self.execute_cell(cell_id, window, cx);
+                return;
+            }
+            // Skip markdown/raw cells and continue to the next.
+        }
+    }
+
+    /// Abort any in-progress multi-cell run (e.g. on error, interrupt, kernel
+    /// loss, or a structural change).
+    fn cancel_run_queue(&mut self) {
+        self.run_queue.clear();
+        self.active_run_cell = None;
     }
 
     fn run_current_cell(&mut self, _: &Run, window: &mut Window, cx: &mut Context<Self>) {
@@ -1296,6 +1355,10 @@ impl NotebookEditor {
         self.pending_executions.retain(|mapped| mapped != &cell_id);
         self.cells_awaiting_kernel_choice
             .retain(|mapped| mapped != &cell_id);
+        // If this cell was part of an in-progress batch, abort the batch.
+        if self.active_run_cell.as_ref() == Some(&cell_id) || self.run_queue.contains(&cell_id) {
+            self.cancel_run_queue();
+        }
         self.cell_list.splice(index..index + 1, 0);
 
         self.selected_cell_index = index.min(self.cell_order.len().saturating_sub(1));
@@ -1349,6 +1412,10 @@ impl NotebookEditor {
         self.pending_executions.retain(|mapped| mapped != &cell_id);
         self.cells_awaiting_kernel_choice
             .retain(|mapped| mapped != &cell_id);
+        // If this cell was part of an in-progress batch, abort the batch.
+        if self.active_run_cell.as_ref() == Some(&cell_id) || self.run_queue.contains(&cell_id) {
+            self.cancel_run_queue();
+        }
         self.cell_order[index] = new_cell_id.clone();
         self.cell_map.insert(new_cell_id, new_cell);
         // Length is unchanged, but the row must re-render as the new cell type.
@@ -1362,11 +1429,8 @@ impl NotebookEditor {
 
     fn run_cells_above(&mut self, _: &RunCellsAbove, window: &mut Window, cx: &mut Context<Self>) {
         let end = self.selected_cell_index.min(self.cell_order.len());
-        // Collect first: execute_cell borrows self mutably during the loop.
         let cells: Vec<CellId> = self.cell_order[..end].to_vec();
-        for cell_id in cells {
-            self.execute_cell(cell_id, window, cx);
-        }
+        self.run_cell_batch(cells, window, cx);
     }
 
     fn run_cell_and_below(
@@ -1379,11 +1443,8 @@ impl NotebookEditor {
         if start >= self.cell_order.len() {
             return;
         }
-        // Collect first: execute_cell borrows self mutably during the loop.
         let cells: Vec<CellId> = self.cell_order[start..].to_vec();
-        for cell_id in cells {
-            self.execute_cell(cell_id, window, cx);
-        }
+        self.run_cell_batch(cells, window, cx);
     }
 
     fn cell_count(&self) -> usize {
@@ -2572,6 +2633,31 @@ impl KernelSession for NotebookEditor {
                 }
             }
         }
+
+        // Advance (or stop) a multi-cell run when the active cell finishes.
+        if let JupyterMessageContent::ExecuteReply(reply) = &message.content {
+            let finished_cell = message
+                .parent_header
+                .as_ref()
+                .and_then(|header| self.execution_requests.get(&header.msg_id).cloned());
+            if let Some(finished_cell) = finished_cell
+                && self.active_run_cell.as_ref() == Some(&finished_cell)
+            {
+                self.active_run_cell = None;
+                if matches!(reply.status, ReplyStatus::Error) {
+                    // Stop-on-error: cancel the rest of the batch.
+                    if !self.run_queue.is_empty() {
+                        log::info!(
+                            "notebook: cell errored; cancelling {} queued cell(s)",
+                            self.run_queue.len()
+                        );
+                        self.run_queue.clear();
+                    }
+                } else {
+                    self.advance_run_queue(window, cx);
+                }
+            }
+        }
     }
 
     fn kernel_errored(&mut self, error_message: String, cx: &mut Context<Self>) {
@@ -2583,6 +2669,7 @@ impl KernelSession for NotebookEditor {
         }
         self.kernel = Kernel::ErroredLaunch(error_message);
         self.execution_requests.clear();
+        self.cancel_run_queue();
         self.stop_executing_cells(cx);
         cx.notify();
     }
@@ -2593,6 +2680,7 @@ impl KernelSession for NotebookEditor {
         }
         self.kernel = Kernel::Shutdown;
         self.execution_requests.clear();
+        self.cancel_run_queue();
         self.stop_executing_cells(cx);
         cx.notify();
     }
