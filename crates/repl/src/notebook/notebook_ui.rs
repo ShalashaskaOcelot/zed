@@ -15,7 +15,7 @@ use gpui::{
     ListState, Point, Task, TaskExt, actions, list, prelude::*,
 };
 use jupyter_protocol::JupyterKernelspec;
-use language::{Language, LanguageRegistry};
+use language::{Buffer, Language, LanguageRegistry};
 use log;
 use project::{Project, ProjectEntryId, ProjectPath};
 use settings::Settings as _;
@@ -249,6 +249,16 @@ impl NotebookEditor {
 
         cx.subscribe(&notebook_item, |this, _item, _event, cx| {
             this.refresh_language(cx);
+        })
+        .detach();
+
+        // Reload the notebook when its .ipynb changes on disk (the project
+        // auto-reloads the backing buffer and emits `Reloaded`).
+        let buffer = notebook_item.read(cx).buffer.clone();
+        cx.subscribe_in(&buffer, window, |this, buffer, event, window, cx| {
+            if let language::BufferEvent::Reloaded = event {
+                this.handle_external_change(buffer, window, cx);
+            }
         })
         .detach();
 
@@ -551,14 +561,137 @@ impl NotebookEditor {
         message: String,
         autohide: bool,
     ) {
-        struct CreatePythonEnvError;
-        let notification_id = NotificationId::unique::<CreatePythonEnvError>();
+        struct NotebookToast;
+        let notification_id = NotificationId::unique::<NotebookToast>();
         if let Some(workspace) = Workspace::for_window(window, cx) {
             workspace.update(cx, |workspace, cx| {
                 let toast = workspace::Toast::new(notification_id, message);
                 let toast = if autohide { toast.autohide() } else { toast };
                 workspace.show_toast(toast, cx);
             });
+        }
+    }
+
+    /// Parse `.ipynb` text into a v4 notebook, tolerating empty files, missing
+    /// cell IDs, and legacy formats. Shared by open, reload, and external
+    /// change handling.
+    fn parse_notebook_text(text: &str) -> Result<nbformat::v4::Notebook> {
+        if text.trim().is_empty() {
+            return Ok(nbformat::v4::Notebook {
+                nbformat: 4,
+                nbformat_minor: 5,
+                cells: vec![],
+                metadata: serde_json::from_str("{}")?,
+            });
+        }
+
+        let parsed = match nbformat::parse_notebook(text) {
+            Ok(notebook) => notebook,
+            Err(_) => {
+                // Pre-process to ensure cell IDs exist, then re-parse.
+                let mut json: serde_json::Value = serde_json::from_str(text)?;
+                if let Some(cells) = json.get_mut("cells").and_then(|c| c.as_array_mut()) {
+                    for cell in cells {
+                        if cell.get("id").is_none() {
+                            cell["id"] = serde_json::Value::String(Uuid::new_v4().to_string());
+                        }
+                    }
+                }
+                nbformat::parse_notebook(&serde_json::to_string(&json)?)?
+            }
+        };
+
+        Ok(match parsed {
+            nbformat::Notebook::V4(notebook) => notebook,
+            nbformat::Notebook::Legacy(legacy) => nbformat::upgrade_legacy_notebook(legacy)?,
+            nbformat::Notebook::V3(v3) => nbformat::upgrade_v3_notebook(v3)?,
+        })
+    }
+
+    /// Rebuild the notebook's cells from `notebook`, wiring up subscriptions
+    /// and resetting execution state. Used by reload and external-change
+    /// handling (NOT the initial `new`, which wires cells inline).
+    fn reload_cells_from_notebook(
+        &mut self,
+        notebook: &nbformat::v4::Notebook,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let languages = self.languages.clone();
+        let notebook_language = self.notebook_language.clone();
+
+        let mut cell_order = Vec::new();
+        let mut cell_map = HashMap::default();
+        for cell in notebook.cells.iter() {
+            let cell_id = cell.id();
+            cell_order.push(cell_id.clone());
+            let cell_entity = Cell::load(cell, &languages, notebook_language.clone(), window, cx);
+            match &cell_entity {
+                Cell::Code(code_cell) => {
+                    self.wire_code_cell(cell_id.clone(), code_cell, window, cx)
+                }
+                Cell::Markdown(markdown_cell) => {
+                    self.wire_markdown_cell(cell_id.clone(), markdown_cell, window, cx)
+                }
+                Cell::Raw(_) => {}
+            }
+            cell_map.insert(cell_id.clone(), cell_entity);
+        }
+
+        // Reset execution/queue state — the previous cells no longer exist.
+        self.execution_requests.clear();
+        self.pending_executions.clear();
+        self.cells_awaiting_kernel_choice.clear();
+        self.cancel_run_queue();
+
+        self.cell_order = cell_order.clone();
+        self.original_cell_order = cell_order;
+        self.cell_map = cell_map;
+        self.selected_cell_index = 0;
+        self.notebook_mode = NotebookMode::Command;
+        self.cell_list = ListState::new(self.cell_order.len(), gpui::ListAlignment::Top, px(1000.));
+
+        self.notebook_item.update(cx, |item, _| {
+            item.notebook = notebook.clone();
+        });
+        self.refresh_language(cx);
+        cx.notify();
+    }
+
+    /// The .ipynb changed on disk (the project auto-reloaded the backing
+    /// buffer). Rebuild from the new content unless there are unsaved changes,
+    /// in which case keep them and warn.
+    fn handle_external_change(
+        &mut self,
+        buffer: &Entity<Buffer>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.is_dirty(cx) {
+            Self::show_env_toast(
+                window,
+                cx,
+                "This notebook changed on disk. Your unsaved changes were kept — \
+                 use Reload to discard them and load the version on disk."
+                    .to_string(),
+                false,
+            );
+            return;
+        }
+
+        let disk_text = buffer.read(cx).text();
+        // Skip if the disk content already matches ours (e.g. our own save).
+        if let Ok(current) = serde_json::to_string_pretty(&self.to_notebook(cx))
+            && current.trim() == disk_text.trim()
+        {
+            return;
+        }
+
+        match Self::parse_notebook_text(&disk_text) {
+            Ok(notebook) => self.reload_cells_from_notebook(&notebook, window, cx),
+            Err(error) => {
+                log::warn!("notebook: failed to parse externally-changed .ipynb: {error}")
+            }
         }
     }
 
@@ -2208,6 +2341,9 @@ pub struct NotebookItem {
     notebook: nbformat::v4::Notebook,
     // Store our version of the notebook in memory (cell_order, cell_map)
     id: ProjectEntryId,
+    // The underlying project buffer for the .ipynb file. Retained so the
+    // project keeps watching the file and emits `Reloaded` on external change.
+    buffer: Entity<Buffer>,
 }
 
 impl project::ProjectItem for NotebookItem {
@@ -2227,54 +2363,12 @@ impl project::ProjectItem for NotebookItem {
                     .read_with(cx, |project, cx| project.absolute_path(&path, cx))
                     .with_context(|| format!("finding the absolute path of {path:?}"))?;
 
-                // todo: watch for changes to the file
                 let buffer = project
                     .update(cx, |project, cx| project.open_buffer(path.clone(), cx))
                     .await?;
                 let file_content = buffer.read_with(cx, |buffer, _| buffer.text());
 
-                let notebook = if file_content.trim().is_empty() {
-                    nbformat::v4::Notebook {
-                        nbformat: 4,
-                        nbformat_minor: 5,
-                        cells: vec![],
-                        metadata: serde_json::from_str("{}").unwrap(),
-                    }
-                } else {
-                    let notebook = match nbformat::parse_notebook(&file_content) {
-                        Ok(nb) => nb,
-                        Err(_) => {
-                            // Pre-process to ensure IDs exist
-                            let mut json: serde_json::Value = serde_json::from_str(&file_content)?;
-                            if let Some(cells) =
-                                json.get_mut("cells").and_then(|c| c.as_array_mut())
-                            {
-                                for cell in cells {
-                                    if cell.get("id").is_none() {
-                                        cell["id"] =
-                                            serde_json::Value::String(Uuid::new_v4().to_string());
-                                    }
-                                }
-                            }
-                            let file_content = serde_json::to_string(&json)?;
-                            nbformat::parse_notebook(&file_content)?
-                        }
-                    };
-
-                    match notebook {
-                        nbformat::Notebook::V4(notebook) => notebook,
-                        // 4.1 - 4.4 are converted to 4.5
-                        nbformat::Notebook::Legacy(legacy_notebook) => {
-                            // TODO: Decide if we want to mutate the notebook by including Cell IDs
-                            // and any other conversions
-
-                            nbformat::upgrade_legacy_notebook(legacy_notebook)?
-                        }
-                        nbformat::Notebook::V3(v3_notebook) => {
-                            nbformat::upgrade_v3_notebook(v3_notebook)?
-                        }
-                    }
-                };
+                let notebook = NotebookEditor::parse_notebook_text(&file_content)?;
 
                 let id = project
                     .update(cx, |project, cx| {
@@ -2288,6 +2382,7 @@ impl project::ProjectItem for NotebookItem {
                     languages,
                     notebook,
                     id,
+                    buffer,
                 }))
             }))
         } else {
@@ -2516,13 +2611,11 @@ impl Item for NotebookEditor {
 
     fn reload(
         &mut self,
-        project: Entity<Project>,
+        _project: Entity<Project>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
         let project_path = self.notebook_item.read(cx).project_path.clone();
-        let languages = self.languages.clone();
-        let notebook_language = self.notebook_language.clone();
 
         cx.spawn_in(window, async move |this, cx| {
             let buffer = this
@@ -2533,49 +2626,10 @@ impl Item for NotebookEditor {
                 .await?;
 
             let file_content = buffer.read_with(cx, |buffer, _| buffer.text());
-
-            let mut json: serde_json::Value = serde_json::from_str(&file_content)?;
-            if let Some(cells) = json.get_mut("cells").and_then(|c| c.as_array_mut()) {
-                for cell in cells {
-                    if cell.get("id").is_none() {
-                        cell["id"] = serde_json::Value::String(Uuid::new_v4().to_string());
-                    }
-                }
-            }
-            let file_content = serde_json::to_string(&json)?;
-
-            let notebook = nbformat::parse_notebook(&file_content);
-            let notebook = match notebook {
-                Ok(nbformat::Notebook::V4(notebook)) => notebook,
-                Ok(nbformat::Notebook::Legacy(legacy_notebook)) => {
-                    nbformat::upgrade_legacy_notebook(legacy_notebook)?
-                }
-                Ok(nbformat::Notebook::V3(v3_notebook)) => {
-                    nbformat::upgrade_v3_notebook(v3_notebook)?
-                }
-                Err(e) => {
-                    anyhow::bail!("Failed to parse notebook: {:?}", e);
-                }
-            };
+            let notebook = Self::parse_notebook_text(&file_content)?;
 
             this.update_in(cx, |this, window, cx| {
-                let mut cell_order = vec![];
-                let mut cell_map = HashMap::default();
-
-                for cell in notebook.cells.iter() {
-                    let cell_id = cell.id();
-                    cell_order.push(cell_id.clone());
-                    let cell_entity =
-                        Cell::load(cell, &languages, notebook_language.clone(), window, cx);
-                    cell_map.insert(cell_id.clone(), cell_entity);
-                }
-
-                this.cell_order = cell_order.clone();
-                this.original_cell_order = cell_order;
-                this.cell_map = cell_map;
-                this.cell_list =
-                    ListState::new(this.cell_order.len(), gpui::ListAlignment::Top, px(1000.));
-                cx.notify();
+                this.reload_cells_from_notebook(&notebook, window, cx);
             })?;
 
             Ok(())
