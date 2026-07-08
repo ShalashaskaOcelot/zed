@@ -12,9 +12,26 @@ Scheduled into phases (kept here only as a pointer):
 ## Medium priority
 
 - Cell hover controls: VS Code-style per-cell toolbar on the selected/hovered
-  cell (run-above / run-below / delete / add-below), reusing the phase-4
-  actions. The actions, keybinds, and the two ellipsis menus already expose
-  this functionality; the hover toolbar is a convenience layer.
+  cell, reusing the phase-4 actions. USER PREFERENCE (2026-07-08): wants the
+  run-above / run-cell-and-below (and likely delete / add) buttons shown
+  individually in the focused cell's top-right, NOT tucked in the "More
+  options" menu. The actions, keybinds, and menus already exist; this is the
+  discoverable per-cell button layer.
+- Deleting the LAST remaining cell: currently refused. Decide/implement the
+  preferred behaviour — either clear its contents in place, or delete it and
+  insert a fresh empty cell — so delete always "does something". (Spun off
+  from phase 4; user asked.)
+- `a`/`b` add-cell (and the + toolbar buttons) currently switch straight into
+  EDIT mode. VS Code focuses the new cell but stays in command mode until you
+  press Enter. Consider matching that (focus + command mode). (Spun off from
+  phase 4.)
+- Auto-run the triggering cell after a kernel is picked from the run-prompt.
+  Dropped when fixing bugs.md #11 (the cell no longer queues on a no-kernel
+  run to avoid the stuck-"Running" state); re-add the auto-run once the
+  picker-dismiss lifecycle can be tracked cleanly.
+- Persist the per-notebook kernel choice across full Zed restarts (currently
+  only within a session; user: "not a big deal"). Likely via the saved .ipynb
+  metadata match or a persisted `ReplStore`. (Spun off from phase 6.)
 - Collapse/expand cell input and output (a `CellControlType` scaffold exists).
   Useful for cells with large outputs.
 - Bind the "smart arrows" (`NotebookMoveUp`/`NotebookMoveDown`) to up/down in

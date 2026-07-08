@@ -1,14 +1,12 @@
 # Phase 3 — Navigation and scrolling
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING (2026-07-08). Compiles,
-> clippy-clean, unit tests pass. Runtime behaviour NOT yet confirmed. Do NOT
-> archive until the user confirms. Ask periodically.
+> ⚠️ STATUS: PARTIALLY CONFIRMED (2026-07-08). Fit-aware reveal, natural fit,
+> and cursor-follow are CONFIRMED working by the user. Home/End was broken;
+> a fix has been pushed and is AWAITING RE-TEST. Do NOT archive until Home/End
+> is confirmed.
 >
-> Kind: **mixed** — fit-aware reveal and cursor-follow are *changes to
-> existing* nav/scroll behaviour (keep OPEN until the user confirms they take
-> effect; if unchanged, fix in place). Home/End is a *new binding* (archive
-> that item once confirmed present; issues become new items). Resolve each
-> item by its own kind.
+> Kind: **mixed**. The confirmed items are done; Home/End stays open until the
+> re-test confirms it (change/fix — fixed in place, not re-filed).
 
 Goal: nav-mode cell navigation and edit-mode cursor movement keep the right
 thing in view.
@@ -23,9 +21,8 @@ Primary files: `crates/repl/src/notebook/notebook_ui.rs`,
       `ListState::scroll_to_reveal_item_top_aligned` (`list.rs`) — if the item
       is taller than the viewport it pins the item's TOP to the top of the
       view regardless of travel direction; if it fits it falls back to the
-      existing minimal reveal. `jump_to_cell` now uses it, so arrow nav and
-      Home/End get the behaviour. Kept as a new opt-in method so other
-      `list()` users are unaffected. ⚠ untested
+      existing minimal reveal. `jump_to_cell` now uses it. ✅ CONFIRMED (user
+      2026-07-08).
 - [x] View follows cursor in edit mode (change): `follow_cursor_in_cell`,
       driven by a shared `on_cell_editor_event` handler on `SelectionsChanged`
       for the selected cell. Scrolls the notebook list only when the cursor
@@ -33,10 +30,15 @@ Primary files: `crates/repl/src/notebook/notebook_ui.rs`,
       centered. NOTE: the cursor's vertical position is estimated from its
       fractional display-row within the cell's laid-out height (the cell
       includes non-editor chrome), so it is approximate; may need tuning after
-      testing. ⚠ untested
-- [x] Bind Home/End in command mode to first/last cell (new binding):
-      `home` → `menu::SelectFirst`, `end` → `menu::SelectLast` in all three
-      keymaps (handlers `select_first`/`select_last` already existed). ⚠ untested
+      testing. ✅ CONFIRMED working (user 2026-07-08): "view correctly follows
+      the cursor, no jumping around, no leaving viewport". (The fractional-row
+      approximation held up in practice.)
+- [x] Home/End → first/last cell. FIRST ATTEMPT (bind to `menu::SelectFirst`/
+      `SelectLast`) did NOT work — those actions were swallowed even though
+      `menu::SelectNext`/`Previous` (arrows) reach the notebook. FIX: added
+      dedicated `notebook::SelectFirstCell` / `SelectLastCell` actions and
+      bound `home`/`end` to them in the command-mode context (all three
+      keymaps). ⚠ AWAITING RE-TEST.
 - [~] Smart arrows (`NotebookMoveUp`/`NotebookMoveDown`) in edit mode:
       DECIDED to defer — moved to `backlog.md`. Binding up/down in the
       `NotebookEditor > Editor` context risks overriding completion-menu

@@ -135,3 +135,51 @@ confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
   confirm whether anything consults it before "fixing" it.
 - **Fix attempted:** none
 - **Tested:** n/a
+
+## 10. Kernel picker does not accept Enter to select
+
+- **Status:** open
+- **Symptom:** (user 2026-07-08) In the kernel selector, arrow keys navigate
+  the list, but pressing Enter does not confirm the highlighted kernel — the
+  user perceives a newline being entered in the search box instead.
+- **Analysis:** The picker's query editor is single-line
+  (`Editor::single_line` via the erased-editor factory) and
+  `KernelPickerDelegate::confirm` (`kernel_options.rs:300`) looks correct
+  (calls `on_select` + emits `DismissEvent`). Enter is globally bound to
+  `menu::Confirm`. So Enter should reach `Picker::confirm` → delegate. The
+  failure is most likely a focus / key-context interaction specific to this
+  picker being hosted in a `PopoverMenu` and/or opened via
+  `kernel_picker_handle.show()` (phase 6 lazy-start) — arrows reach it but
+  Confirm does not. NEEDS RUNTIME DEBUGGING; not safe to guess-fix shared
+  picker infra.
+- **Diagnostic questions for the user:** does Enter fail (a) only after
+  opening via the run-prompt, or also when clicking the kernel button in the
+  status bar? (b) before typing any filter text, or only after? (c) does
+  double-clicking a kernel in the list select it?
+- **Fix attempted:** none (investigated; deferred pending the answers above)
+- **Tested:** n/a
+
+## 11. Kernel-select prompt leaves the cell stuck "Running" on dismiss
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-07-08) Running a cell with no kernel opens the
+  picker; pressing Esc (dismiss) leaves the cell showing "Running…" (really
+  queued) forever instead of resetting to idle.
+- **Analysis:** The lazy-start path queued the cell and showed the running
+  spinner before the kernel was chosen; dismissing left it queued/spinning.
+- **Fix attempted:** `execute_cell` now, when the kernel is shut down/errored
+  and NO kernel is remembered, opens the picker WITHOUT queuing or spinning
+  the cell (new `Disposition::Prompt`). Esc therefore leaves the cell idle.
+  Trade-off: the triggering cell no longer auto-runs after picking a kernel
+  from the prompt — the user picks, then runs again. (Auto-run-after-pick is
+  filed as a backlog enhancement.)
+- **Tested:** no — needs user confirmation.
+
+## 12. "Clear all outputs" sometimes needed several presses
+
+- **Status:** open (not reproduced)
+- **Symptom:** (user 2026-07-08) One instance where "Clear all outputs" had to
+  be pressed ~5 times before it worked. Not reproducible so far.
+- **Analysis:** none yet. Low-priority note; investigate only if it recurs.
+- **Fix attempted:** none
+- **Tested:** n/a

@@ -48,7 +48,7 @@ use zed_actions::notebook::{
     AddCellAbove, AddCellBelow, AddCodeBlock, AddMarkdownBlock, ClearOutputs, ConvertToCode,
     ConvertToMarkdown, DeleteCell, EnterCommandMode, EnterEditMode, InterruptKernel, MoveCellDown,
     MoveCellUp, NotebookMoveDown, NotebookMoveUp, OpenNotebook, RestartKernel, Run, RunAll,
-    RunAndAdvance, RunCellAndBelow, RunCellsAbove,
+    RunAndAdvance, RunCellAndBelow, RunCellsAbove, SelectFirstCell, SelectLastCell,
 };
 
 /// Whether the notebook is in command mode (navigating cells) or edit mode (editing a cell).
@@ -620,6 +620,10 @@ impl NotebookEditor {
         enum Disposition {
             Sent(String),
             Queued { launch: bool },
+            /// No kernel selected/remembered: prompt the user to pick one and
+            /// do NOT queue or spin the cell, so dismissing the picker leaves
+            /// the cell in its idle initial state.
+            Prompt,
             Failed(String),
         }
 
@@ -641,9 +645,21 @@ impl NotebookEditor {
             Kernel::StartingKernel(_) | Kernel::Restarting => {
                 Disposition::Queued { launch: false }
             }
-            Kernel::Shutdown | Kernel::ErroredLaunch(_) => Disposition::Queued { launch: true },
+            Kernel::Shutdown | Kernel::ErroredLaunch(_) => {
+                if self.remembered_kernel_spec(cx).is_some() {
+                    Disposition::Queued { launch: true }
+                } else {
+                    Disposition::Prompt
+                }
+            }
             Kernel::ShuttingDown => Disposition::Failed("the kernel is shutting down".to_string()),
         };
+
+        if let Disposition::Prompt = disposition {
+            // Open the kernel picker; leave the cell untouched (idle).
+            self.launch_kernel(window, cx);
+            return;
+        }
 
         if let Disposition::Queued { launch } = &disposition {
             if !self.pending_executions.contains(&cell_id) {
@@ -662,6 +678,7 @@ impl NotebookEditor {
                 match &disposition {
                     Disposition::Failed(error) => cell.show_kernel_error(error, window, cx),
                     Disposition::Sent(_) | Disposition::Queued { .. } => cell.start_execution(),
+                    Disposition::Prompt => {}
                 }
                 cx.notify();
             });
@@ -671,7 +688,7 @@ impl NotebookEditor {
             Disposition::Sent(msg_id) => {
                 self.execution_requests.insert(msg_id, cell_id);
             }
-            Disposition::Queued { .. } => {}
+            Disposition::Queued { .. } | Disposition::Prompt => {}
             Disposition::Failed(error) => {
                 log::error!("notebook: cannot execute cell: {error}");
             }
@@ -1246,7 +1263,7 @@ impl NotebookEditor {
 
     pub fn select_first(
         &mut self,
-        _: &menu::SelectFirst,
+        _: &SelectFirstCell,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1257,12 +1274,7 @@ impl NotebookEditor {
         }
     }
 
-    pub fn select_last(
-        &mut self,
-        _: &menu::SelectLast,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn select_last(&mut self, _: &SelectLastCell, window: &mut Window, cx: &mut Context<Self>) {
         let count = self.cell_count();
         if count > 0 {
             self.set_selected_index(count - 1, true, window, cx);

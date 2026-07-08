@@ -954,6 +954,10 @@ pub mod notebook {
             NotebookMoveDown,
             /// Move up in cells.
             NotebookMoveUp,
+            /// Selects the first cell.
+            SelectFirstCell,
+            /// Selects the last cell.
+            SelectLastCell,
             /// Enters the current cell's editor (edit mode).
             EnterEditMode,
             /// Exits the cell editor and returns to cell command mode.
