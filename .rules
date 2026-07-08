@@ -40,7 +40,14 @@ root. This system must be adhered to religiously.
    sit in the archive in an unfinished state.
 3. **Archive completed work immediately** so it is never accidentally
    re-implemented. When a phase completes, move its file to `to-do/archive/`
-   in the same commit that completes it.
+   in the same commit that completes it. **Exception — runtime-testable
+   changes:** if a phase's work needs the user to run the app to confirm it
+   behaves correctly (most notebook/UI/kernel work does), the phase is
+   "implemented" but NOT "complete" until the user confirms. Keep the phase
+   file in `to-do/` with a `⚠️ AWAITING USER TESTING` header and a `⚠ untested`
+   marker next to each unconfirmed item, and periodically ask the user to
+   test. Only move it to `to-do/archive/` (and drop the markers) once the user
+   confirms it works. This mirrors the bug rule below.
 4. **Bugs:** when a fix is attempted, update the bug's status to
    `fix attempted - untested` with a note describing the fix. **Never attempt
    a further fix for a bug whose last fix is untested** — we don't know yet
