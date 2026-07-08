@@ -671,8 +671,9 @@ impl NotebookEditor {
             Self::show_env_toast(
                 window,
                 cx,
-                "This notebook changed on disk. Your unsaved changes were kept — \
-                 use Reload to discard them and load the version on disk."
+                "This notebook changed on disk, but you have unsaved changes here. \
+                 Saving will overwrite the on-disk version; close and reopen the \
+                 file to load the on-disk version instead."
                     .to_string(),
                 false,
             );

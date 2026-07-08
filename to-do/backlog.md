@@ -11,6 +11,15 @@ Scheduled into phases (kept here only as a pointer):
 
 ## Medium priority
 
+- Let "Create Python Environment" choose the location (user 2026-07-08 —
+  for user-based rather than repo-based venvs in a central place). Default to
+  the local workspace `.venv` so Enter/OK just creates it there, but allow
+  picking a different directory. (Phase 5 follow-up.)
+- A convenient "reload from disk" affordance for the notebook (user 2026-07-08):
+  when the .ipynb changed on disk, the conflict toast currently tells the user
+  to close and reopen. `Item::reload` exists (wired in phase 9) but isn't
+  surfaced as a button/command. Add a Reload button (e.g. on the conflict
+  toast) or a "Reload Notebook" command that calls the existing reload.
 - Create new `.ipynb` files (user 2026-07-08 — currently you must duplicate an
   existing notebook and empty it). Two parts, VS Code parity:
   1. When a `.ipynb` is created via the file browser (empty file), populate it

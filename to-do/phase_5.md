@@ -1,8 +1,11 @@
 # Phase 5 — Create Python environments from the kernel picker
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING (2026-07-08). Compiles,
-> clippy-clean, unit tests pass. Runtime behaviour NOT yet confirmed (needs a
-> real Python on PATH). Do NOT archive until the user confirms.
+> ⚠️ STATUS: MOSTLY CONFIRMED, one path pending (2026-07-08). User confirmed:
+> create venv works, reusing an existing `.venv` works, and the new env shows
+> up in the picker. STILL TO TEST: the no-Python-on-PATH error path — the user
+> will test later, so keep this OPEN until then. New feature, so on final
+> confirmation archive it and treat tweaks (e.g. custom location) as new items
+> (already backlogged).
 >
 > Kind: **new feature** — on confirmation that it creates a venv, installs
 > ipykernel, and selects it, archive; any tweak/defect becomes a new item.
@@ -47,12 +50,12 @@ Primary files: `crates/repl/src/components/kernel_options.rs` (picker footer +
 
 ## Manual test checklist (for the user)
 
-- [ ] With no `.venv`: "Create Python Environment" creates one, installs
-      ipykernel, and the kernel switches to `.venv` (toast shows progress).
-- [ ] With an existing `.venv`: reuses it (installs ipykernel if missing) and
-      selects it.
-- [ ] No Python on PATH: a clear error toast appears.
-- [ ] The new `.venv` also shows up in the picker list afterward.
+- [x] With no `.venv`: "Create Python Environment" creates one, installs
+      ipykernel, and the kernel switches to `.venv`. ✅ CONFIRMED.
+- [x] With an existing `.venv`: reuses it. ✅ CONFIRMED.
+- [ ] No Python on PATH: a clear error toast appears. ⚠ PENDING (user will
+      test later).
+- [x] The new `.venv` also shows up in the picker list afterward. ✅ CONFIRMED.
 
 ## Verification (automated)
 

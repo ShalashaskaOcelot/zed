@@ -185,3 +185,19 @@ confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
   sidestep this by not auto-entering edit mode). Needs reliable repro.
 - **Fix attempted:** none
 - **Tested:** n/a
+
+## 14. Saving overwrites external changes without warning
+
+- **Status:** open
+- **Symptom:** (user 2026-07-08) If the .ipynb changed on disk while open in
+  Zed and you have unsaved notebook changes, saving from Zed silently
+  overwrites the on-disk (external) changes with no warning/confirmation.
+- **Analysis:** Phase 9 surfaces the conflict on the RELOAD side (a toast when
+  the file changes on disk under unsaved changes) but the SAVE side
+  (`Item::save`, `notebook_ui.rs`) unconditionally `fs.atomic_write`s. It needs
+  a save-time conflict check: before writing, compare the on-disk content (or
+  the retained buffer's `has_conflict` / mtime) against what we loaded, and if
+  it changed, prompt to overwrite / cancel / diff. Requires a confirm dialog,
+  so it's its own chunk of work. Data-loss risk → medium-high.
+- **Fix attempted:** none
+- **Tested:** n/a
