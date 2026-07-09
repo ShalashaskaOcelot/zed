@@ -946,6 +946,10 @@ pub mod notebook {
             PasteCell,
             /// Duplicates the current cell below itself.
             DuplicateCell,
+            /// Undoes the last structural cell operation (add/delete/move/convert).
+            UndoCellOp,
+            /// Redoes the last undone structural cell operation.
+            RedoCellOp,
             /// Runs all cells above the current cell.
             RunCellsAbove,
             /// Runs the current cell and all cells below it.

@@ -1640,6 +1640,8 @@
       "d d": "notebook::DeleteCell",
       "c": "notebook::CopyCell",
       "v": "notebook::PasteCell",
+      "z": "notebook::UndoCellOp",
+      "shift-z": "notebook::RedoCellOp",
       "m": "notebook::ConvertToMarkdown",
       "y": "notebook::ConvertToCode",
       "home": "notebook::SelectFirstCell",

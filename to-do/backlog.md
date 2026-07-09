@@ -96,7 +96,8 @@ Small follow-ups:
 
 - Remove `#![allow(unused, dead_code)]` from `notebook_ui.rs` and delete the
   large commented-out `NotebookControls` block.
-- Remove leftover `println!` debug lines in `move_cell_up` / `move_cell_down`.
+- ~~Remove leftover `println!` debug lines in `move_cell_up` / `move_cell_down`~~
+  (done in phase 8).
 - Fix typo `"CellControlType::CollapseCelln"` (`cell.rs`).
 
 ## Done (implemented in an earlier phase — kept briefly for reference)

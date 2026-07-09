@@ -52,9 +52,32 @@ use zed_actions::notebook::{
     AddCellAbove, AddCellBelow, AddCodeBlock, AddMarkdownBlock, ClearOutputs, ConvertToCode,
     ConvertToMarkdown, CopyCell, CutCell, DeleteCell, DuplicateCell, EnterCommandMode,
     EnterEditMode, InterruptKernel, MoveCellDown, MoveCellUp, NotebookMoveDown, NotebookMoveUp,
-    OpenNotebook, PasteCell, RestartKernel, Run, RunAll, RunAndAdvance, RunCellAndBelow,
-    RunCellsAbove, SelectFirstCell, SelectLastCell,
+    OpenNotebook, PasteCell, RedoCellOp, RestartKernel, Run, RunAll, RunAndAdvance,
+    RunCellAndBelow, RunCellsAbove, SelectFirstCell, SelectLastCell, UndoCellOp,
 };
+
+/// A structural cell operation, stored so it can be undone/redone. Restored
+/// cells are rebuilt from the serialized nbformat form (not resurrected
+/// entities), so their subscriptions and language wiring are always fresh.
+enum CellEdit {
+    Inserted {
+        index: usize,
+        cell: nbformat::v4::Cell,
+    },
+    Deleted {
+        index: usize,
+        cell: nbformat::v4::Cell,
+    },
+    Moved {
+        from: usize,
+        to: usize,
+    },
+    Converted {
+        index: usize,
+        before: nbformat::v4::Cell,
+        after: nbformat::v4::Cell,
+    },
+}
 
 /// Whether the notebook is in command mode (navigating cells) or edit mode (editing a cell).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -123,6 +146,10 @@ pub struct NotebookEditor {
     /// The code cell currently executing as part of a batch; we wait for its
     /// `ExecuteReply` before submitting the next queued cell.
     active_run_cell: Option<CellId>,
+    /// Structural cell operations, for undo/redo (does not cover in-cell text
+    /// edits, which the cell editors undo themselves).
+    undo_stack: Vec<CellEdit>,
+    redo_stack: Vec<CellEdit>,
     kernel_picker_handle: PopoverMenuHandle<Picker<KernelPickerDelegate>>,
 }
 
@@ -238,6 +265,8 @@ impl NotebookEditor {
             cells_awaiting_kernel_choice: Vec::new(),
             run_queue: Vec::new(),
             active_run_cell: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
             kernel_picker_handle: PopoverMenuHandle::default(),
         };
         // Lazy start: don't launch a kernel on open. Show the remembered
@@ -1268,22 +1297,24 @@ impl NotebookEditor {
         println!("Open notebook triggered");
     }
 
-    fn move_cell_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        println!("Move cell up triggered");
+    fn move_cell_up(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if self.selected_cell_index > 0 {
-            self.cell_order
-                .swap(self.selected_cell_index, self.selected_cell_index - 1);
-            self.selected_cell_index -= 1;
+            let from = self.selected_cell_index;
+            let to = from - 1;
+            self.cell_order.swap(from, to);
+            self.selected_cell_index = to;
+            self.record_edit(CellEdit::Moved { from, to });
             cx.notify();
         }
     }
 
-    fn move_cell_down(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        println!("Move cell down triggered");
+    fn move_cell_down(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if !self.cell_order.is_empty() && self.selected_cell_index < self.cell_order.len() - 1 {
-            self.cell_order
-                .swap(self.selected_cell_index, self.selected_cell_index + 1);
-            self.selected_cell_index += 1;
+            let from = self.selected_cell_index;
+            let to = from + 1;
+            self.cell_order.swap(from, to);
+            self.selected_cell_index = to;
+            self.record_edit(CellEdit::Moved { from, to });
             cx.notify();
         }
     }
@@ -1441,7 +1472,8 @@ impl NotebookEditor {
     fn add_markdown_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (cell_id, markdown_cell) = self.build_markdown_cell(String::new(), window, cx);
         let index = self.index_below_selection();
-        self.insert_cell(index, cell_id, Cell::Markdown(markdown_cell.clone()));
+        self.insert_cell(index, cell_id.clone(), Cell::Markdown(markdown_cell.clone()));
+        self.record_new_cell(index, &cell_id, cx);
         markdown_cell.update(cx, |cell, cx| {
             cell.set_editing(true);
             cx.notify();
@@ -1457,9 +1489,21 @@ impl NotebookEditor {
 
     fn add_code_cell_at(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let (cell_id, code_cell) = self.build_code_cell(String::new(), window, cx);
-        self.insert_cell(index, cell_id, Cell::Code(code_cell.clone()));
+        self.insert_cell(index, cell_id.clone(), Cell::Code(code_cell.clone()));
+        self.record_new_cell(index, &cell_id, cx);
         let editor = code_cell.read(cx).editor().clone();
         self.focus_cell_editor_in_edit_mode(editor, window, cx);
+    }
+
+    /// Record a just-inserted cell (by id) as an undoable insertion.
+    fn record_new_cell(&mut self, index: usize, cell_id: &CellId, cx: &mut Context<Self>) {
+        if let Some(cell) = self.cell_map.get(cell_id) {
+            let serialized = cell.to_nbformat_cell(cx);
+            self.record_edit(CellEdit::Inserted {
+                index,
+                cell: serialized,
+            });
+        }
     }
 
     fn add_cell_above(&mut self, _: &AddCellAbove, window: &mut Window, cx: &mut Context<Self>) {
@@ -1483,20 +1527,17 @@ impl NotebookEditor {
             return;
         };
 
-        self.cell_order.remove(index);
-        self.cell_map.remove(&cell_id);
-        self.execution_requests
-            .retain(|_, mapped| mapped != &cell_id);
-        self.pending_executions.retain(|mapped| mapped != &cell_id);
-        self.cells_awaiting_kernel_choice
-            .retain(|mapped| mapped != &cell_id);
-        // If this cell was part of an in-progress batch, abort the batch.
-        if self.active_run_cell.as_ref() == Some(&cell_id) || self.run_queue.contains(&cell_id) {
-            self.cancel_run_queue();
-        }
-        self.cell_list.splice(index..index + 1, 0);
+        // Capture the cell (with live content) for undo before removing it.
+        let serialized = self.cell_map.get(&cell_id).map(|cell| cell.to_nbformat_cell(cx));
 
-        self.selected_cell_index = index.min(self.cell_order.len().saturating_sub(1));
+        self.raw_remove_cell(index);
+        if let Some(serialized) = serialized {
+            self.record_edit(CellEdit::Deleted {
+                index,
+                cell: serialized,
+            });
+        }
+
         self.notebook_mode = NotebookMode::Command;
         self.focus_handle.focus(window, cx);
         self.cell_list.scroll_to_reveal_item(self.selected_cell_index);
@@ -1567,7 +1608,7 @@ impl NotebookEditor {
                 attachments,
                 ..
             } => nbformat::v4::Cell::Markdown {
-                id: new_cell_id.clone(),
+                id: new_cell_id,
                 metadata,
                 source,
                 attachments,
@@ -1579,7 +1620,7 @@ impl NotebookEditor {
                 outputs,
                 ..
             } => nbformat::v4::Cell::Code {
-                id: new_cell_id.clone(),
+                id: new_cell_id,
                 metadata,
                 execution_count,
                 source,
@@ -1588,26 +1629,156 @@ impl NotebookEditor {
             nbformat::v4::Cell::Raw {
                 metadata, source, ..
             } => nbformat::v4::Cell::Raw {
-                id: new_cell_id.clone(),
+                id: new_cell_id,
                 metadata,
                 source,
             },
         };
 
+        self.raw_insert_cell(index, cell.clone(), window, cx);
+        self.record_edit(CellEdit::Inserted { index, cell });
+        self.notebook_mode = NotebookMode::Command;
+        self.focus_handle.focus(window, cx);
+        cx.notify();
+    }
+
+    // --- Structural primitives (no undo recording, no focus/mode side effects) ---
+
+    /// Build a live cell from `cell` (PRESERVING its id), wire it, and insert at
+    /// `index`. Selects the inserted cell.
+    fn raw_insert_cell(
+        &mut self,
+        index: usize,
+        cell: nbformat::v4::Cell,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let cell_id = cell.id().clone();
         let languages = self.languages.clone();
         let notebook_language = self.notebook_language.clone();
         let cell_entity = Cell::load(&cell, &languages, notebook_language, window, cx);
         match &cell_entity {
-            Cell::Code(code_cell) => self.wire_code_cell(new_cell_id.clone(), code_cell, window, cx),
+            Cell::Code(code_cell) => self.wire_code_cell(cell_id.clone(), code_cell, window, cx),
             Cell::Markdown(markdown_cell) => {
-                self.wire_markdown_cell(new_cell_id.clone(), markdown_cell, window, cx)
+                self.wire_markdown_cell(cell_id.clone(), markdown_cell, window, cx)
             }
             Cell::Raw(_) => {}
         }
+        self.insert_cell(index, cell_id, cell_entity);
+    }
 
-        self.insert_cell(index, new_cell_id, cell_entity);
+    /// Remove the cell at `index`, cleaning up execution/queue state.
+    fn raw_remove_cell(&mut self, index: usize) {
+        if index >= self.cell_order.len() {
+            return;
+        }
+        let cell_id = self.cell_order.remove(index);
+        self.cell_map.remove(&cell_id);
+        self.execution_requests
+            .retain(|_, mapped| mapped != &cell_id);
+        self.pending_executions.retain(|mapped| mapped != &cell_id);
+        self.cells_awaiting_kernel_choice
+            .retain(|mapped| mapped != &cell_id);
+        if self.active_run_cell.as_ref() == Some(&cell_id) || self.run_queue.contains(&cell_id) {
+            self.cancel_run_queue();
+        }
+        self.cell_list.splice(index..index + 1, 0);
+        self.selected_cell_index = index.min(self.cell_order.len().saturating_sub(1));
+    }
+
+    /// Move the cell at `from` to `to` (count unchanged; no list splice needed).
+    fn raw_move_cell(&mut self, from: usize, to: usize) {
+        if from >= self.cell_order.len() || to >= self.cell_order.len() {
+            return;
+        }
+        let cell_id = self.cell_order.remove(from);
+        self.cell_order.insert(to, cell_id);
+        self.selected_cell_index = to;
+    }
+
+    /// Replace the cell at `index` with a fresh live cell built from `cell`.
+    fn raw_replace_cell(
+        &mut self,
+        index: usize,
+        cell: nbformat::v4::Cell,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if index >= self.cell_order.len() {
+            return;
+        }
+        let old_id = self.cell_order[index].clone();
+        self.cell_map.remove(&old_id);
+        self.execution_requests.retain(|_, mapped| mapped != &old_id);
+        self.pending_executions.retain(|mapped| mapped != &old_id);
+        self.cells_awaiting_kernel_choice
+            .retain(|mapped| mapped != &old_id);
+
+        let cell_id = cell.id().clone();
+        let languages = self.languages.clone();
+        let notebook_language = self.notebook_language.clone();
+        let cell_entity = Cell::load(&cell, &languages, notebook_language, window, cx);
+        match &cell_entity {
+            Cell::Code(code_cell) => self.wire_code_cell(cell_id.clone(), code_cell, window, cx),
+            Cell::Markdown(markdown_cell) => {
+                self.wire_markdown_cell(cell_id.clone(), markdown_cell, window, cx)
+            }
+            Cell::Raw(_) => {}
+        }
+        self.cell_order[index] = cell_id.clone();
+        self.cell_map.insert(cell_id, cell_entity);
+        self.cell_list.splice(index..index + 1, 1);
+        self.selected_cell_index = index;
+    }
+
+    fn record_edit(&mut self, edit: CellEdit) {
+        self.undo_stack.push(edit);
+        self.redo_stack.clear();
+    }
+
+    fn undo_cell_op(&mut self, _: &UndoCellOp, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(edit) = self.undo_stack.pop() else {
+            return;
+        };
+        match &edit {
+            CellEdit::Inserted { index, .. } => self.raw_remove_cell(*index),
+            CellEdit::Deleted { index, cell } => {
+                self.raw_insert_cell(*index, cell.clone(), window, cx)
+            }
+            CellEdit::Moved { from, to } => self.raw_move_cell(*to, *from),
+            CellEdit::Converted { index, before, .. } => {
+                self.raw_replace_cell(*index, before.clone(), window, cx)
+            }
+        }
+        self.redo_stack.push(edit);
+        self.after_undo_redo(window, cx);
+    }
+
+    fn redo_cell_op(&mut self, _: &RedoCellOp, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(edit) = self.redo_stack.pop() else {
+            return;
+        };
+        match &edit {
+            CellEdit::Inserted { index, cell } => {
+                self.raw_insert_cell(*index, cell.clone(), window, cx)
+            }
+            CellEdit::Deleted { index, .. } => self.raw_remove_cell(*index),
+            CellEdit::Moved { from, to } => self.raw_move_cell(*from, *to),
+            CellEdit::Converted { index, after, .. } => {
+                self.raw_replace_cell(*index, after.clone(), window, cx)
+            }
+        }
+        self.undo_stack.push(edit);
+        self.after_undo_redo(window, cx);
+    }
+
+    fn after_undo_redo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.notebook_mode = NotebookMode::Command;
         self.focus_handle.focus(window, cx);
+        if !self.cell_order.is_empty() {
+            self.cell_list
+                .scroll_to_reveal_item_top_aligned(self.selected_cell_index);
+        }
         cx.notify();
     }
 
@@ -1639,32 +1810,35 @@ impl NotebookEditor {
             return;
         }
 
+        let Some(before) = self.cell_map.get(&cell_id).map(|cell| cell.to_nbformat_cell(cx)) else {
+            return;
+        };
         let source = self.cell_source_text(&cell_id, cx);
-
-        let (new_cell_id, new_cell) = if to_markdown {
-            let (id, cell) = self.build_markdown_cell(source, window, cx);
-            (id, Cell::Markdown(cell))
+        let new_cell_id: CellId = Uuid::new_v4().into();
+        let after = if to_markdown {
+            nbformat::v4::Cell::Markdown {
+                id: new_cell_id,
+                metadata: Self::empty_cell_metadata(),
+                source: vec![source],
+                attachments: None,
+            }
         } else {
-            let (id, cell) = self.build_code_cell(source, window, cx);
-            (id, Cell::Code(cell))
+            nbformat::v4::Cell::Code {
+                id: new_cell_id,
+                metadata: Self::empty_cell_metadata(),
+                execution_count: None,
+                source: vec![source],
+                outputs: vec![],
+            }
         };
 
-        self.cell_map.remove(&cell_id);
-        self.execution_requests
-            .retain(|_, mapped| mapped != &cell_id);
-        self.pending_executions.retain(|mapped| mapped != &cell_id);
-        self.cells_awaiting_kernel_choice
-            .retain(|mapped| mapped != &cell_id);
-        // If this cell was part of an in-progress batch, abort the batch.
-        if self.active_run_cell.as_ref() == Some(&cell_id) || self.run_queue.contains(&cell_id) {
-            self.cancel_run_queue();
-        }
-        self.cell_order[index] = new_cell_id.clone();
-        self.cell_map.insert(new_cell_id, new_cell);
-        // Length is unchanged, but the row must re-render as the new cell type.
-        self.cell_list.splice(index..index + 1, 1);
+        self.raw_replace_cell(index, after.clone(), window, cx);
+        self.record_edit(CellEdit::Converted {
+            index,
+            before,
+            after,
+        });
 
-        self.selected_cell_index = index;
         self.notebook_mode = NotebookMode::Command;
         self.focus_handle.focus(window, cx);
         cx.notify();
@@ -2044,6 +2218,9 @@ impl NotebookEditor {
                                         .action("Paste Cell", Box::new(PasteCell))
                                         .action("Duplicate Cell", Box::new(DuplicateCell))
                                         .separator()
+                                        .action("Undo Cell Change", Box::new(UndoCellOp))
+                                        .action("Redo Cell Change", Box::new(RedoCellOp))
+                                        .separator()
                                         .action("Clear All Outputs", Box::new(ClearOutputs))
                                         .action("Delete Cell", Box::new(DeleteCell))
                                 }))
@@ -2315,6 +2492,8 @@ impl Render for NotebookEditor {
             .on_action(
                 cx.listener(|this, action, window, cx| this.duplicate_cell(action, window, cx)),
             )
+            .on_action(cx.listener(|this, action, window, cx| this.undo_cell_op(action, window, cx)))
+            .on_action(cx.listener(|this, action, window, cx| this.redo_cell_op(action, window, cx)))
             .on_action(
                 cx.listener(|this, action, window, cx| this.convert_to_code(action, window, cx)),
             )

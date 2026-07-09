@@ -1,10 +1,36 @@
 # Phase 8 — Cell-operation undo/redo
 
-> STATUS: PLANNED — not started. High priority: cell mutations (delete, move,
-> convert, paste) are currently irreversible, which makes delete in particular
-> risky. This is the safety net for phases 4 and 7.
+> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING (2026-07-08). Compiles,
+> clippy-clean, unit tests pass. Do NOT archive until the user confirms.
 >
 > Kind: **new feature.**
+>
+> ## Implementation summary
+> - `CellEdit` enum (Inserted / Deleted / Moved / Converted) with `undo_stack`
+>   and `redo_stack` on `NotebookEditor`.
+> - Structural mutations record onto the undo stack (and clear redo): add
+>   (code/markdown/above/below), paste, duplicate → `Inserted`; delete →
+>   `Deleted` (captures the cell's LIVE content + outputs so undo restores
+>   them); move up/down → `Moved`; convert → `Converted` (before/after).
+> - `UndoCellOp` / `RedoCellOp` apply the inverse/forward via raw primitives
+>   (`raw_insert_cell` / `raw_remove_cell` / `raw_move_cell` /
+>   `raw_replace_cell`) that rebuild cells from serialized nbformat (fresh
+>   entities + wiring, never resurrected). Keybinds: `z` undo, `shift-z` redo
+>   (command mode, all keymaps); also in the More options menu.
+> - Restored cells preserve their original id so undo/redo round-trip cleanly.
+> - Removed leftover `println!` debug lines from move_cell_up/down along the way.
+>
+> ## Scope notes
+> - Covers STRUCTURAL ops only; in-cell text editing is undone by the cell's
+>   own editor. Undoing an add/paste restores the cell as it was at
+>   creation/paste time (subsequent text edits are the editor's own history).
+>
+> ## Manual test checklist (for the user)
+> - [ ] Delete a cell → `z` restores it (same position, content, outputs).
+> - [ ] Move a cell → `z` moves it back; `shift-z` redoes.
+> - [ ] Convert a cell → `z` restores the original type + text.
+> - [ ] Paste/duplicate → `z` removes the added cell.
+> - [ ] A new structural op after undo clears the redo stack.
 
 Goal: undo/redo for structural cell operations, so deleting/moving/converting/
 pasting a cell can be reverted. Text edits *within* a cell already undo via the
