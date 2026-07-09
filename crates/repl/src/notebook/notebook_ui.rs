@@ -11,8 +11,8 @@ use feature_flags::{FeatureFlagAppExt as _, NotebookFeatureFlag};
 use futures::FutureExt;
 use futures::future::Shared;
 use gpui::{
-    AnyElement, App, Entity, EventEmitter, FocusHandle, Focusable, KeyContext, ListScrollEvent,
-    ListState, Point, Task, TaskExt, actions, list, prelude::*,
+    AnyElement, App, ClipboardItem, Entity, EventEmitter, FocusHandle, Focusable, KeyContext,
+    ListScrollEvent, ListState, Point, Task, TaskExt, actions, list, prelude::*,
 };
 use jupyter_protocol::JupyterKernelspec;
 use language::{Buffer, Language, LanguageRegistry};
@@ -50,9 +50,10 @@ use util::ResultExt as _;
 use zed_actions::editor::{MoveDown, MoveUp};
 use zed_actions::notebook::{
     AddCellAbove, AddCellBelow, AddCodeBlock, AddMarkdownBlock, ClearOutputs, ConvertToCode,
-    ConvertToMarkdown, DeleteCell, EnterCommandMode, EnterEditMode, InterruptKernel, MoveCellDown,
-    MoveCellUp, NotebookMoveDown, NotebookMoveUp, OpenNotebook, RestartKernel, Run, RunAll,
-    RunAndAdvance, RunCellAndBelow, RunCellsAbove, SelectFirstCell, SelectLastCell,
+    ConvertToMarkdown, CopyCell, CutCell, DeleteCell, DuplicateCell, EnterCommandMode,
+    EnterEditMode, InterruptKernel, MoveCellDown, MoveCellUp, NotebookMoveDown, NotebookMoveUp,
+    OpenNotebook, PasteCell, RestartKernel, Run, RunAll, RunAndAdvance, RunCellAndBelow,
+    RunCellsAbove, SelectFirstCell, SelectLastCell,
 };
 
 /// Whether the notebook is in command mode (navigating cells) or edit mode (editing a cell).
@@ -1502,6 +1503,114 @@ impl NotebookEditor {
         cx.notify();
     }
 
+    fn copy_cell(&mut self, _: &CopyCell, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some(cell_id) = self.cell_order.get(self.selected_cell_index) else {
+            return;
+        };
+        let Some(cell) = self.cell_map.get(cell_id) else {
+            return;
+        };
+        let nbformat_cell = cell.to_nbformat_cell(cx);
+        match serde_json::to_string(&nbformat_cell) {
+            Ok(json) => cx.write_to_clipboard(ClipboardItem::new_string(json)),
+            Err(error) => log::error!("notebook: failed to copy cell: {error}"),
+        }
+    }
+
+    fn cut_cell(&mut self, _: &CutCell, window: &mut Window, cx: &mut Context<Self>) {
+        self.copy_cell(&CopyCell, window, cx);
+        self.delete_cell(&DeleteCell, window, cx);
+    }
+
+    /// Parse an nbformat cell from clipboard text, if present.
+    fn clipboard_cell(cx: &mut Context<Self>) -> Option<nbformat::v4::Cell> {
+        let text = cx.read_from_clipboard()?.text()?;
+        serde_json::from_str::<nbformat::v4::Cell>(&text).ok()
+    }
+
+    fn paste_cell(&mut self, _: &PasteCell, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(cell) = Self::clipboard_cell(cx) else {
+            return;
+        };
+        let index = self.index_below_selection();
+        self.insert_nbformat_cell(index, cell, window, cx);
+    }
+
+    fn duplicate_cell(&mut self, _: &DuplicateCell, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(cell_id) = self.cell_order.get(self.selected_cell_index) else {
+            return;
+        };
+        let Some(cell) = self.cell_map.get(cell_id) else {
+            return;
+        };
+        let nbformat_cell = cell.to_nbformat_cell(cx);
+        let index = self.selected_cell_index + 1;
+        self.insert_nbformat_cell(index, nbformat_cell, window, cx);
+    }
+
+    /// Build a live cell from an nbformat cell (with a fresh id), wire it, and
+    /// insert it at `index`. Shared by paste and duplicate.
+    fn insert_nbformat_cell(
+        &mut self,
+        index: usize,
+        cell: nbformat::v4::Cell,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // A pasted/duplicated cell must get a fresh id, or it would collide
+        // with the source cell's id.
+        let new_cell_id: CellId = Uuid::new_v4().into();
+        let cell = match cell {
+            nbformat::v4::Cell::Markdown {
+                metadata,
+                source,
+                attachments,
+                ..
+            } => nbformat::v4::Cell::Markdown {
+                id: new_cell_id.clone(),
+                metadata,
+                source,
+                attachments,
+            },
+            nbformat::v4::Cell::Code {
+                metadata,
+                execution_count,
+                source,
+                outputs,
+                ..
+            } => nbformat::v4::Cell::Code {
+                id: new_cell_id.clone(),
+                metadata,
+                execution_count,
+                source,
+                outputs,
+            },
+            nbformat::v4::Cell::Raw {
+                metadata, source, ..
+            } => nbformat::v4::Cell::Raw {
+                id: new_cell_id.clone(),
+                metadata,
+                source,
+            },
+        };
+
+        let languages = self.languages.clone();
+        let notebook_language = self.notebook_language.clone();
+        let cell_entity = Cell::load(&cell, &languages, notebook_language, window, cx);
+        match &cell_entity {
+            Cell::Code(code_cell) => self.wire_code_cell(new_cell_id.clone(), code_cell, window, cx),
+            Cell::Markdown(markdown_cell) => {
+                self.wire_markdown_cell(new_cell_id.clone(), markdown_cell, window, cx)
+            }
+            Cell::Raw(_) => {}
+        }
+
+        self.insert_cell(index, new_cell_id, cell_entity);
+        self.notebook_mode = NotebookMode::Command;
+        self.focus_handle.focus(window, cx);
+        cx.notify();
+    }
+
     fn convert_to_markdown(
         &mut self,
         _: &ConvertToMarkdown,
@@ -1930,6 +2039,11 @@ impl NotebookEditor {
                                         .action("Convert to Code", Box::new(ConvertToCode))
                                         .action("Convert to Markdown", Box::new(ConvertToMarkdown))
                                         .separator()
+                                        .action("Copy Cell", Box::new(CopyCell))
+                                        .action("Cut Cell", Box::new(CutCell))
+                                        .action("Paste Cell", Box::new(PasteCell))
+                                        .action("Duplicate Cell", Box::new(DuplicateCell))
+                                        .separator()
                                         .action("Clear All Outputs", Box::new(ClearOutputs))
                                         .action("Delete Cell", Box::new(DeleteCell))
                                 }))
@@ -2195,6 +2309,12 @@ impl Render for NotebookEditor {
                 cx.listener(|this, action, window, cx| this.add_cell_below(action, window, cx)),
             )
             .on_action(cx.listener(|this, action, window, cx| this.delete_cell(action, window, cx)))
+            .on_action(cx.listener(|this, action, window, cx| this.copy_cell(action, window, cx)))
+            .on_action(cx.listener(|this, action, window, cx| this.cut_cell(action, window, cx)))
+            .on_action(cx.listener(|this, action, window, cx| this.paste_cell(action, window, cx)))
+            .on_action(
+                cx.listener(|this, action, window, cx| this.duplicate_cell(action, window, cx)),
+            )
             .on_action(
                 cx.listener(|this, action, window, cx| this.convert_to_code(action, window, cx)),
             )

@@ -938,6 +938,14 @@ pub mod notebook {
             AddCellBelow,
             /// Deletes the current cell.
             DeleteCell,
+            /// Copies the current cell to the clipboard.
+            CopyCell,
+            /// Cuts the current cell to the clipboard.
+            CutCell,
+            /// Pastes a cell from the clipboard below the current cell.
+            PasteCell,
+            /// Duplicates the current cell below itself.
+            DuplicateCell,
             /// Runs all cells above the current cell.
             RunCellsAbove,
             /// Runs the current cell and all cells below it.

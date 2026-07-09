@@ -1,10 +1,36 @@
 # Phase 7 — Cell clipboard operations (copy / cut / paste / duplicate)
 
-> STATUS: PLANNED — not started. High priority: these are everyday notebook
-> operations and a natural safety companion to phase 4's delete/insert.
+> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING (2026-07-08). Compiles,
+> clippy-clean, unit tests pass. Do NOT archive until the user confirms.
 >
 > Kind: **new feature** (adds operations that don't exist), with ONE small
-> **change** item: reconciling the `x` keybinding with Jupyter's convention.
+> **change** item: `x` rebound from DeleteCell to CutCell (keep OPEN until the
+> user confirms the rebinding took effect).
+>
+> ## Implementation summary
+> - Actions `CopyCell`, `CutCell`, `PasteCell`, `DuplicateCell`.
+> - Clipboard format: the cell serialized as nbformat JSON via `ClipboardItem`
+>   (works within a notebook and across notebooks/windows). Paste parses the
+>   clipboard text as an `nbformat::v4::Cell`; non-cell text is ignored.
+> - Copy → clipboard; Cut → copy + delete (respects the last-cell guard);
+>   Paste → insert below with a FRESH cell id (via `insert_nbformat_cell`);
+>   Duplicate → insert a copy of the selected cell below (does not touch the
+>   clipboard). Pasted/duplicated code cells keep their source but get a new
+>   id and are fully wired.
+> - Nav-mode keybinds (command mode, all three keymaps): `c` copy, `x` cut,
+>   `v` paste (below), `d d` delete (unchanged). Also in the "More options"
+>   menu.
+>
+> ## Deferred (backlog)
+> - Paste ABOVE (`shift-v`) — only paste-below is wired for now.
+>
+> ## Manual test checklist (for the user)
+> - [ ] Copy a cell (`c`), paste below (`v`): content + type preserved,
+>       outputs not duplicated, new cell is independent (new id).
+> - [ ] Cut (`x`): cell removed and on clipboard; paste elsewhere.
+> - [ ] `d d` still deletes (does not cut).
+> - [ ] Duplicate (via More options menu).
+> - [ ] Paste into a different notebook / window.
 
 Goal: standard cell clipboard editing, matching Jupyter/VS Code conventions,
 built on the phase-4 insert/delete/build helpers.

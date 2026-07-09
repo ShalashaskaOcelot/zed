@@ -9,6 +9,9 @@ Scheduled into phases (kept here only as a pointer):
 - Undo/redo for cell operations → **phase 8**.
 - Watch the .ipynb for external changes and reload → **phase 9**.
 
+Small follow-ups:
+- Paste cell ABOVE (`shift-v`) — phase 7 wired only paste-below.
+
 ## Medium priority
 
 - Let "Create Python Environment" choose the location (user 2026-07-08 —
