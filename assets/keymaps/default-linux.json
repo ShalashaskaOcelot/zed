@@ -1503,8 +1503,6 @@
       "ctrl-x": "notebook::CutCell",
       "ctrl-v": "notebook::PasteCell",
       "i i": "notebook::InterruptKernel",
-      "z": "notebook::UndoCellOp",
-      "shift-z": "notebook::RedoCellOp",
       "ctrl-z": "notebook::UndoCellOp",
       "ctrl-shift-z": "notebook::RedoCellOp",
       "m": "notebook::ConvertToMarkdown",

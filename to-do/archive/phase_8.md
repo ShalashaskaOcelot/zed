@@ -6,8 +6,10 @@
 > new `bugs.md` entry, not a reopen of this phase.
 >
 > Root cause of the original "undo not working" report: undo was bound only to
-> `z` (Jupyter-style) but the user pressed `ctrl-z`. Fixed by adding
-> `ctrl-z` / `ctrl-shift-z` bindings; `z` / `shift-z` retained.
+> `z` (Jupyter-style) but the user pressed `ctrl-z`. Fixed by binding undo/redo
+> to the OS-standard combos only: `ctrl-z` / `ctrl-shift-z` (Linux/Windows),
+> `cmd-z` / `cmd-shift-z` (macOS). The single-key `z` / `shift-z` were removed
+> per the user's request to keep only the standard combos.
 
 Primary files: `crates/repl/src/notebook/notebook_ui.rs`,
 `crates/zed_actions/src/lib.rs`, `assets/keymaps/*`.
