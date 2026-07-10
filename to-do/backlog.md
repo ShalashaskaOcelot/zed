@@ -85,9 +85,10 @@ Small follow-ups:
   command/keybind). Crib from the inline REPL's `ClearCurrentOutput`
   (`repl_sessions_ui.rs:51`).
 - Markdown cell rendered-preview toggle improvements (render on exit-edit).
-- Decide behaviour of ctrl-c inside a focused cell editor (currently copy;
-  interrupt is only bound in the outer `NotebookEditor` context — likely
-  intentional). Consider `i i` double-tap interrupt like Jupyter.
+- (Resolved in phase 7 rebind) ctrl-c inside a focused cell editor now does
+  editor text-copy; cell copy/cut/paste moved to ctrl-c/x/v in command mode;
+  interrupt moved off ctrl-c onto the Jupyter-standard `i i` in command mode
+  (plus the toolbar Stop button).
 
 ## Low priority
 

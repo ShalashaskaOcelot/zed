@@ -203,8 +203,13 @@ confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
   These may not fully fix the "focus fully lost" case (where nothing in the
   notebook is focused); that likely needs returning focus to the notebook after
   toolbar-button / popover interactions. Kept OPEN.
-- **Tested:** no — needs user confirmation + more repro detail on the exact
-  action that drops focus.
+- **Update (user 2026-07-09):** "Your fix on focus seems to have worked, mark
+  that down but keep it open as an ongoing observation." The on_focus mode-sync
+  mitigation appears effective; keeping the bug OPEN as an ongoing observation
+  in case the "focus fully lost" edge recurs. If it does, capture the exact
+  action that dropped focus (the reporter wasn't sure of the trigger this time).
+- **Tested:** partially — the on_focus fix seems to work; kept open as an
+  ongoing observation for the rarer full-focus-loss case.
 
 ## 14. Saving overwrites external changes without warning
 

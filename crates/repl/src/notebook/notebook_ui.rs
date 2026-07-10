@@ -1179,17 +1179,20 @@ impl NotebookEditor {
                 self.execute_cell(cell_id, window, cx);
             }
             Cell::Markdown(markdown_cell) => {
-                // for markdown, finish editing and move to next cell
+                // for markdown, finish editing
                 let is_editing = markdown_cell.read(cx).is_editing();
                 if is_editing {
                     markdown_cell.update(cx, |cell, cx| {
                         cell.run(cx);
                     });
-                    self.enter_command_mode(window, cx);
                 }
             }
             Cell::Raw(_) => {}
         }
+        // Running a cell (ctrl/cmd-enter) always returns to command mode,
+        // regardless of the mode it was triggered from, so the cursor leaves
+        // the editor and single-key command shortcuts keep working.
+        self.enter_command_mode(window, cx);
     }
 
     fn run_and_advance(&mut self, _: &RunAndAdvance, window: &mut Window, cx: &mut Context<Self>) {

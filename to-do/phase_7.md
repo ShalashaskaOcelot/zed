@@ -1,12 +1,11 @@
 # Phase 7 — Cell clipboard operations (copy / cut / paste / duplicate)
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING (commit 1b6d566). Compiles,
-> clippy-clean, unit tests pass. Do NOT archive until the user confirms.
-> Kind: **new feature** (+ one **change**: `x` rebound from delete to cut).
->
-> User note (2026-07-08): copy/paste reported "not working" — under
-> investigation; likely the notebook getting stuck in Edit mode (see bug #13 /
-> #15), where the `c`/`v` command-mode keys type into a cell instead of firing.
+> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING of the rebind. The clipboard
+> logic itself is CONFIRMED working — the user verified copy/paste worked with
+> the old single-key `c`/`v` bindings ("Copy and paste using c and v did work").
+> The only open item is the keybinding change below.
+> Kind: **new feature** (clipboard, confirmed working) + **change** (rebind to
+> standard Ctrl-C / Ctrl-X / Ctrl-V — awaiting confirmation).
 
 Primary files: `crates/zed_actions/src/lib.rs`,
 `crates/repl/src/notebook/notebook_ui.rs`, `assets/keymaps/*`.
@@ -19,9 +18,21 @@ Primary files: `crates/zed_actions/src/lib.rs`,
       `nbformat::v4::Cell`; non-cell text is ignored.
 - [x] Copy → clipboard; Cut → copy + delete (respects the last-cell guard);
       Paste → insert below with a FRESH id; Duplicate → copy of selected below.
-- [x] Nav-mode keybinds (command mode, all keymaps): `c` copy, `x` cut
-      (rebound from delete), `v` paste; `d d` still deletes. Also in the More
-      options menu + command palette.
+- [x] **Confirmed working** via the old `c`/`v`/`x` command-mode keys.
+
+## Rebind to standard combos (awaiting confirmation)
+
+The single-key `c`/`x`/`v` bindings were unintuitive (and `x` clashed
+conceptually with delete). Rebound to the OS-standard clipboard combos, in the
+command-mode context only (edit mode keeps text copy/cut/paste):
+
+- [x] `ctrl-c` / `cmd-c` → CopyCell (was `c`).
+- [x] `ctrl-x` / `cmd-x` → CutCell (was `x`).
+- [x] `ctrl-v` / `cmd-v` → PasteCell (was `v`).
+- [x] `d d` still deletes (unchanged).
+- [x] Freed the base-context `ctrl-c`/`cmd-c` (was InterruptKernel — it was
+      shadowed everywhere anyway); interrupt moved to Jupyter-standard `i i` in
+      command mode, and remains on the toolbar Stop button.
 
 ## Deferred (backlog)
 
@@ -29,11 +40,11 @@ Primary files: `crates/zed_actions/src/lib.rs`,
 
 ## Manual test checklist (for the user)
 
-- [ ] Copy a cell (`c`), paste below (`v`): content + type preserved, outputs
-      not duplicated, new cell independent.
-- [ ] Cut (`x`): cell removed and on clipboard; paste elsewhere.
+- [ ] In command mode: `ctrl-c`/`cmd-c` copies, `ctrl-v`/`cmd-v` pastes below.
+- [ ] `ctrl-x`/`cmd-x` cuts (cell removed + on clipboard); paste elsewhere.
+- [ ] In edit mode, `ctrl-c`/`ctrl-x`/`ctrl-v` still operate on TEXT, not cells.
 - [ ] `d d` still deletes (does not cut).
-- [ ] Duplicate (More options menu).
+- [ ] `i i` interrupts a running cell (replaces the old `ctrl-c` interrupt).
 - [ ] Paste into a different notebook / window.
 
 ## Verification (automated)

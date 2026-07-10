@@ -1,14 +1,13 @@
-# Phase 8 — Cell-operation undo/redo
+# Phase 8 — Cell-operation undo/redo (COMPLETE, archived 2026-07-09)
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING (commit 7b41fbb). Compiles,
-> clippy-clean, unit tests pass. Do NOT archive until the user confirms.
-> Kind: **new feature**.
+> ✅ STATUS: CONFIRMED by the user 2026-07-09 ("So undo now works").
+> Kind: **new feature** — archived per the new-feature rule (confirmed present
+> and working). Any later defect in a specific op (redo, move, convert) is a
+> new `bugs.md` entry, not a reopen of this phase.
 >
-> User note (2026-07-08): undo reported "not working" (Ctrl-Z did nothing).
-> Two contributing factors under investigation: (1) undo was bound to `z`
-> (Jupyter) not `ctrl-z` — ctrl-z/ctrl-shift-z now added too; (2) the notebook
-> can get stuck in Edit mode so command-mode `z` types into a cell instead of
-> firing (see bug #13 / #15).
+> Root cause of the original "undo not working" report: undo was bound only to
+> `z` (Jupyter-style) but the user pressed `ctrl-z`. Fixed by adding
+> `ctrl-z` / `ctrl-shift-z` bindings; `z` / `shift-z` retained.
 
 Primary files: `crates/repl/src/notebook/notebook_ui.rs`,
 `crates/zed_actions/src/lib.rs`, `assets/keymaps/*`.
