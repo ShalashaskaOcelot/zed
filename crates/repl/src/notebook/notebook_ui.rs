@@ -292,6 +292,16 @@ impl NotebookEditor {
         })
         .detach();
 
+        // Keep `notebook_mode` in sync with focus: when the notebook itself
+        // (not a cell editor) holds focus, we are in command mode. This avoids
+        // a stuck state where the mode flag and the actually-focused element
+        // disagree and single-key shortcuts stop firing.
+        cx.on_focus(&editor.focus_handle, window, |this, _window, cx| {
+            this.notebook_mode = NotebookMode::Command;
+            cx.notify();
+        })
+        .detach();
+
         editor
     }
 
@@ -1472,14 +1482,11 @@ impl NotebookEditor {
     fn add_markdown_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (cell_id, markdown_cell) = self.build_markdown_cell(String::new(), window, cx);
         let index = self.index_below_selection();
-        self.insert_cell(index, cell_id.clone(), Cell::Markdown(markdown_cell.clone()));
+        self.insert_cell(index, cell_id.clone(), Cell::Markdown(markdown_cell));
         self.record_new_cell(index, &cell_id, cx);
-        markdown_cell.update(cx, |cell, cx| {
-            cell.set_editing(true);
-            cx.notify();
-        });
-        let editor = markdown_cell.read(cx).editor().clone();
-        self.focus_cell_editor_in_edit_mode(editor, window, cx);
+        // Select the new cell in command mode (VS Code-style: press Enter to
+        // edit). Staying in command mode keeps single-key shortcuts working.
+        self.enter_command_mode(window, cx);
     }
 
     fn add_code_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1489,10 +1496,9 @@ impl NotebookEditor {
 
     fn add_code_cell_at(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let (cell_id, code_cell) = self.build_code_cell(String::new(), window, cx);
-        self.insert_cell(index, cell_id.clone(), Cell::Code(code_cell.clone()));
+        self.insert_cell(index, cell_id.clone(), Cell::Code(code_cell));
         self.record_new_cell(index, &cell_id, cx);
-        let editor = code_cell.read(cx).editor().clone();
-        self.focus_cell_editor_in_edit_mode(editor, window, cx);
+        self.enter_command_mode(window, cx);
     }
 
     /// Record a just-inserted cell (by id) as an undoable insertion.

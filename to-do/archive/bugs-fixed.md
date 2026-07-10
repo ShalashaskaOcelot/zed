@@ -17,6 +17,19 @@ Confirmed-fixed bugs moved out of `to-do/bugs.md`.
 - **Fix:** phase 4 wired the per-output Ellipsis to a menu (Copy Output /
   Clear Output).
 
+## 10. Kernel picker does not accept Enter to select
+
+- **Status:** fixed - confirmed (user 2026-07-08: "the kernel picker now
+  accepts enter as an option").
+- **Root cause:** the picker's popover renders inside the NotebookEditor
+  element tree, so its single-line query editor matched the notebook's
+  `"NotebookEditor > Editor"` keymap context (`enter -> editor::Newline`),
+  which beat the picker's `"Picker"` context `enter -> menu::Confirm`.
+- **Fix:** gave notebook CELL editors a distinct `NotebookCellEditor` key
+  context and scoped the notebook editor bindings to
+  `"NotebookEditor > NotebookCellEditor > Editor"`, so the picker's query
+  editor no longer matches and Enter resolves to Confirm. (commit cfcbcd2)
+
 ## 11. Kernel-select prompt: cell state on dismiss vs. select
 
 - **Status:** fixed - confirmed (user 2026-07-08: "queued items now run

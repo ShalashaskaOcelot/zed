@@ -1550,6 +1550,7 @@
       "ctrl-shift-m": "notebook::AddMarkdownBlock",
       "ctrl-shift-r": "notebook::RestartKernel",
       "ctrl-c": "notebook::InterruptKernel",
+      "escape": "notebook::EnterCommandMode",
     },
   },
   {
@@ -1566,6 +1567,8 @@
       "v": "notebook::PasteCell",
       "z": "notebook::UndoCellOp",
       "shift-z": "notebook::RedoCellOp",
+      "ctrl-z": "notebook::UndoCellOp",
+      "ctrl-shift-z": "notebook::RedoCellOp",
       "m": "notebook::ConvertToMarkdown",
       "y": "notebook::ConvertToCode",
       "home": "notebook::SelectFirstCell",

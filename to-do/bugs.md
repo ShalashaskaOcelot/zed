@@ -53,10 +53,23 @@ Move to `to-do/archive/` only when `fixed - confirmed`.
     `NativeRunningKernel` overrides it to use the OS interrupt (with the
     message send as a fallback). Notebook and REPL both call
     `kernel.interrupt()`.
-- **Tested:** no — Unix path type-checks locally; Windows path type-checks and
-  clippy-checks against the `x86_64-pc-windows-msvc` target but the actual
-  interrupt behaviour needs user confirmation on Windows (interrupt a
-  long-running cell, e.g. `import time; time.sleep(30)`).
+- **Round 2 result (user 2026-07-08):** the interrupt IS delivered — clicking
+  interrupt during `time.sleep(10)` raised `KeyboardInterrupt` and stopped the
+  batch (the cells below did not run). BUT it did not fire until the sleep
+  finished (~10s), rather than immediately. This is the KNOWN Windows/ipykernel
+  limitation: the event-based interrupt (`JPY_INTERRUPT_EVENT` →
+  `interrupt_main` → `PyErr_SetInterrupt`) sets the interrupt flag but does not
+  wake a C-level blocking call like `time.sleep`; CPython only raises the
+  exception once control returns to the interpreter. A pure-Python busy loop
+  should be interrupted promptly. So the mechanism works; only immediate
+  interruption of C-blocking calls is limited.
+- **Status:** the core interrupt now works; keep this open only until the user
+  confirms a pure-Python loop interrupts PROMPTLY. Immediate interruption of
+  C-blocking calls on Windows would require launching the kernel in a new
+  process group and using `GenerateConsoleCtrlEvent` (jupyter's "signal"
+  interrupt mode) — filed in backlog.
+- **Tested:** partially — delivered + batch-cancel confirmed; prompt interrupt
+  of normal Python code still to confirm.
 
 (Bug #4 "More options button opens nothing" — fixed & confirmed 2026-07-08
 via phase 4's popover menu; moved to `archive/bugs-fixed.md`.)
@@ -121,39 +134,8 @@ confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
 - **Fix attempted:** none
 - **Tested:** n/a
 
-## 10. Kernel picker does not accept Enter to select
-
-- **Status:** open
-- **Symptom:** (user 2026-07-08) In the kernel selector, arrow keys navigate
-  the list, but pressing Enter does not confirm the highlighted kernel — the
-  user perceives a newline being entered in the search box instead.
-- **Analysis:** The picker's query editor is single-line
-  (`Editor::single_line` via the erased-editor factory) and
-  `KernelPickerDelegate::confirm` (`kernel_options.rs:300`) looks correct
-  (calls `on_select` + emits `DismissEvent`). Enter is globally bound to
-  `menu::Confirm`. So Enter should reach `Picker::confirm` → delegate. The
-  failure is most likely a focus / key-context interaction specific to this
-  picker being hosted in a `PopoverMenu` and/or opened via
-  `kernel_picker_handle.show()` (phase 6 lazy-start) — arrows reach it but
-  Confirm does not. NEEDS RUNTIME DEBUGGING; not safe to guess-fix shared
-  picker infra.
-- **ROOT CAUSE (2026-07-08):** the user's diagnosis was right — the focused
-  query editor ate Enter as a newline. The kernel picker's popover is rendered
-  inside the `NotebookEditor` element tree, so its query editor matched the
-  notebook's OWN keymap context `"NotebookEditor > Editor"`, which binds
-  `enter → editor::Newline`. That binding matches at the editor node (deeper)
-  and beat the picker's `"Picker"` context `enter → menu::Confirm`, so Enter
-  inserted a newline instead of confirming. (Zed's GitBranchSelector avoids
-  this by scoping its editor bindings through `> Picker > Editor`.)
-- **Fix attempted:** gave the notebook's CELL editors a distinct
-  `NotebookCellEditor` key context (added to the div wrapping each cell's
-  editor in `cell.rs`) and changed the keymap context from
-  `"NotebookEditor > Editor"` to `"NotebookEditor > NotebookCellEditor >
-  Editor"` in all three keymaps. The picker's query editor is not inside a
-  `NotebookCellEditor`, so it no longer matches — Enter now resolves to the
-  picker's `menu::Confirm`.
-- **Tested:** no — needs user confirmation (Enter selects the kernel; cell
-  editors still get enter=newline / ctrl-enter=run / escape=command mode).
+(Bug #10 "Kernel picker does not accept Enter" — fixed & confirmed 2026-07-08
+via the NotebookCellEditor keymap scoping; moved to `archive/bugs-fixed.md`.)
 
 (Bug #11 "Kernel-select prompt: cell state on dismiss vs. select" — fixed &
 confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
@@ -182,9 +164,47 @@ confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
   command-mode `enter → EnterEditMode` binding either isn't active or
   `enter_edit_mode` focuses an editor that isn't the one showing. Overlaps
   with the backlog item to make `a`/`b` focus in COMMAND mode (which would
-  sidestep this by not auto-entering edit mode). Needs reliable repro.
-- **Fix attempted:** none
-- **Tested:** n/a
+  sidestep this by not auto-entering edit mode).
+- **Fix attempted (2026-07-08):** `a`/`b` (and the + toolbar buttons) now
+  insert the new cell and stay in COMMAND mode (select it, focus the notebook
+  handle) instead of jumping into edit mode. Note: the user separately hit a
+  broader "no cursor, no chars, esc doesn't help" stuck state that is NOT edit
+  mode — that is the focus/mode desync in bug #15.
+- **Tested:** no — needs user confirmation that `a`/`b` now land in command
+  mode and shortcuts keep working after adding a cell.
+
+## 15. Notebook keyboard shortcuts get stuck (focus/mode desync)
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-07-08) Intermittently, command-mode shortcuts
+  (delete, add, convert, copy/paste, undo) stop firing. In the stuck state
+  there is NO cursor and NO characters appear (so it is NOT edit mode), and
+  pressing Escape does not recover it. Recovery required selecting another
+  cell, pressing Escape, navigating back, then the shortcut worked. Also seen:
+  `b` sometimes doesn't even select/focus the new cell (stays on the old one),
+  other times it does. So it's a focus/mode desync, not a specific action bug —
+  it's very likely the underlying cause of the "undo/copy/paste not working"
+  reports too (the `z`/`c`/`v` keys simply don't dispatch when stuck).
+- **Analysis:** command-mode keybindings require BOTH `notebook_mode == command`
+  AND the notebook (or a descendant) focused. These can desync: `select_cell_by_id`
+  sets `Edit` on any editor focus, and focus can be lost entirely (e.g. after
+  clicking toolbar buttons / popovers) with nothing bringing it back — Escape
+  is only bound in the notebook contexts, so if focus is fully off the notebook
+  it can't recover. Needs runtime debugging to pin the exact focus-loss
+  trigger(s).
+- **Fix attempted (2026-07-08), partial/mitigations:**
+  1. `cx.on_focus` on the notebook root handle → force `notebook_mode = Command`
+     whenever the notebook itself gains focus, keeping mode synced to focus.
+  2. `a`/`b`/+ now stay in command mode (bug #13) so adding a cell no longer
+     drops you into edit unexpectedly.
+  3. Bound Escape → `EnterCommandMode` in the base `NotebookEditor` context
+     (not just edit mode) as a recovery path — works whenever the notebook is
+     still in the focus chain.
+  These may not fully fix the "focus fully lost" case (where nothing in the
+  notebook is focused); that likely needs returning focus to the notebook after
+  toolbar-button / popover interactions. Kept OPEN.
+- **Tested:** no — needs user confirmation + more repro detail on the exact
+  action that drops focus.
 
 ## 14. Saving overwrites external changes without warning
 

@@ -70,6 +70,16 @@ Small follow-ups:
   native now captures it on premature exit — extend to post-connect failures).
 - Replace the fixed 500ms native-launch readiness sleep with a proper
   kernel_info/heartbeat handshake (follow-up to bug #6 if 10054 persists).
+- Immediate interrupt of C-level blocking calls (e.g. `time.sleep`) on Windows
+  (follow-up to bug #3). The event-based interrupt sets Python's interrupt flag
+  but doesn't wake a blocking C call, so `time.sleep` only interrupts when it
+  returns. jupyter's "signal" interrupt mode launches the kernel in a new
+  process group and uses `GenerateConsoleCtrlEvent(CTRL_BREAK/ CTRL_C)` for
+  prompt interruption — bigger launch change; normal Python loops already
+  interrupt promptly.
+- Return keyboard focus to the notebook after toolbar-button / popover
+  interactions so command-mode shortcuts keep working without clicking a cell
+  (follow-up to bug #15 if the on_focus/Escape mitigations aren't enough).
 - Dedicated `ClearCellOutputs` action + keybind for a single cell (the
   per-output "..." menu already offers "Clear Output"; this adds a
   command/keybind). Crib from the inline REPL's `ClearCurrentOutput`
