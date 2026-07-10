@@ -8,6 +8,10 @@ Scheduled into phases (kept here only as a pointer):
 - Copy / cut / paste / duplicate cell → **phase 7**.
 - Undo/redo for cell operations → **phase 8**.
 - Watch the .ipynb for external changes and reload → **phase 9**.
+- Create new `.ipynb` + "New Jupyter Notebook" command → **phase 12**.
+- Per-cell hover/selection toolbar → **phase 13**.
+- Save-conflict guard + Reload affordance (with bug #14) → **phase 14**.
+- Reset execution counter on restart + `ClearCellOutputs` action → **phase 15**.
 
 Small follow-ups:
 - Paste cell ABOVE (`shift-v`) — phase 7 wired only paste-below.
@@ -18,41 +22,33 @@ Small follow-ups:
   for user-based rather than repo-based venvs in a central place). Default to
   the local workspace `.venv` so Enter/OK just creates it there, but allow
   picking a different directory. (Phase 5 follow-up.)
-- A convenient "reload from disk" affordance for the notebook (user 2026-07-08):
-  when the .ipynb changed on disk, the conflict toast currently tells the user
-  to close and reopen. `Item::reload` exists (wired in phase 9) but isn't
-  surfaced as a button/command. Add a Reload button (e.g. on the conflict
-  toast) or a "Reload Notebook" command that calls the existing reload.
-- Create new `.ipynb` files (user 2026-07-08 — currently you must duplicate an
-  existing notebook and empty it). Two parts, VS Code parity:
-  1. When a `.ipynb` is created via the file browser (empty file), populate it
-     with a minimal valid nbformat v4 template (one empty code cell) so it
-     opens as a notebook instead of erroring on empty/invalid JSON.
-  2. A "New Jupyter Notebook" command-palette action that opens an untitled,
-     unsaved notebook in the editor.
-- Cell hover controls: VS Code-style per-cell toolbar on the selected/hovered
-  cell, reusing the phase-4 actions. USER PREFERENCE (2026-07-08): wants the
-  run-above / run-cell-and-below (and likely delete / add) buttons shown
-  individually in the focused cell's top-right, NOT tucked in the "More
-  options" menu. The actions, keybinds, and menus already exist; this is the
-  discoverable per-cell button layer.
+- (Moved to **phase 14**) A convenient "reload from disk" affordance for the
+  notebook (user 2026-07-08): the conflict toast currently tells the user to
+  close and reopen. `Item::reload` exists (wired in phase 9) but isn't surfaced
+  as a button/command.
+- (Moved to **phase 12**) Create new `.ipynb` files (user 2026-07-08 — currently
+  you must duplicate an existing notebook and empty it). Two parts, VS Code
+  parity: populate an empty file with a minimal nbformat v4 template; add a
+  "New Jupyter Notebook" command.
+- (Moved to **phase 13**) Cell hover controls: VS Code-style per-cell toolbar on
+  the selected/hovered cell, reusing the phase-4 actions. USER PREFERENCE
+  (2026-07-08): run-above / run-cell-and-below (and likely delete / add) buttons
+  shown individually in the focused cell's top-right, NOT tucked in "More
+  options".
 - Deleting the LAST remaining cell: currently refused. Decide/implement the
   preferred behaviour — either clear its contents in place, or delete it and
   insert a fresh empty cell — so delete always "does something". (Spun off
   from phase 4; user asked.)
-- `a`/`b` add-cell (and the + toolbar buttons) currently switch straight into
-  EDIT mode. VS Code focuses the new cell but stays in command mode until you
-  press Enter. Consider matching that (focus + command mode). (Spun off from
-  phase 4.)
+- (DONE via bug #13) `a`/`b` add-cell (and the + toolbar buttons) now stay in
+  COMMAND mode (focus the new cell, press Enter to edit) instead of jumping into
+  edit mode. Awaiting the same user confirmation as bug #13.
 - Auto-run the triggering cell after a kernel is picked from the run-prompt.
   Dropped when fixing bugs.md #11 (the cell no longer queues on a no-kernel
   run to avoid the stuck-"Running" state); re-add the auto-run once the
   picker-dismiss lifecycle can be tracked cleanly.
-- Reset the per-cell execution counter (the number under each cell's run
-  button) when the kernel is restarted, so a fresh run-through is visually
-  distinct from a session with re-runs. (User 2026-07-08.) The count comes
-  from the kernel's `execute_input.execution_count` (`cell.rs`); on restart,
-  clear each cell's `execution_count` (and probably its outputs' counts).
+- (Moved to **phase 15**) Reset the per-cell execution counter when the kernel
+  is restarted, so a fresh run-through is visually distinct from a re-run
+  session. (User 2026-07-08.)
 - Persist the per-notebook kernel choice across full Zed restarts (currently
   only within a session; user: "not a big deal"). Likely via the saved .ipynb
   metadata match or a persisted `ReplStore`. (Spun off from phase 6.)
@@ -80,10 +76,9 @@ Small follow-ups:
 - Return keyboard focus to the notebook after toolbar-button / popover
   interactions so command-mode shortcuts keep working without clicking a cell
   (follow-up to bug #15 if the on_focus/Escape mitigations aren't enough).
-- Dedicated `ClearCellOutputs` action + keybind for a single cell (the
-  per-output "..." menu already offers "Clear Output"; this adds a
-  command/keybind). Crib from the inline REPL's `ClearCurrentOutput`
-  (`repl_sessions_ui.rs:51`).
+- (Moved to **phase 15**) Dedicated `ClearCellOutputs` action + keybind for a
+  single cell (the per-output "..." menu already offers "Clear Output"; this
+  adds a command/keybind). Crib from the inline REPL's `ClearCurrentOutput`.
 - Markdown cell rendered-preview toggle improvements (render on exit-edit).
 - (Resolved in phase 7 rebind) ctrl-c inside a focused cell editor now does
   editor text-copy; cell copy/cut/paste moved to ctrl-c/x/v in command mode;
