@@ -1,10 +1,9 @@
-# Phase 9 — External file sync (watch & reload)
+# Phase 9 — External file sync (watch & reload) (COMPLETE, archived 2026-07-10)
 
-> ⚠️ STATUS: RELOAD CONFIRMED; save-side conflict warning still missing
-> (commit 3ae7e5a). Kind: **new feature**. User confirmed the external-change
-> popup appears and reload works. Remaining gap tracked as bug #14 (saving
-> silently overwrites external changes). Keep OPEN until bug #14 is resolved
-> or the phase is explicitly closed with #14 carrying the remainder.
+> ✅ STATUS: CONFIRMED by the user 2026-07-10 ("9 is good"). Kind: **new
+> feature**. The external-change popup appears and reload works. The save-side
+> conflict warning was never part of this phase's delivery; it is carried
+> forward as bug #14 / **phase 14** (save-conflict guard + reload affordance).
 
 Primary files: `crates/repl/src/notebook/notebook_ui.rs`.
 

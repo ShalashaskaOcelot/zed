@@ -35,7 +35,7 @@ Primary files: `crates/repl/src/notebook/notebook_ui.rs`,
       `menu::SelectNext`/`Previous` (arrows) reach the notebook. FIX: added
       dedicated `notebook::SelectFirstCell` / `SelectLastCell` actions and
       bound `home`/`end` to them in the command-mode context (all three
-      keymaps). ⚠ AWAITING RE-TEST.
+      keymaps). ✅ CONFIRMED working (user 2026-07-10).
 - [~] Smart arrows (`NotebookMoveUp`/`NotebookMoveDown`) in edit mode:
       DECIDED to defer — moved to `backlog.md`. Binding up/down in the
       `NotebookEditor > Editor` context risks overriding completion-menu

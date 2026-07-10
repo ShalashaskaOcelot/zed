@@ -9,67 +9,13 @@ Move to `to-do/archive/` only when `fixed - confirmed`.
 (Bug #1 "Restart kernel kills but relaunch fails" — fixed & confirmed
 2026-07-08, moved to `archive/bugs-fixed.md`.)
 
-## 2. Running a cell with a dead/shutdown kernel does not start the kernel
+(Bug #2 "Running a cell with a dead kernel does not start it" — fixed &
+confirmed 2026-07-10, moved to `archive/bugs-fixed.md`.)
 
-- **Status:** fix attempted - untested
-- **Symptom:** After the kernel is killed, running a cell just errors
-  ("the kernel is shut down" / "failed to launch") instead of starting the
-  selected kernel.
-- **Analysis:** `execute_cell` (`notebook_ui.rs:518-567`) has no relaunch
-  branch for `Shutdown` / `ErroredLaunch`; it only renders an error output.
-  It also does not queue executions while `StartingKernel` (the REPL does,
-  `session.rs:683-793`).
-- **Fix attempted:** `execute_cell` now queues the execution and relaunches
-  the selected kernel when the kernel is `Shutdown` or `ErroredLaunch`, and
-  queues (without relaunching) while `StartingKernel`/`Restarting`. Queued
-  cells run in order once the kernel is up; if the launch fails they show the
-  launch error instead of spinning. Covered by updated test
-  `test_run_cell_with_missing_interpreter_shows_error`.
-- **Tested:** no — automated test passes; needs user confirmation on Windows
-
-## 3. Interrupt / stop button does not interrupt a running cell
-
-- **Status:** fix attempted - untested
-- **Symptom:** (Round 1) Stop button always disabled. (Round 2, user
-  2026-07-08) Button is now enabled when idle, but pressing it does not stop
-  a running task.
-- **Analysis:** Round 1 was pure UI enablement (Busy-only gate). Round 2 is
-  the real mechanism: the notebook sent a message-based `interrupt_request`
-  over the control channel, but ipykernel does NOT honor message-based
-  interrupts by default — it expects an OS-level interrupt (SIGINT on Unix, a
-  Windows interrupt event). We know the control channel itself works because
-  `ShutdownRequest` (restart) travels the same channel and succeeds, so the
-  message is delivered but ignored. The user is on Windows, where ipykernel's
-  parent poller waits on a `JPY_INTERRUPT_EVENT` handle.
-- **Fix attempted:**
-  - Round 1: enable the stop button whenever the kernel is connected (Idle or
-    Busy); log send failures; warn when no kernel is running.
-  - Round 2: OS-level interrupt. Added `Child::spawn_interruptible` and
-    `Child::interrupt` in `util::process`. Unix sends `SIGINT` to the kernel's
-    process group (`killpg`). Windows creates an inheritable auto-reset event,
-    passes it to the kernel via `JPY_INTERRUPT_EVENT`, and signals it with
-    `SetEvent` — matching how jupyter_client interrupts kernels on Windows.
-    `RunningKernel::interrupt` defaults to the old message-based path;
-    `NativeRunningKernel` overrides it to use the OS interrupt (with the
-    message send as a fallback). Notebook and REPL both call
-    `kernel.interrupt()`.
-- **Round 2 result (user 2026-07-08):** the interrupt IS delivered — clicking
-  interrupt during `time.sleep(10)` raised `KeyboardInterrupt` and stopped the
-  batch (the cells below did not run). BUT it did not fire until the sleep
-  finished (~10s), rather than immediately. This is the KNOWN Windows/ipykernel
-  limitation: the event-based interrupt (`JPY_INTERRUPT_EVENT` →
-  `interrupt_main` → `PyErr_SetInterrupt`) sets the interrupt flag but does not
-  wake a C-level blocking call like `time.sleep`; CPython only raises the
-  exception once control returns to the interpreter. A pure-Python busy loop
-  should be interrupted promptly. So the mechanism works; only immediate
-  interruption of C-blocking calls is limited.
-- **Status:** the core interrupt now works; keep this open only until the user
-  confirms a pure-Python loop interrupts PROMPTLY. Immediate interruption of
-  C-blocking calls on Windows would require launching the kernel in a new
-  process group and using `GenerateConsoleCtrlEvent` (jupyter's "signal"
-  interrupt mode) — filed in backlog.
-- **Tested:** partially — delivered + batch-cancel confirmed; prompt interrupt
-  of normal Python code still to confirm.
+(Bug #3 "Interrupt does not stop a running cell" — fixed & confirmed 2026-07-10
+via the OS-level interrupt; a pure-Python loop interrupts immediately. Immediate
+interrupt of C-blocking calls like `time.sleep` on Windows remains a backlog
+item. Moved to `archive/bugs-fixed.md`.)
 
 (Bug #4 "More options button opens nothing" — fixed & confirmed 2026-07-08
 via phase 4's popover menu; moved to `archive/bugs-fixed.md`.)
@@ -149,29 +95,9 @@ confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
 - **Fix attempted:** none
 - **Tested:** n/a
 
-## 13. After adding a cell with `a`/`b`, Enter sometimes won't enter edit mode
-
-- **Status:** open (intermittent, hard to reproduce)
-- **Symptom:** (user 2026-07-08) Pressed `b` to add a cell; the cell was
-  created and focused but Enter did nothing (repeatedly), and esc→enter,
-  refocusing from an adjacent cell, etc. didn't help. Clicking directly in the
-  cell text area fixed it and it then behaved. On another attempt, `b` created
-  the cell AND went straight into edit mode. Inconsistent.
-- **Analysis:** Likely a focus/mode race in the add-cell path
-  (`add_code_cell_at` → `focus_cell_editor_in_edit_mode` sets
-  `NotebookMode::Edit` and focuses the new editor). When it lands in a bad
-  state, `notebook_mode`/focus and the actual focused element disagree, so the
-  command-mode `enter → EnterEditMode` binding either isn't active or
-  `enter_edit_mode` focuses an editor that isn't the one showing. Overlaps
-  with the backlog item to make `a`/`b` focus in COMMAND mode (which would
-  sidestep this by not auto-entering edit mode).
-- **Fix attempted (2026-07-08):** `a`/`b` (and the + toolbar buttons) now
-  insert the new cell and stay in COMMAND mode (select it, focus the notebook
-  handle) instead of jumping into edit mode. Note: the user separately hit a
-  broader "no cursor, no chars, esc doesn't help" stuck state that is NOT edit
-  mode — that is the focus/mode desync in bug #15.
-- **Tested:** no — needs user confirmation that `a`/`b` now land in command
-  mode and shortcuts keep working after adding a cell.
+(Bug #13 "After adding a cell with `a`/`b`, Enter won't enter edit mode" —
+fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
+`archive/bugs-fixed.md`. The broader full-focus-loss edge remains as bug #15.)
 
 ## 15. Notebook keyboard shortcuts get stuck (focus/mode desync)
 

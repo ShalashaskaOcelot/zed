@@ -1,9 +1,8 @@
-# Phase 11 — Run always returns to command mode
+# Phase 11 — Run always returns to command mode (COMPLETE, archived 2026-07-10)
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Do NOT archive until the user
-> confirms.
-> Kind: **change to existing behaviour** — keep OPEN until the user confirms the
-> mode actually switches; if it still lands in edit mode the change did not take.
+> ✅ STATUS: CONFIRMED by the user 2026-07-10 ("11 ... can confirm fixed").
+> Kind: **change to existing behaviour** — the change took effect: Ctrl-Enter
+> and Shift-Enter now both land in command mode after executing.
 
 Requested by the user (2026-07-09): "if I ctrl-enter or shift-enter to execute
 [it] should always push to command mode. I've noticed that shift-enter will

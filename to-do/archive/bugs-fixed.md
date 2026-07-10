@@ -67,3 +67,40 @@ Confirmed-fixed bugs moved out of `to-do/bugs.md`.
 - **Fix:** Added `KernelSession::kernel_exited`, called by the native and WSL
   process watchers on a successful exit, transitioning the notebook (and REPL
   session) to `Shutdown` and stopping cell spinners. (commit 7bd5b5a)
+
+## 2. Running a cell with a dead/shutdown kernel does not start the kernel
+
+- **Status:** fixed - confirmed (user, 2026-07-10: "bug 2 is fixed")
+- **Symptom:** After the kernel was killed, running a cell just errored instead
+  of starting the selected kernel.
+- **Fix:** `execute_cell` now queues the execution and relaunches the selected
+  kernel when it is `Shutdown` / `ErroredLaunch`, and queues (without
+  relaunching) while `StartingKernel` / `Restarting`. Queued cells run in order
+  once the kernel is up; a failed launch shows the launch error instead of
+  spinning.
+
+## 3. Interrupt / stop button does not interrupt a running cell
+
+- **Status:** fixed - confirmed (user, 2026-07-10: tested with a Python loop
+  instead of `time.sleep`, "killed immediately")
+- **Symptom:** Stop button did not stop a running task.
+- **Fix:** OS-level interrupt. `Child::spawn_interruptible` / `Child::interrupt`
+  in `util::process`: Unix sends `SIGINT` to the kernel's process group;
+  Windows creates an inheritable auto-reset event, passes it via
+  `JPY_INTERRUPT_EVENT`, and signals it with `SetEvent` (matching
+  jupyter_client). `NativeRunningKernel::interrupt` uses the OS interrupt with
+  the message-based path as a fallback. A pure-Python loop interrupts promptly.
+- **Follow-up (backlog, not a bug):** immediate interruption of a C-level
+  blocking call (e.g. `time.sleep`) on Windows is delayed until the call
+  returns — a known ipykernel/Windows event-interrupt limitation; would need
+  `GenerateConsoleCtrlEvent` (jupyter's "signal" interrupt mode).
+
+## 13. After adding a cell with `a`/`b`, Enter sometimes won't enter edit mode
+
+- **Status:** fixed - confirmed (user, 2026-07-10: "13 looks good")
+- **Symptom:** `b` created and focused a cell but Enter did nothing; the
+  notebook could land in a focus/mode desync after add.
+- **Fix:** `a`/`b` (and the + toolbar buttons) now insert the new cell and stay
+  in COMMAND mode (select it, focus the notebook handle) instead of jumping into
+  edit mode, so `enter → EnterEditMode` reliably fires. (The broader
+  full-focus-loss edge remains tracked as bug #15.)

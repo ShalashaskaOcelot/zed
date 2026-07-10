@@ -1,11 +1,10 @@
-# Phase 7 — Cell clipboard operations (copy / cut / paste / duplicate)
+# Phase 7 — Cell clipboard operations (copy / cut / paste / duplicate) (COMPLETE, archived 2026-07-10)
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING of the rebind. The clipboard
-> logic itself is CONFIRMED working — the user verified copy/paste worked with
-> the old single-key `c`/`v` bindings ("Copy and paste using c and v did work").
-> The only open item is the keybinding change below.
-> Kind: **new feature** (clipboard, confirmed working) + **change** (rebind to
-> standard Ctrl-C / Ctrl-X / Ctrl-V — awaiting confirmation).
+> ✅ STATUS: CONFIRMED by the user 2026-07-10 ("7 ... can confirm fixed"). The
+> clipboard logic worked with the old single-key `c`/`v`; the standard
+> Ctrl-C / Ctrl-X / Ctrl-V (Cmd- on macOS) rebind is now confirmed too, along
+> with `i i` interrupt.
+> Kind: **new feature** (clipboard) + **change** (standard-combo rebind).
 
 Primary files: `crates/zed_actions/src/lib.rs`,
 `crates/repl/src/notebook/notebook_ui.rs`, `assets/keymaps/*`.
