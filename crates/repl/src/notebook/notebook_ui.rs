@@ -23,7 +23,9 @@ use ui::{CommonAnimationExt, Tooltip, prelude::*};
 use workspace::item::{ItemEvent, SaveOptions, TabContentParams};
 use workspace::notifications::NotificationId;
 use workspace::searchable::SearchableItemHandle;
-use workspace::{Item, ItemHandle, Pane, ProjectItem, ToolbarItemLocation, Workspace};
+use workspace::{
+    Item, ItemHandle, OpenOptions, OpenVisible, Pane, ProjectItem, ToolbarItemLocation, Workspace,
+};
 
 use super::{Cell, CellEvent, CellPosition, MarkdownCellEvent, RenderableCell};
 
@@ -51,8 +53,8 @@ use zed_actions::editor::{MoveDown, MoveUp};
 use zed_actions::notebook::{
     AddCellAbove, AddCellBelow, AddCodeBlock, AddMarkdownBlock, ClearOutputs, ConvertToCode,
     ConvertToMarkdown, CopyCell, CutCell, DeleteCell, DuplicateCell, EnterCommandMode,
-    EnterEditMode, InterruptKernel, MoveCellDown, MoveCellUp, NotebookMoveDown, NotebookMoveUp,
-    OpenNotebook, PasteCell, RedoCellOp, RestartKernel, Run, RunAll, RunAndAdvance,
+    EnterEditMode, InterruptKernel, MoveCellDown, MoveCellUp, NewNotebook, NotebookMoveDown,
+    NotebookMoveUp, OpenNotebook, PasteCell, RedoCellOp, RestartKernel, Run, RunAll, RunAndAdvance,
     RunCellAndBelow, RunCellsAbove, SelectFirstCell, SelectLastCell, UndoCellOp,
 };
 
@@ -114,6 +116,13 @@ pub fn init(cx: &mut App) {
                 // gets turned off they need to restart Zed.
             }
         }
+    })
+    .detach();
+
+    cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
+        workspace.register_action(|workspace, _: &NewNotebook, window, cx| {
+            NotebookEditor::create_new_notebook(workspace, window, cx);
+        });
     })
     .detach();
 }
@@ -612,17 +621,111 @@ impl NotebookEditor {
         }
     }
 
+    /// A single empty code cell with a fresh id, used to seed a new or empty
+    /// notebook so it opens with something to type into.
+    fn empty_code_cell() -> nbformat::v4::Cell {
+        nbformat::v4::Cell::Code {
+            id: Uuid::new_v4().into(),
+            metadata: Self::empty_cell_metadata(),
+            execution_count: None,
+            source: Vec::new(),
+            outputs: Vec::new(),
+        }
+    }
+
+    /// A minimal valid nbformat v4 notebook containing one empty code cell.
+    /// Used when opening an empty `.ipynb` and by the "New Jupyter Notebook"
+    /// command, mirroring VS Code (a new notebook is never truly empty).
+    fn empty_notebook() -> Result<nbformat::v4::Notebook> {
+        Ok(nbformat::v4::Notebook {
+            nbformat: 4,
+            nbformat_minor: 5,
+            cells: vec![Self::empty_code_cell()],
+            metadata: serde_json::from_str("{}")?,
+        })
+    }
+
+    /// Create a new `Untitled-N.ipynb` in the first visible worktree, seeded
+    /// with the one-cell template, and open it as a notebook. Requires a folder
+    /// to be open (there is nowhere to put the file otherwise).
+    fn create_new_notebook(
+        workspace: &mut Workspace,
+        window: &mut Window,
+        cx: &mut Context<Workspace>,
+    ) {
+        // Only meaningful when notebooks are enabled (the `.ipynb` project item
+        // is registered under the same gate); otherwise the file would open as
+        // raw JSON.
+        if !cx.has_flag::<NotebookFeatureFlag>() && std::env::var("LOCAL_NOTEBOOK_DEV").is_err() {
+            return;
+        }
+
+        let project = workspace.project().clone();
+        let fs = project.read(cx).fs().clone();
+
+        let Some(worktree_root) = project
+            .read(cx)
+            .visible_worktrees(cx)
+            .next()
+            .map(|worktree| worktree.read(cx).abs_path().to_path_buf())
+        else {
+            struct NewNotebookToast;
+            workspace.show_toast(
+                workspace::Toast::new(
+                    NotificationId::unique::<NewNotebookToast>(),
+                    "Open a folder to create a new notebook.".to_string(),
+                ),
+                cx,
+            );
+            return;
+        };
+
+        let template = match Self::empty_notebook()
+            .and_then(|notebook| Ok(serde_json::to_string_pretty(&notebook)?))
+        {
+            Ok(json) => json,
+            Err(error) => {
+                log::error!("notebook: failed to build the new-notebook template: {error}");
+                return;
+            }
+        };
+
+        cx.spawn_in(window, async move |workspace, cx| {
+            // Pick a unique Untitled name so repeated invocations don't collide.
+            let mut candidate = worktree_root.join("Untitled.ipynb");
+            let mut index = 1;
+            while fs.is_file(&candidate).await {
+                candidate = worktree_root.join(format!("Untitled-{index}.ipynb"));
+                index += 1;
+            }
+
+            fs.atomic_write(candidate.clone(), template).await?;
+
+            workspace
+                .update_in(cx, |workspace, window, cx| {
+                    workspace.open_abs_path(
+                        candidate,
+                        OpenOptions {
+                            visible: Some(OpenVisible::None),
+                            ..Default::default()
+                        },
+                        window,
+                        cx,
+                    )
+                })?
+                .await?;
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
+    }
+
     /// Parse `.ipynb` text into a v4 notebook, tolerating empty files, missing
     /// cell IDs, and legacy formats. Shared by open, reload, and external
-    /// change handling.
+    /// change handling. An empty/whitespace file yields a one-cell template so
+    /// it opens as a usable notebook rather than a blank pane.
     fn parse_notebook_text(text: &str) -> Result<nbformat::v4::Notebook> {
         if text.trim().is_empty() {
-            return Ok(nbformat::v4::Notebook {
-                nbformat: 4,
-                nbformat_minor: 5,
-                cells: vec![],
-                metadata: serde_json::from_str("{}")?,
-            });
+            return Self::empty_notebook();
         }
 
         let parsed = match nbformat::parse_notebook(text) {
@@ -3218,5 +3321,31 @@ mod tests {
                 other => panic!("expected a single error output, got: {other:?}"),
             }
         });
+    }
+
+    /// An empty/whitespace `.ipynb` must open as a one-cell notebook (not a
+    /// blank pane), and the generated template must round-trip back through the
+    /// parser as valid nbformat.
+    #[test]
+    fn test_empty_notebook_template_round_trips() {
+        for text in ["", "   \n\t", "\n"] {
+            let notebook = NotebookEditor::parse_notebook_text(text)
+                .expect("empty text should parse into the template");
+            assert_eq!(
+                notebook.cells.len(),
+                1,
+                "an empty notebook should be seeded with one cell"
+            );
+            assert!(
+                matches!(notebook.cells[0], nbformat::v4::Cell::Code { .. }),
+                "the seeded cell should be a code cell"
+            );
+
+            let serialized =
+                serde_json::to_string_pretty(&notebook).expect("template should serialize");
+            let reparsed = NotebookEditor::parse_notebook_text(&serialized)
+                .expect("serialized template should re-parse");
+            assert_eq!(reparsed.cells.len(), 1);
+        }
     }
 }

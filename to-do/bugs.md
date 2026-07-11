@@ -152,3 +152,40 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
   so it's its own chunk of work. Data-loss risk → medium-high.
 - **Fix attempted:** none
 - **Tested:** n/a
+
+## 16. Queued cell output misrouted when a run spans kernel selection/launch
+
+- **Status:** open (needs runtime instrumentation)
+- **Symptom:** (user 2026-07-10) With no kernel selected, the user ran cells 1
+  and 2 (which brought up the kernel picker), selected a kernel, then ran cell
+  3. Cells 1 and 2 ran, cell 2 errored — but cell 2's error output appeared in
+  **cell 3's** output area, not cell 2's. Does NOT reproduce when the kernel is
+  already selected before running; only when the queued cells straddle the
+  kernel selection/launch boundary. User's hunch: "3 was queued before 1 had
+  completed."
+- **Analysis so far (what has been RULED OUT):**
+  - Routing is by `parent_header.msg_id → execution_requests[msg_id] → cell`
+    (`notebook_ui.rs` `route`), and each `ExecuteRequest.into()` gets a UNIQUE
+    `msg_id` (jupyter-protocol `JupyterMessage::new` → `Uuid::new_v4()`), so a
+    simple msg_id collision is not the cause.
+  - The queued-cell flush (`launch_kernel` ready branch:
+    `for cell_id in take(pending_executions) { execute_cell(cell_id) }`) sends
+    in order and records `execution_requests.insert(msg_id, cell_id)` per
+    iteration, so the recorded mapping looks correct on paper.
+  - `promote_awaiting_cells` preserves order; the manually-run cell 3 is
+    appended after, so the drain order is [1, 2, 3].
+  - Not the batch/`run_queue` path (these were individual runs, so
+    `active_run_cell` is None).
+  - NOTE anomaly: `JupyterMessage::new` also generates a fresh `session` id PER
+    message when there is no parent, so every execute request uses a DIFFERENT
+    session. Unusual (normally one session per client); shouldn't cross-wire by
+    msg_id, but worth checking whether iopub attribution is affected.
+- **Leading remaining hypotheses:** (a) a race between `route()` handling
+  incoming iopub messages and `execution_requests` being mutated during the
+  rapid back-to-back flush; (b) the kernel attaching the wrong parent under the
+  per-message-session quirk; (c) a display/index issue where the output lands
+  on the cell at a stale index. Needs targeted logging of the actual
+  `msg_id ↔ cell_id` map and the misrouted error's `parent_header` at runtime.
+- **Fix attempted:** none (deliberately — the obvious cause is ruled out; a
+  speculative fix would be premature).
+- **Tested:** n/a

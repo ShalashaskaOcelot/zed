@@ -1,6 +1,8 @@
 # Phase 12 — Create & open new notebooks
 
-Kind: **new feature**. Not yet started — this is a plan.
+> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, unit
+> test passes. Kind: **new feature** — on confirmation that empty `.ipynb`
+> files open and "New Jupyter Notebook" works, archive; tweaks become new items.
 
 Goal: VS Code parity for getting a notebook to exist. Today you must duplicate
 an existing `.ipynb` and empty it; an empty/new `.ipynb` fails to open because
@@ -11,28 +13,38 @@ Primary files: `crates/repl/src/notebook/notebook_ui.rs` (open/parse path,
 wherever notebook open is routed. A command-palette action needs an entry in
 `crates/zed_actions` (or the repl actions module) + a workspace handler.
 
-## Tasks
+## Implemented
 
-- [ ] When a `.ipynb` opened from the file browser is empty (or whitespace),
-      populate it with a minimal valid nbformat v4 template (one empty code
-      cell) so it opens as a notebook instead of erroring on empty/invalid JSON.
-      Decide whether to write the template to disk on open or hold it in the
-      buffer until first save (prefer: fill the buffer, mark dirty, so an
-      untouched file isn't rewritten).
-- [ ] Add a "New Jupyter Notebook" command-palette action that opens an
-      untitled, unsaved notebook (minimal nbformat v4 template) in the editor,
-      routed like other "new file" actions.
-- [ ] Ensure the template round-trips: it saves as valid nbformat and reopens.
+- [x] An empty/whitespace `.ipynb` now opens with a one-cell template.
+      `parse_notebook_text`'s empty branch returns `empty_notebook()` (a minimal
+      nbformat v4 notebook with one empty code cell) instead of a zero-cell
+      notebook, so an empty file opens as a usable notebook, not a blank pane.
+- [x] "New Jupyter Notebook" command (`notebook::NewNotebook`, registered as a
+      workspace action). Creates a unique `Untitled-N.ipynb` in the first
+      visible worktree, seeds it with the template, and opens it. Gated on the
+      notebook feature flag; toasts if no folder is open.
+- [x] Template round-trips: unit test `test_empty_notebook_template_round_trips`
+      asserts an empty file yields one code cell and the serialized template
+      re-parses.
 
-## Risks / gaps
+## Deviation from the original plan (candidate backlog)
 
-- Empty-file detection must not clobber a file that is mid-write by another
-  process; only treat truly empty/whitespace content as "new".
-- Untitled notebooks need a language/kernel selection flow (reuse the existing
-  lazy-start + kernel picker; no kernel until first run).
+- The command creates a REAL file (`Untitled-N.ipynb`) on disk rather than a
+  truly untitled/unsaved buffer. Untitled notebooks would need project-item
+  routing for buffers without a path (bigger plumbing). Creating a file in the
+  worktree reuses the whole existing open/save path and still removes the
+  "duplicate an existing notebook" pain. Truly-untitled is a possible follow-up.
 
-## Verification
+## Manual test checklist (for the user)
 
-- `cargo check -p repl` + `./script/clippy -p repl` clean; add a unit test that
-  `parse_notebook_text` accepts the generated template.
-- User test: create an empty `.ipynb` and open it; run "New Jupyter Notebook".
+- [ ] Create an empty file named `something.ipynb` (file browser → New File);
+      opening it shows a one-cell notebook, not an error/blank pane.
+- [ ] Run "New Jupyter Notebook" from the command palette → a new
+      `Untitled.ipynb` opens as a notebook; run it again → `Untitled-1.ipynb`.
+- [ ] With no folder open, "New Jupyter Notebook" shows a toast instead of
+      failing silently.
+
+## Verification (automated)
+
+- `cargo check -p repl` + `./script/clippy -p repl` clean.
+- `cargo test -p repl notebook`: 2 passed (incl. the new round-trip test).

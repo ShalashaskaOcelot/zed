@@ -916,6 +916,8 @@ pub mod notebook {
         [
             /// Opens a Jupyter notebook file.
             OpenNotebook,
+            /// Creates a new Jupyter notebook in the active worktree and opens it.
+            NewNotebook,
             /// Runs all cells in the notebook.
             RunAll,
             /// Runs the current cell and stays on it.
