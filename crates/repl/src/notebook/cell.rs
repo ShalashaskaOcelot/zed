@@ -348,42 +348,44 @@ pub trait RenderableCell: Render {
         }
     }
 
-    fn gutter(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The selection indicator bar at the far-left edge of the gutter: a
+    /// rounded accent bar on the selected cell, a hairline on the rest. Kept at
+    /// the edge so it never clips the run button / execution number.
+    fn gutter_indicator_bar(&self, cx: &mut Context<Self>) -> Div {
         let is_selected = self.selected();
+        div()
+            .absolute()
+            .left_0()
+            .top_0()
+            .h_full()
+            .when(is_selected, |this| {
+                this.w(px(3.))
+                    .rounded_full()
+                    .bg(cx.theme().colors().icon_accent)
+            })
+            .when(!is_selected, |this| {
+                this.w(px(1.)).bg(cx.theme().colors().border)
+            })
+    }
 
+    fn gutter(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .relative()
             .h_full()
             .w(px(GUTTER_WIDTH))
-            .child(
-                div()
-                    .w(px(GUTTER_WIDTH))
-                    .flex()
-                    .flex_none()
-                    .justify_center()
-                    .h_full()
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(1.))
-                            .h_full()
-                            .when(is_selected, |this| this.bg(cx.theme().colors().icon_accent))
-                            .when(!is_selected, |this| this.bg(cx.theme().colors().border)),
-                    ),
-            )
+            .child(self.gutter_indicator_bar(cx))
             .when_some(self.control(window, cx), |this, control| {
                 this.child(
                     div()
                         .absolute()
                         .top(px(CODE_BLOCK_INSET - 2.0))
-                        .left_0()
+                        .left(px(4.))
                         .flex()
                         .flex_none()
-                        .w(px(GUTTER_WIDTH))
+                        .w(px(GUTTER_WIDTH - 4.0))
                         .h(px(GUTTER_WIDTH + 12.0))
                         .items_center()
                         .justify_center()
-                        .bg(cx.theme().colors().tab_bar_background)
                         .child(control.button),
                 )
             })
@@ -978,41 +980,23 @@ impl CodeCell {
     }
 
     pub fn gutter_output(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let is_selected = self.selected();
-
         div()
             .relative()
             .h_full()
             .w(px(GUTTER_WIDTH))
-            .child(
-                div()
-                    .w(px(GUTTER_WIDTH))
-                    .flex()
-                    .flex_none()
-                    .justify_center()
-                    .h_full()
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(1.))
-                            .h_full()
-                            .when(is_selected, |this| this.bg(cx.theme().colors().icon_accent))
-                            .when(!is_selected, |this| this.bg(cx.theme().colors().border)),
-                    ),
-            )
+            .child(self.gutter_indicator_bar(cx))
             .when(self.has_outputs(), |this| {
                 this.child(
                     div()
                         .absolute()
                         .top(px(CODE_BLOCK_INSET - 2.0))
-                        .left_0()
+                        .left(px(4.))
                         .flex()
                         .flex_none()
-                        .w(px(GUTTER_WIDTH))
+                        .w(px(GUTTER_WIDTH - 4.0))
                         .h(px(GUTTER_WIDTH + 12.0))
                         .items_center()
                         .justify_center()
-                        .bg(cx.theme().colors().tab_bar_background)
                         .child(
                             PopoverMenu::new("cell-output-menu")
                                 .trigger_with_tooltip(
@@ -1110,47 +1094,29 @@ impl RenderableCell for CodeCell {
     }
 
     fn gutter(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let is_selected = self.selected();
         let execution_count = self.execution_count;
 
         div()
             .relative()
             .h_full()
             .w(px(GUTTER_WIDTH))
-            .child(
-                div()
-                    .w(px(GUTTER_WIDTH))
-                    .flex()
-                    .flex_none()
-                    .justify_center()
-                    .h_full()
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(1.))
-                            .h_full()
-                            .when(is_selected, |this| this.bg(cx.theme().colors().icon_accent))
-                            .when(!is_selected, |this| this.bg(cx.theme().colors().border)),
-                    ),
-            )
+            .child(self.gutter_indicator_bar(cx))
             .when_some(self.control(window, cx), |this, control| {
                 this.child(
                     v_flex()
                         .absolute()
                         .top(px(CODE_BLOCK_INSET - 2.0))
-                        .left_0()
-                        .w(px(GUTTER_WIDTH))
+                        .left(px(4.))
+                        .w(px(GUTTER_WIDTH - 4.0))
                         .items_center()
-                        .gap_1()
-                        // run/stop button in a subtle rounded well so it reads
-                        // as a distinct control against the editor background
+                        .gap_0p5()
+                        // run/stop button in a soft rounded well so it reads as
+                        // a distinct control against the editor background
                         .child(
                             div()
                                 .rounded_md()
                                 .p_0p5()
                                 .bg(cx.theme().colors().element_background)
-                                .border_1()
-                                .border_color(cx.theme().colors().border)
                                 .child(control.button),
                         )
                         // Jupyter-style execution number (`In [N]`): the count is
