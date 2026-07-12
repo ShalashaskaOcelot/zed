@@ -15,7 +15,7 @@ use settings::Settings as _;
 use ui::{CommonAnimationExt, ContextMenu, IconButtonShape, PopoverMenu, Tooltip, prelude::*};
 use util::ResultExt;
 use zed_actions::notebook::{
-    AddCellBelow, DeleteCell, InterruptKernel, Run, RunCellAndBelow, RunCellsAbove,
+    AddCellBelow, DeleteCell, InterruptKernel, RunCellAndBelow, RunCellsAbove,
 };
 
 use crate::{
@@ -915,10 +915,6 @@ impl CodeCell {
             .border_color(cx.theme().colors().border)
             .bg(cx.theme().colors().element_background)
             .child(
-                button("cell-run", IconName::PlayFilled, CellToolbarAction::Run)
-                    .tooltip(|_window, cx| Tooltip::for_action("Run cell", &Run, cx)),
-            )
-            .child(
                 button("cell-run-above", IconName::ArrowUp, CellToolbarAction::RunAbove).tooltip(
                     |_window, cx| Tooltip::for_action("Run cells above", &RunCellsAbove, cx),
                 ),
@@ -1139,24 +1135,33 @@ impl RenderableCell for CodeCell {
             )
             .when_some(self.control(window, cx), |this, control| {
                 this.child(
-                    div()
+                    v_flex()
                         .absolute()
                         .top(px(CODE_BLOCK_INSET - 2.0))
                         .left_0()
-                        .flex()
-                        .flex_col()
                         .w(px(GUTTER_WIDTH))
                         .items_center()
-                        .justify_center()
-                        .bg(cx.theme().colors().tab_bar_background)
-                        .child(control.button)
+                        .gap_1()
+                        // run/stop button in a subtle rounded well so it reads
+                        // as a distinct control against the editor background
+                        .child(
+                            div()
+                                .rounded_md()
+                                .p_0p5()
+                                .bg(cx.theme().colors().element_background)
+                                .border_1()
+                                .border_color(cx.theme().colors().border)
+                                .child(control.button),
+                        )
+                        // Jupyter-style execution number (`In [N]`): the count is
+                        // the kernel's session-global execution counter, not a
+                        // per-cell run tally.
                         .when_some(execution_count, |this, count| {
                             this.child(
                                 div()
-                                    .mt_1()
                                     .text_xs()
                                     .text_color(cx.theme().colors().text_muted)
-                                    .child(format!("{}", count)),
+                                    .child(format!("[{count}]")),
                             )
                         }),
                 )

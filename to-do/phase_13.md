@@ -16,8 +16,14 @@ phase-4 actions already wired on the notebook root.
 ## Implemented
 
 - [x] `CodeCell::cell_toolbar` renders a small action bar (icon buttons) in the
-      code cell's top-right: Run, Run cells above, Run cell and below, Add cell
+      code cell's top-right: Run cells above, Run cell and below, Add cell
       below, Delete. Each has a `Tooltip::for_action` so its keybinding shows.
+      (Run-cell was intentionally NOT included — the left gutter run button is
+      the single home for running the current cell; user 2026-07-11.)
+- [x] Polished the left gutter "execution box": run/stop button now sits in a
+      subtle rounded, bordered well, and the execution number renders Jupyter-
+      style as `[N]` (it is the kernel's session-global `In [N]` execution
+      count / order, confirmed 2026-07-11 — see phase 15).
 - [x] Shown when the cell is selected, and on hover via `group("code-cell")` +
       `group_hover(... .visible())` (invisible otherwise).
 - [x] Buttons emit `CellEvent::ToolbarAction(cell_id, action)`; the notebook's

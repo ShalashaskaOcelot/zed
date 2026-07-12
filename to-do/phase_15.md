@@ -10,12 +10,25 @@ Primary files: `crates/repl/src/notebook/notebook_ui.rs` (`restart_kernel`),
 `crates/repl/src/notebook/cell.rs` (execution_count, outputs), the actions
 module + keymaps for the new action.
 
+## Note on the counter (investigated 2026-07-11)
+
+The number under the run button is `CodeCell.execution_count`, set in
+`handle_message` from the kernel's `ExecuteInput.execution_count`. This is the
+Jupyter execution number (`In [N]`): a SESSION-GLOBAL counter the kernel
+increments once per execution — i.e. execution ORDER within the session, NOT a
+per-cell run tally. Running each cell once in order shows 1,2,3,…; re-running a
+cell relabels it with the next number. (It is now displayed as `[N]`.) The
+reset-on-restart task below is therefore still valid and useful: it clears the
+stale `In [N]` numbers so a fresh run-through after restart visibly starts at 1
+instead of showing leftover numbers from the previous kernel session.
+
 ## Tasks
 
-- [ ] On kernel restart, reset each cell's execution counter (the number under
-      the run button) and its outputs' counts, so a fresh run-through is
-      visually distinct from a re-run session. The count comes from
-      `execute_input.execution_count`; clear it in `restart_kernel`.
+- [ ] On kernel restart, reset each cell's execution counter (the `In [N]`
+      number) and its outputs' counts to empty, so a fresh run-through is
+      visually distinct from the previous session. Clear each cell's
+      `execution_count` in `restart_kernel` (the kernel itself already restarts
+      its counter at 1; this just drops the stale UI numbers).
 - [ ] Add a dedicated `ClearCellOutputs` action + keybind that clears the
       SELECTED cell's outputs (the per-output "..." menu already offers "Clear
       Output" for one output; this does the whole cell). Crib from the inline
