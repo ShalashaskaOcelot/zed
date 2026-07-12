@@ -14,7 +14,9 @@ use runtimelib::{JupyterMessage, JupyterMessageContent};
 use settings::Settings as _;
 use ui::{CommonAnimationExt, ContextMenu, IconButtonShape, PopoverMenu, Tooltip, prelude::*};
 use util::ResultExt;
-use zed_actions::notebook::InterruptKernel;
+use zed_actions::notebook::{
+    AddCellBelow, DeleteCell, InterruptKernel, Run, RunCellAndBelow, RunCellsAbove,
+};
 
 use crate::{
     notebook::{CODE_BLOCK_INSET, GUTTER_WIDTH},
@@ -42,6 +44,21 @@ pub enum CellControlType {
 pub enum CellEvent {
     Run(CellId),
     FocusedIn(CellId),
+    /// A per-cell toolbar button was clicked. The notebook selects this cell
+    /// (by id) and then performs the action, so the button always acts on its
+    /// own cell even when the toolbar is shown on hover of a non-selected cell.
+    ToolbarAction(CellId, CellToolbarAction),
+}
+
+/// Actions offered by the per-cell hover/selection toolbar. Each maps to an
+/// existing notebook action; the toolbar is purely a discoverable surface.
+#[derive(Clone, Copy)]
+pub enum CellToolbarAction {
+    Run,
+    RunAbove,
+    RunBelow,
+    AddBelow,
+    Delete,
 }
 
 pub enum MarkdownCellEvent {
@@ -875,6 +892,53 @@ impl CodeCell {
         }
     }
 
+    /// A floating toolbar of the most common cell actions, shown in the cell's
+    /// top-right when it is selected or hovered. Each button emits a
+    /// `CellEvent::ToolbarAction`; the notebook selects this cell and then runs
+    /// the matching action, so the buttons are just a discoverable surface over
+    /// the existing keyboard/menu actions.
+    fn cell_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let button = |name: &'static str, icon: IconName, action: CellToolbarAction| {
+            IconButton::new(name, icon)
+                .icon_size(IconSize::Small)
+                .shape(IconButtonShape::Square)
+                .on_click(cx.listener(move |this, _, _window, cx| {
+                    cx.emit(CellEvent::ToolbarAction(this.id.clone(), action));
+                }))
+        };
+
+        h_flex()
+            .gap_0p5()
+            .p_0p5()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().colors().border)
+            .bg(cx.theme().colors().element_background)
+            .child(
+                button("cell-run", IconName::PlayFilled, CellToolbarAction::Run)
+                    .tooltip(|_window, cx| Tooltip::for_action("Run cell", &Run, cx)),
+            )
+            .child(
+                button("cell-run-above", IconName::ArrowUp, CellToolbarAction::RunAbove).tooltip(
+                    |_window, cx| Tooltip::for_action("Run cells above", &RunCellsAbove, cx),
+                ),
+            )
+            .child(
+                button("cell-run-below", IconName::ArrowDown, CellToolbarAction::RunBelow)
+                    .tooltip(|_window, cx| {
+                        Tooltip::for_action("Run cell and below", &RunCellAndBelow, cx)
+                    }),
+            )
+            .child(
+                button("cell-add-below", IconName::Plus, CellToolbarAction::AddBelow)
+                    .tooltip(|_window, cx| Tooltip::for_action("Add cell below", &AddCellBelow, cx)),
+            )
+            .child(
+                button("cell-delete", IconName::Trash, CellToolbarAction::Delete)
+                    .tooltip(|_window, cx| Tooltip::for_action("Delete cell", &DeleteCell, cx)),
+            )
+    }
+
     pub fn handle_message(
         &mut self,
         message: &JupyterMessage,
@@ -1136,8 +1200,11 @@ impl Render for CodeCell {
             .and_then(|buffer| buffer.read(cx).language())
             .map(|lang| lang.name().to_string());
 
+        let is_selected = self.selected();
+
         v_flex()
             .size_full()
+            .group("code-cell")
             // TODO: Move base cell render into trait impl so we don't have to repeat this
             .children(self.cell_position_spacer(true, window, cx))
             // Editor portion
@@ -1169,12 +1236,27 @@ impl Render for CodeCell {
                                         .w_full()
                                         .child(self.editor.clone()),
                                 )
-                                // lang badge in top-right corner
+                                // per-cell action toolbar in the top-right,
+                                // shown when the cell is selected or hovered
+                                .child(
+                                    div()
+                                        .absolute()
+                                        .top_1()
+                                        .right_2()
+                                        .when(!is_selected, |this| {
+                                            this.invisible()
+                                                .group_hover("code-cell", |style| style.visible())
+                                        })
+                                        .child(self.cell_toolbar(cx)),
+                                )
+                                // lang badge in the bottom-right corner (moved
+                                // out of the top-right to make room for the
+                                // toolbar)
                                 .when_some(language_name, |this, name| {
                                     this.child(
                                         div()
                                             .absolute()
-                                            .top_1()
+                                            .bottom_1()
                                             .right_2()
                                             .px_2()
                                             .py_0p5()

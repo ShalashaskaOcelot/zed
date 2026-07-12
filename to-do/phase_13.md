@@ -1,7 +1,8 @@
 # Phase 13 — Per-cell hover/selection toolbar
 
-Kind: **new feature** (discoverability layer over existing actions).
-Not yet started — this is a plan.
+> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, tests
+> pass. Kind: **new feature** — on confirmation the toolbar appears and each
+> button fires the right action, archive; tweaks become new items.
 
 Goal: a VS Code-style per-cell toolbar shown on the selected/hovered cell so the
 common actions are discoverable without the "More options" menu or memorising
@@ -12,26 +13,39 @@ tucked inside "More options".
 Primary files: `crates/repl/src/notebook/cell.rs` (cell render), reusing the
 phase-4 actions already wired on the notebook root.
 
-## Tasks
+## Implemented
 
-- [ ] Render a small action bar in the top-right of the selected (and/or
-      hovered) cell. Buttons dispatch the EXISTING actions — no new logic:
-      Run, Run Above, Run Cell & Below, Delete, and Add (above/below).
-- [ ] Icon buttons with `Tooltip::for_action` so each shows its keybinding.
-- [ ] Show on selection and on hover; keep it out of the way when the cell is
-      neither (avoid clutter on long notebooks).
-- [ ] Make sure clicking a toolbar button returns focus to the notebook so
-      command-mode shortcuts keep working (ties into bug #15 follow-up).
+- [x] `CodeCell::cell_toolbar` renders a small action bar (icon buttons) in the
+      code cell's top-right: Run, Run cells above, Run cell and below, Add cell
+      below, Delete. Each has a `Tooltip::for_action` so its keybinding shows.
+- [x] Shown when the cell is selected, and on hover via `group("code-cell")` +
+      `group_hover(... .visible())` (invisible otherwise).
+- [x] Buttons emit `CellEvent::ToolbarAction(cell_id, action)`; the notebook's
+      `handle_cell_toolbar_action` FIRST selects that cell (by id, command mode,
+      focuses the notebook handle) THEN runs the mapped action — so a button
+      always acts on its own cell even when shown on hover of a non-selected
+      cell, and focus returns to the notebook so shortcuts keep working.
+- [x] The language badge moved from top-right to bottom-right to make room.
 
-## Risks / gaps
+## Scope notes / follow-ups (candidate backlog)
 
-- Focus: popovers/buttons that steal focus are the suspected cause of the
-  bug #15 desync — route clicks through handlers that re-focus the notebook.
-- Don't duplicate the whole "More options" menu inline; surface only the
-  high-frequency actions and leave the rest in the menu.
+- Toolbar is on CODE cells only. Markdown/raw cells could get a smaller
+  (Add/Delete) toolbar later.
+- Uses `ArrowUp`/`ArrowDown` icons for run-above/run-below (tooltips clarify);
+  swap for more specific icons if any are added.
 
-## Verification
+## Manual test checklist (for the user)
 
-- `cargo check -p repl` + `./script/clippy -p repl` clean.
-- User test: buttons appear on the focused/hovered cell, each fires the right
-  action, and shortcuts still work afterwards.
+- [ ] Select a code cell → the toolbar appears top-right; hover a non-selected
+      code cell → it appears there too.
+- [ ] Each button fires the right action (run / run above / run below / add
+      below / delete) on the CORRECT cell, including when clicked via hover on a
+      cell that wasn't selected.
+- [ ] After clicking a toolbar button, command-mode keyboard shortcuts still
+      work (focus returned to the notebook).
+- [ ] The language badge (now bottom-right) doesn't overlap the toolbar.
+
+## Verification (automated)
+
+- `cargo check -p repl` + `./script/clippy -p repl` clean; `cargo test -p repl
+  notebook` passes.

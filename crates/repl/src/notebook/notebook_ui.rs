@@ -27,7 +27,9 @@ use workspace::{
     Item, ItemHandle, OpenOptions, OpenVisible, Pane, ProjectItem, ToolbarItemLocation, Workspace,
 };
 
-use super::{Cell, CellEvent, CellPosition, MarkdownCellEvent, RenderableCell};
+use super::{
+    Cell, CellEvent, CellPosition, CellToolbarAction, MarkdownCellEvent, RenderableCell,
+};
 
 use nbformat::v4::CellId;
 use nbformat::v4::Metadata as NotebookMetadata;
@@ -200,6 +202,9 @@ impl NotebookEditor {
                             }
                             CellEvent::FocusedIn(_) => {
                                 this.select_cell_by_id(&cell_id_for_focus, cx)
+                            }
+                            CellEvent::ToolbarAction(cell_id, action) => {
+                                this.handle_cell_toolbar_action(cell_id, *action, window, cx)
                             }
                         }
                     })
@@ -1326,6 +1331,32 @@ impl NotebookEditor {
         }
     }
 
+    /// Select the cell that owns a toolbar button — so index-based actions
+    /// target it even when the toolbar was shown on hover of a non-selected
+    /// cell — then perform the requested action.
+    fn handle_cell_toolbar_action(
+        &mut self,
+        cell_id: &CellId,
+        action: CellToolbarAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.cell_order.iter().position(|id| id == cell_id) else {
+            return;
+        };
+        self.selected_cell_index = index;
+        self.notebook_mode = NotebookMode::Command;
+        self.focus_handle.focus(window, cx);
+
+        match action {
+            CellToolbarAction::Run => self.run_current_cell(&Run, window, cx),
+            CellToolbarAction::RunAbove => self.run_cells_above(&RunCellsAbove, window, cx),
+            CellToolbarAction::RunBelow => self.run_cell_and_below(&RunCellAndBelow, window, cx),
+            CellToolbarAction::AddBelow => self.add_cell_below(&AddCellBelow, window, cx),
+            CellToolbarAction::Delete => self.delete_cell(&DeleteCell, window, cx),
+        }
+    }
+
     fn enter_edit_mode(&mut self, _: &EnterEditMode, window: &mut Window, cx: &mut Context<Self>) {
         self.notebook_mode = NotebookMode::Edit;
         if let Some(cell_id) = self.cell_order.get(self.selected_cell_index) {
@@ -1490,6 +1521,9 @@ impl NotebookEditor {
             move |this, _cell, event, window, cx| match event {
                 CellEvent::Run(cell_id) => this.execute_cell(cell_id.clone(), window, cx),
                 CellEvent::FocusedIn(_) => this.select_cell_by_id(&cell_id_for_run, cx),
+                CellEvent::ToolbarAction(cell_id, action) => {
+                    this.handle_cell_toolbar_action(cell_id, *action, window, cx)
+                }
             },
         )
         .detach();
