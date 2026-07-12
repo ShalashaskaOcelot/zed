@@ -54,7 +54,7 @@
 //! # Display the DataFrame
 //! display(df)
 //! ```
-use gpui::{AnyElement, ClipboardItem, TextRun};
+use gpui::{AnyElement, ClipboardItem, FontWeight, TextRun};
 use runtimelib::datatable::TableSchema;
 use runtimelib::media::datatable::TabularDataResource;
 use serde_json::Value;
@@ -88,6 +88,10 @@ fn cell_content(row: &Value, field: &str) -> String {
 
 // Declare constant for the padding multiple on the line height
 const TABLE_Y_PADDING_MULTIPLE: f32 = 0.5;
+
+/// Cap on rendered rows so a huge DataFrame doesn't create tens of thousands
+/// of elements. The clipboard content (Copy Output) still contains all rows.
+const MAX_RENDERED_ROWS: usize = 300;
 
 impl TableView {
     pub fn new(table: &TabularDataResource, window: &mut Window, cx: &mut App) -> Self {
@@ -186,6 +190,7 @@ impl TableView {
         &self,
         schema: &TableSchema,
         is_header: bool,
+        striped: bool,
         row: &Value,
         window: &mut Window,
         cx: &mut App,
@@ -214,22 +219,24 @@ impl TableView {
                     _ => div(),
                 };
 
+                let is_null = !is_header && matches!(row.get(&field.name), Some(Value::Null) | None);
                 let value = cell_content(row, &field.name);
 
-                let mut cell = container
+                let cell = container
                     .min_w(*width + px(22.))
                     .w(*width + px(22.))
-                    .child(value)
                     .px_2()
-                    .py((TABLE_Y_PADDING_MULTIPLE / 2.0) * line_height)
-                    .border_color(theme.colors().border);
+                    .py((TABLE_Y_PADDING_MULTIPLE / 2.0) * line_height);
 
                 if is_header {
-                    cell = cell.border_1().bg(theme.colors().border_focused)
+                    cell.font_weight(FontWeight::SEMIBOLD).child(value)
+                } else if is_null {
+                    // Render missing values as a dimmed placeholder instead of
+                    // an empty cell.
+                    cell.text_color(theme.colors().text_muted).child("—")
                 } else {
-                    cell = cell.border_1()
+                    cell.child(value)
                 }
-                cell
             })
             .collect::<Vec<_>>();
 
@@ -239,10 +246,22 @@ impl TableView {
             total_width += *width + px(22.);
         }
 
-        h_flex()
-            .w(total_width)
-            .children(row_cells)
-            .into_any_element()
+        let row_element = h_flex().w(total_width).children(row_cells);
+
+        if is_header {
+            row_element
+                .bg(theme.colors().element_background)
+                .border_b_1()
+                .border_color(theme.colors().border)
+        } else {
+            row_element
+                .border_b_1()
+                .border_color(theme.colors().border_variant)
+                .when(striped, |this| {
+                    this.bg(theme.colors().element_background.opacity(0.35))
+                })
+        }
+        .into_any_element()
     }
 }
 
@@ -260,21 +279,47 @@ impl Render for TableView {
         let header = self.render_row(
             &self.table.schema,
             true,
+            false,
             &Value::Object(headings),
             window,
             cx,
         );
 
-        let body = data
+        let row_count = data.len();
+        let body: Vec<AnyElement> = data
             .iter()
-            .map(|row| self.render_row(&self.table.schema, false, row, window, cx));
+            .take(MAX_RENDERED_ROWS)
+            .enumerate()
+            .map(|(index, row)| {
+                self.render_row(&self.table.schema, false, index % 2 == 1, row, window, cx)
+            })
+            .collect();
 
         v_flex()
             .id("table")
             .overflow_x_scroll()
             .w_full()
-            .child(header)
-            .children(body)
+            .child(
+                v_flex()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(cx.theme().colors().border)
+                    .overflow_hidden()
+                    .child(header)
+                    .children(body),
+            )
+            .when(row_count > MAX_RENDERED_ROWS, |this| {
+                this.child(
+                    div()
+                        .px_2()
+                        .py_1()
+                        .text_xs()
+                        .text_color(cx.theme().colors().text_muted)
+                        .child(format!(
+                            "Showing first {MAX_RENDERED_ROWS} of {row_count} rows"
+                        )),
+                )
+            })
             .into_any_element()
     }
 }
