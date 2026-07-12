@@ -1,7 +1,10 @@
 # Phase 15 — Cell output & execution-state management
 
-Kind: **mixed** — a change to existing behaviour (reset counters on restart)
-plus a new feature (dedicated clear-outputs action). Not yet started — a plan.
+> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, tests
+> pass.
+> Kind: **mixed** — a change to existing behaviour (reset counters on restart:
+> keep OPEN until confirmed to take effect) plus a new feature (clear-cell-
+> outputs action: archive once confirmed present and working).
 
 Goal: keep the per-cell execution counters and outputs coherent with the kernel
 state, and give a first-class way to clear a single cell's outputs.
@@ -22,28 +25,32 @@ reset-on-restart task below is therefore still valid and useful: it clears the
 stale `In [N]` numbers so a fresh run-through after restart visibly starts at 1
 instead of showing leftover numbers from the previous kernel session.
 
-## Tasks
+## Implemented
 
-- [ ] On kernel restart, reset each cell's execution counter (the `In [N]`
-      number) and its outputs' counts to empty, so a fresh run-through is
-      visually distinct from the previous session. Clear each cell's
-      `execution_count` in `restart_kernel` (the kernel itself already restarts
-      its counter at 1; this just drops the stale UI numbers).
-- [ ] Add a dedicated `ClearCellOutputs` action + keybind that clears the
-      SELECTED cell's outputs (the per-output "..." menu already offers "Clear
-      Output" for one output; this does the whole cell). Crib from the inline
-      REPL's `ClearCurrentOutput` (`repl_sessions_ui.rs`). Add to command mode
-      keymaps + the More options menu.
+- [x] On kernel restart, each code cell's `In [N]` execution number is cleared
+      (`CodeCell::reset_execution_count`, called in `restart_kernel`), so a
+      fresh run-through visibly starts at [1] instead of showing the previous
+      session's numbers. Interrupt does NOT clear them (an interrupted session
+      keeps its history). Outputs are not cleared — only the stale numbers.
+- [x] `notebook::ClearCellOutputs` action: clears the SELECTED cell's outputs
+      (the per-output "..." menu's "Clear Output" remains for a single
+      output). In the command palette and the More options menu.
 
-## Risks / gaps
+## Deviation from the plan
 
-- Only reset counters on a genuine restart/shutdown, not on interrupt (an
-  interrupted cell keeps its history).
-- Keep the clear-outputs action's keybind clear of the clipboard/undo combos
-  just standardised in phase 7/8.
+- No default KEYBIND for ClearCellOutputs: there is no standard shortcut for
+  this across Jupyter/VS Code, and the user's standing direction is to avoid
+  inventing non-standard bindings. Menu + command palette only; a user can
+  bind it themselves.
 
-## Verification
+## Manual test checklist (for the user)
 
-- `cargo check -p repl` + `./script/clippy -p repl` clean.
-- User test: run cells, restart → counters reset to empty; select a cell and
-  clear its outputs via the action/keybind.
+- [ ] Run several cells (numbers [1]..[N] appear), restart the kernel → all
+      numbers disappear; running again starts at [1].
+- [ ] Interrupt does NOT clear the numbers.
+- [ ] Select a cell with outputs → "Clear Cell Outputs" (More options menu or
+      command palette) clears only that cell's outputs.
+
+## Verification (automated)
+
+- `cargo check -p repl` + `./script/clippy -p repl` clean; tests pass.

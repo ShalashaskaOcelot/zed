@@ -381,10 +381,11 @@ pub trait RenderableCell: Render {
                     div()
                         .absolute()
                         .top(px(CODE_BLOCK_INSET - 2.0))
-                        .left_0()
+                        // centered between the indicator bar and the cell edge
+                        .left(px(3.))
                         .flex()
                         .flex_none()
-                        .w(px(GUTTER_WIDTH))
+                        .w(px(GUTTER_WIDTH - 3.0))
                         .h(px(GUTTER_WIDTH + 12.0))
                         .items_center()
                         .justify_center()
@@ -868,6 +869,13 @@ impl CodeCell {
         self.is_executing
     }
 
+    /// Forget the kernel-session execution number (`In [N]`). Used on kernel
+    /// restart: the new session's counter starts at 1, so the old numbers are
+    /// stale.
+    pub fn reset_execution_count(&mut self) {
+        self.execution_count = None;
+    }
+
     /// Displays a kernel-level failure (e.g. the kernel failed to launch because
     /// Python is not installed) as an error output on this cell, so the user gets
     /// feedback instead of a spinner that never resolves.
@@ -1001,10 +1009,11 @@ impl CodeCell {
                     div()
                         .absolute()
                         .top(px(CODE_BLOCK_INSET - 2.0))
-                        .left_0()
+                        // centered between the indicator bar and the cell edge
+                        .left(px(3.))
                         .flex()
                         .flex_none()
-                        .w(px(GUTTER_WIDTH))
+                        .w(px(GUTTER_WIDTH - 3.0))
                         .h(px(GUTTER_WIDTH + 12.0))
                         .items_center()
                         .justify_center()
@@ -1124,8 +1133,9 @@ impl RenderableCell for CodeCell {
                     v_flex()
                         .absolute()
                         .top(px(CODE_BLOCK_INSET - 2.0))
-                        .left_0()
-                        .w(px(GUTTER_WIDTH))
+                        // centered between the indicator bar and the cell edge
+                        .left(px(3.))
+                        .w(px(GUTTER_WIDTH - 3.0))
                         .items_center()
                         .gap_0p5()
                         // VS Code style: a bare hovering run button, only shown

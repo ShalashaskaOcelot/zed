@@ -918,6 +918,10 @@ pub mod notebook {
             OpenNotebook,
             /// Creates a new Jupyter notebook in the active worktree and opens it.
             NewNotebook,
+            /// Reloads the notebook from disk, discarding unsaved changes.
+            ReloadNotebook,
+            /// Clears the outputs of the selected cell.
+            ClearCellOutputs,
             /// Runs all cells in the notebook.
             RunAll,
             /// Runs the current cell and stays on it.

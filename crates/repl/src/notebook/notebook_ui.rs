@@ -12,7 +12,7 @@ use futures::FutureExt;
 use futures::future::Shared;
 use gpui::{
     AnyElement, App, ClipboardItem, Entity, EventEmitter, FocusHandle, Focusable, KeyContext,
-    ListScrollEvent, ListState, Point, Task, TaskExt, actions, list, prelude::*,
+    ListScrollEvent, ListState, Point, PromptLevel, Task, TaskExt, actions, list, prelude::*,
 };
 use jupyter_protocol::JupyterKernelspec;
 use language::{Buffer, Language, LanguageRegistry};
@@ -53,11 +53,12 @@ use ui::{ContextMenu, PopoverMenu, PopoverMenuHandle};
 use util::ResultExt as _;
 use zed_actions::editor::{MoveDown, MoveUp};
 use zed_actions::notebook::{
-    AddCellAbove, AddCellBelow, AddCodeBlock, AddMarkdownBlock, ClearOutputs, ConvertToCode,
-    ConvertToMarkdown, CopyCell, CutCell, DeleteCell, DuplicateCell, EnterCommandMode,
-    EnterEditMode, InterruptKernel, MoveCellDown, MoveCellUp, NewNotebook, NotebookMoveDown,
-    NotebookMoveUp, OpenNotebook, PasteCell, RedoCellOp, RestartKernel, Run, RunAll, RunAndAdvance,
-    RunCellAndBelow, RunCellsAbove, SelectFirstCell, SelectLastCell, UndoCellOp,
+    AddCellAbove, AddCellBelow, AddCodeBlock, AddMarkdownBlock, ClearCellOutputs, ClearOutputs,
+    ConvertToCode, ConvertToMarkdown, CopyCell, CutCell, DeleteCell, DuplicateCell,
+    EnterCommandMode, EnterEditMode, InterruptKernel, MoveCellDown, MoveCellUp, NewNotebook,
+    NotebookMoveDown, NotebookMoveUp, OpenNotebook, PasteCell, RedoCellOp, ReloadNotebook,
+    RestartKernel, Run, RunAll, RunAndAdvance, RunCellAndBelow, RunCellsAbove, SelectFirstCell,
+    SelectLastCell, UndoCellOp,
 };
 
 /// A structural cell operation, stored so it can be undone/redone. Restored
@@ -165,6 +166,10 @@ pub struct NotebookEditor {
     undo_stack: Vec<CellEdit>,
     redo_stack: Vec<CellEdit>,
     kernel_picker_handle: PopoverMenuHandle<Picker<KernelPickerDelegate>>,
+    /// The .ipynb changed on disk while there were unsaved changes here (the
+    /// conflict toast was shown). While set, saving prompts before
+    /// overwriting the on-disk version. Cleared on reload or confirmed save.
+    disk_changed_externally: bool,
 }
 
 impl NotebookEditor {
@@ -285,6 +290,7 @@ impl NotebookEditor {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             kernel_picker_handle: PopoverMenuHandle::default(),
+            disk_changed_externally: false,
         };
         // Lazy start: don't launch a kernel on open. Show the remembered
         // kernel's name if we can resolve one now (a real launch happens on
@@ -794,6 +800,8 @@ impl NotebookEditor {
         self.pending_executions.clear();
         self.cells_awaiting_kernel_choice.clear();
         self.cancel_run_queue();
+        // We now reflect the on-disk content, so any prior conflict is moot.
+        self.disk_changed_externally = false;
 
         self.cell_order = cell_order.clone();
         self.original_cell_order = cell_order;
@@ -819,15 +827,30 @@ impl NotebookEditor {
         cx: &mut Context<Self>,
     ) {
         if self.is_dirty(cx) {
-            Self::show_env_toast(
-                window,
-                cx,
-                "This notebook changed on disk, but you have unsaved changes here. \
-                 Saving will overwrite the on-disk version; close and reopen the \
-                 file to load the on-disk version instead."
-                    .to_string(),
-                false,
-            );
+            self.disk_changed_externally = true;
+            struct NotebookConflictToast;
+            let notification_id = NotificationId::unique::<NotebookConflictToast>();
+            let this = cx.entity().downgrade();
+            let project = self.project.clone();
+            if let Some(workspace) = Workspace::for_window(window, cx) {
+                workspace.update(cx, |workspace, cx| {
+                    workspace.show_toast(
+                        workspace::Toast::new(
+                            notification_id,
+                            "This notebook changed on disk, but you have unsaved changes \
+                             here. Saving will ask before overwriting the on-disk version.",
+                        )
+                        .on_click("Reload (discard my changes)", move |window, cx| {
+                            this.update(cx, |this, cx| {
+                                this.reload(project.clone(), window, cx)
+                                    .detach_and_log_err(cx);
+                            })
+                            .log_err();
+                        }),
+                        cx,
+                    );
+                });
+            }
             return;
         }
 
@@ -1015,6 +1038,17 @@ impl NotebookEditor {
         self.execution_requests.clear();
         self.cancel_run_queue();
         self.stop_executing_cells(cx);
+        // The restarted kernel's execution counter starts over at 1, so the
+        // cells' `In [N]` numbers from the old session are stale — clear them
+        // so a fresh run-through is visually distinct.
+        for cell in self.cell_map.values() {
+            if let Cell::Code(code_cell) = cell {
+                code_cell.update(cx, |code_cell, cx| {
+                    code_cell.reset_execution_count();
+                    cx.notify();
+                });
+            }
+        }
         cx.notify();
 
         match kernel {
@@ -1397,6 +1431,54 @@ impl NotebookEditor {
         cx: &mut Context<Self>,
     ) {
         self.enter_command_mode(window, cx);
+    }
+
+    /// Reload the notebook from disk. Prompts first when there are unsaved
+    /// changes, since they would be lost.
+    fn handle_reload_notebook(
+        &mut self,
+        _: &ReloadNotebook,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let project = self.project.clone();
+        if self.is_dirty(cx) {
+            let answer = window.prompt(
+                PromptLevel::Warning,
+                "Reload this notebook from disk?",
+                Some("Your unsaved changes will be lost."),
+                &["Reload", "Cancel"],
+                cx,
+            );
+            cx.spawn_in(window, async move |this, cx| {
+                if answer.await != Ok(0) {
+                    return anyhow::Ok(());
+                }
+                this.update_in(cx, |this, window, cx| this.reload(project, window, cx))?
+                    .await
+            })
+            .detach_and_log_err(cx);
+        } else {
+            self.reload(project, window, cx).detach_and_log_err(cx);
+        }
+    }
+
+    /// Clear the outputs of the selected cell (the per-output "..." menu's
+    /// Clear Output only clears one output).
+    fn clear_selected_cell_outputs(
+        &mut self,
+        _: &ClearCellOutputs,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(cell_id) = self.cell_order.get(self.selected_cell_index)
+            && let Some(Cell::Code(cell)) = self.cell_map.get(cell_id)
+        {
+            cell.update(cx, |cell, cx| {
+                cell.clear_outputs();
+                cx.notify();
+            });
+        }
     }
 
     /// Advances to the next cell while staying in command mode (used by RunAndAdvance and shift-enter).
@@ -2370,8 +2452,11 @@ impl NotebookEditor {
                                         .action("Undo Cell Change", Box::new(UndoCellOp))
                                         .action("Redo Cell Change", Box::new(RedoCellOp))
                                         .separator()
+                                        .action("Clear Cell Outputs", Box::new(ClearCellOutputs))
                                         .action("Clear All Outputs", Box::new(ClearOutputs))
                                         .action("Delete Cell", Box::new(DeleteCell))
+                                        .separator()
+                                        .action("Reload Notebook", Box::new(ReloadNotebook))
                                 }))
                             }),
                     )
@@ -2762,6 +2847,12 @@ impl Render for NotebookEditor {
             .on_action(
                 cx.listener(|this, action, window, cx| this.interrupt_kernel(action, window, cx)),
             )
+            .on_action(cx.listener(|this, action, window, cx| {
+                this.handle_reload_notebook(action, window, cx)
+            }))
+            .on_action(cx.listener(|this, action, window, cx| {
+                this.clear_selected_cell_outputs(action, window, cx)
+            }))
             .child(
                 h_flex()
                     .flex_1()
@@ -3018,16 +3109,41 @@ impl Item for NotebookEditor {
         &mut self,
         _options: SaveOptions,
         project: Entity<Project>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
         let notebook = self.to_notebook(cx);
         let path = self.notebook_item.read(cx).path.clone();
         let fs = project.read(cx).fs().clone();
 
-        self.mark_as_saved(cx);
+        if !self.disk_changed_externally {
+            self.mark_as_saved(cx);
+            return cx.spawn(async move |_this, _cx| {
+                let json = serde_json::to_string_pretty(&notebook)
+                    .context("Failed to serialize notebook")?;
+                fs.atomic_write(path, json).await?;
+                Ok(())
+            });
+        }
 
-        cx.spawn(async move |_this, _cx| {
+        // The file changed on disk while we had unsaved changes — confirm
+        // before overwriting the external version.
+        let answer = window.prompt(
+            PromptLevel::Warning,
+            "This notebook changed on disk since it was loaded.",
+            Some("Saving will overwrite the on-disk changes with your version."),
+            &["Overwrite", "Cancel"],
+            cx,
+        );
+
+        cx.spawn(async move |this, cx| {
+            if answer.await != Ok(0) {
+                return Ok(());
+            }
+            this.update(cx, |this, cx| {
+                this.disk_changed_externally = false;
+                this.mark_as_saved(cx);
+            })?;
             let json =
                 serde_json::to_string_pretty(&notebook).context("Failed to serialize notebook")?;
             fs.atomic_write(path, json).await?;

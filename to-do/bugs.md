@@ -150,8 +150,12 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
   the retained buffer's `has_conflict` / mtime) against what we loaded, and if
   it changed, prompt to overwrite / cancel / diff. Requires a confirm dialog,
   so it's its own chunk of work. Data-loss risk → medium-high.
-- **Fix attempted:** none
-- **Tested:** n/a
+- **Fix attempted (2026-07-11, phase 14):** a `disk_changed_externally` flag is
+  set when the external-change conflict is detected (the phase-9 toast path);
+  while set, `Item::save` shows an Overwrite/Cancel prompt and only writes on
+  Overwrite. Flag clears on reload or confirmed overwrite. A Reload button on
+  the conflict toast + a "Reload Notebook" command were added alongside.
+- **Tested:** no — needs user confirmation (see phase 14 checklist)
 
 ## 16. Queued cell output misrouted when a run spans kernel selection/launch
 
