@@ -9,6 +9,15 @@ half-implemented features, and adding missing features (kernel lifecycle,
 cell-level actions, keyboard shortcuts, navigation/scrolling, environment
 management, etc.).
 
+# Dev workflow
+
+- **Commit and push after every completed task** (a phase's implementation, a
+  bug fix, or a discrete user-requested tweak) — as soon as it compiles, is
+  clippy-clean, and its tests pass. Do NOT batch multiple completed tasks into
+  one commit/push. The user pulls and builds each pushed chunk while the next
+  task is being worked on, so small frequent pushes directly speed up the
+  test/feedback loop.
+
 # Phasing system
 
 All work is planned and tracked through the `to-do/` directory at the repo

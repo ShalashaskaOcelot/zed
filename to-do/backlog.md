@@ -18,14 +18,26 @@ Small follow-ups:
 
 ## Medium priority
 
+- Selectable output text (user 2026-07-11): allow selecting a PORTION of a
+  cell's output to copy, instead of only the whole output via the "..." menu's
+  Copy Output. Outputs render as TerminalOutput / markdown / table elements
+  that don't support text selection today.
+- "Open output in new editor" (user 2026-07-11, larger item): for long /
+  scrolling outputs, an affordance (like VS Code's "Open in text editor") that
+  opens the full output in a regular editor buffer/tab for searching,
+  selecting, and scrolling comfortably.
+
 - "New Jupyter Notebook" should open a truly UNSAVED notebook (phase 12
-  follow-up, user 2026-07-11). Currently the command writes `Untitled-N.ipynb`
-  to disk immediately and opens that. The user wants it to behave like Ctrl-N:
-  an untitled, unsaved buffer that only hits disk on manual save. Needs
-  project-item / editor routing for a notebook backed by a path-less buffer
-  (the `NotebookItem` open path currently requires a `ProjectEntryId` and a
-  saved `.ipynb`), plus a save-as flow on first save. Bigger plumbing — schedule
-  as its own phase when picked up.
+  follow-up, user 2026-07-11, re-raised 2026-07-11). Currently the command
+  writes `Untitled-N.ipynb` into the workspace immediately and opens that. It
+  should behave like Ctrl-N: an untitled, session-only buffer that only hits
+  disk on manual save (with a save-as flow on first save). This applies ONLY
+  to the command-palette command — notebooks created via the file browser's
+  New File are correctly saved where they're created, with the given name, and
+  must stay that way. Needs project-item / editor routing for a notebook
+  backed by a path-less buffer (the `NotebookItem` open path currently
+  requires a `ProjectEntryId` and a saved `.ipynb`). Bigger plumbing —
+  schedule as its own phase when picked up.
 
 - Let "Create Python Environment" choose the location (user 2026-07-08 —
   for user-based rather than repo-based venvs in a central place). Default to
