@@ -32,6 +32,15 @@ phase-4 actions already wired on the notebook root.
       button/counter/ellipsis are inset to the right of the bar so nothing
       overlaps. Removed the old opaque-background masking hack and the well's
       border (was too busy at that size).
+- [x] Gutter redesign round 3, VS Code-style (user feedback 2026-07-11 with
+      VS Code screenshots): (1) run button is now a bare hovering button — no
+      well — centered in the full gutter width so it clears the accent bar;
+      (2) the run/edit/ellipsis gutter controls only show on the SELECTED or
+      HOVERED cell (a running cell always shows its stop button); (3) the edge
+      bar is now: accent on selected, grey on hovered, NOTHING otherwise (the
+      old always-on hairline is gone); (4) hover is tracked per-cell via a
+      shared `CELL_HOVER_GROUP` gpui group on every cell root (code, markdown,
+      raw), which the toolbar also uses.
 - [x] Shown when the cell is selected, and on hover via `group("code-cell")` +
       `group_hover(... .visible())` (invisible otherwise).
 - [x] Buttons emit `CellEvent::ToolbarAction(cell_id, action)`; the notebook's

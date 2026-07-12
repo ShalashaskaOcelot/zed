@@ -19,7 +19,7 @@ use zed_actions::notebook::{
 };
 
 use crate::{
-    notebook::{CODE_BLOCK_INSET, GUTTER_WIDTH},
+    notebook::{CELL_HOVER_GROUP, CODE_BLOCK_INSET, GUTTER_WIDTH},
     outputs::{Output, plain, plain::TerminalOutput, user_error::ErrorView},
     repl_settings::ReplSettings,
 };
@@ -348,9 +348,10 @@ pub trait RenderableCell: Render {
         }
     }
 
-    /// The selection indicator bar at the far-left edge of the gutter: a
-    /// rounded accent bar on the selected cell, a hairline on the rest. Kept at
-    /// the edge so it never clips the run button / execution number.
+    /// The indicator bar at the far-left edge of the gutter (VS Code style):
+    /// an accent bar on the selected cell, a grey bar on the hovered cell,
+    /// nothing otherwise. Kept at the edge so it never clips the gutter
+    /// controls.
     fn gutter_indicator_bar(&self, cx: &mut Context<Self>) -> Div {
         let is_selected = self.selected();
         div()
@@ -358,17 +359,18 @@ pub trait RenderableCell: Render {
             .left_0()
             .top_0()
             .h_full()
-            .when(is_selected, |this| {
-                this.w(px(3.))
-                    .rounded_full()
-                    .bg(cx.theme().colors().icon_accent)
-            })
+            .w(px(3.))
+            .rounded_full()
+            .when(is_selected, |this| this.bg(cx.theme().colors().icon_accent))
             .when(!is_selected, |this| {
-                this.w(px(1.)).bg(cx.theme().colors().border)
+                this.group_hover(CELL_HOVER_GROUP, |style| {
+                    style.bg(cx.theme().colors().border)
+                })
             })
     }
 
     fn gutter(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let is_selected = self.selected();
         div()
             .relative()
             .h_full()
@@ -379,13 +381,19 @@ pub trait RenderableCell: Render {
                     div()
                         .absolute()
                         .top(px(CODE_BLOCK_INSET - 2.0))
-                        .left(px(4.))
+                        .left_0()
                         .flex()
                         .flex_none()
-                        .w(px(GUTTER_WIDTH - 4.0))
+                        .w(px(GUTTER_WIDTH))
                         .h(px(GUTTER_WIDTH + 12.0))
                         .items_center()
                         .justify_center()
+                        // VS Code style: the control only shows on the
+                        // selected or hovered cell
+                        .when(!is_selected, |this| {
+                            this.invisible()
+                                .group_hover(CELL_HOVER_GROUP, |style| style.visible())
+                        })
                         .child(control.button),
                 )
             })
@@ -598,6 +606,7 @@ impl Render for MarkdownCell {
         if self.editing {
             return v_flex()
                 .size_full()
+                .group(CELL_HOVER_GROUP)
                 .children(self.cell_position_spacer(true, window, cx))
                 .child(
                     h_flex()
@@ -633,6 +642,7 @@ impl Render for MarkdownCell {
 
         v_flex()
             .size_full()
+            .group(CELL_HOVER_GROUP)
             .children(self.cell_position_spacer(true, window, cx))
             .child(
                 h_flex()
@@ -980,6 +990,7 @@ impl CodeCell {
     }
 
     pub fn gutter_output(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let is_selected = self.selected();
         div()
             .relative()
             .h_full()
@@ -990,13 +1001,17 @@ impl CodeCell {
                     div()
                         .absolute()
                         .top(px(CODE_BLOCK_INSET - 2.0))
-                        .left(px(4.))
+                        .left_0()
                         .flex()
                         .flex_none()
-                        .w(px(GUTTER_WIDTH - 4.0))
+                        .w(px(GUTTER_WIDTH))
                         .h(px(GUTTER_WIDTH + 12.0))
                         .items_center()
                         .justify_center()
+                        .when(!is_selected, |this| {
+                            this.invisible()
+                                .group_hover(CELL_HOVER_GROUP, |style| style.visible())
+                        })
                         .child(
                             PopoverMenu::new("cell-output-menu")
                                 .trigger_with_tooltip(
@@ -1095,6 +1110,9 @@ impl RenderableCell for CodeCell {
 
     fn gutter(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let execution_count = self.execution_count;
+        // The stop button on a RUNNING cell must stay visible even when the
+        // cell is neither selected nor hovered.
+        let always_show_control = self.selected() || self.is_executing;
 
         div()
             .relative()
@@ -1106,17 +1124,18 @@ impl RenderableCell for CodeCell {
                     v_flex()
                         .absolute()
                         .top(px(CODE_BLOCK_INSET - 2.0))
-                        .left(px(4.))
-                        .w(px(GUTTER_WIDTH - 4.0))
+                        .left_0()
+                        .w(px(GUTTER_WIDTH))
                         .items_center()
                         .gap_0p5()
-                        // run/stop button in a soft rounded well so it reads as
-                        // a distinct control against the editor background
+                        // VS Code style: a bare hovering run button, only shown
+                        // on the selected or hovered cell (or while running)
                         .child(
                             div()
-                                .rounded_md()
-                                .p_0p5()
-                                .bg(cx.theme().colors().element_background)
+                                .when(!always_show_control, |this| {
+                                    this.invisible()
+                                        .group_hover(CELL_HOVER_GROUP, |style| style.visible())
+                                })
                                 .child(control.button),
                         )
                         // Jupyter-style execution number (`In [N]`): the count is
@@ -1175,7 +1194,7 @@ impl Render for CodeCell {
 
         v_flex()
             .size_full()
-            .group("code-cell")
+            .group(CELL_HOVER_GROUP)
             // TODO: Move base cell render into trait impl so we don't have to repeat this
             .children(self.cell_position_spacer(true, window, cx))
             // Editor portion
@@ -1215,8 +1234,10 @@ impl Render for CodeCell {
                                         .top_1()
                                         .right_2()
                                         .when(!is_selected, |this| {
-                                            this.invisible()
-                                                .group_hover("code-cell", |style| style.visible())
+                                            this.invisible().group_hover(
+                                                CELL_HOVER_GROUP,
+                                                |style| style.visible(),
+                                            )
                                         })
                                         .child(self.cell_toolbar(cx)),
                                 )
@@ -1404,6 +1425,7 @@ impl Render for RawCell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .size_full()
+            .group(CELL_HOVER_GROUP)
             // TODO: Move base cell render into trait impl so we don't have to repeat this
             .children(self.cell_position_spacer(true, window, cx))
             .child(

@@ -101,6 +101,9 @@ pub(crate) const SMALL_SPACING_SIZE: f32 = 8.0;
 pub(crate) const MEDIUM_SPACING_SIZE: f32 = 12.0;
 pub(crate) const LARGE_SPACING_SIZE: f32 = 16.0;
 pub(crate) const GUTTER_WIDTH: f32 = 26.0;
+/// Hover group shared by every cell's root element, so gutters and toolbars
+/// can show/hide on cell hover regardless of cell type.
+pub(crate) const CELL_HOVER_GROUP: &str = "notebook-cell";
 pub(crate) const CODE_BLOCK_INSET: f32 = MEDIUM_SPACING_SIZE;
 pub(crate) const CONTROL_SIZE: f32 = 20.0;
 
