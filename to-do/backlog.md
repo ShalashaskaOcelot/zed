@@ -18,6 +18,15 @@ Small follow-ups:
 
 ## Medium priority
 
+- "New Jupyter Notebook" should open a truly UNSAVED notebook (phase 12
+  follow-up, user 2026-07-11). Currently the command writes `Untitled-N.ipynb`
+  to disk immediately and opens that. The user wants it to behave like Ctrl-N:
+  an untitled, unsaved buffer that only hits disk on manual save. Needs
+  project-item / editor routing for a notebook backed by a path-less buffer
+  (the `NotebookItem` open path currently requires a `ProjectEntryId` and a
+  saved `.ipynb`), plus a save-as flow on first save. Bigger plumbing — schedule
+  as its own phase when picked up.
+
 - Let "Create Python Environment" choose the location (user 2026-07-08 —
   for user-based rather than repo-based venvs in a central place). Default to
   the local workspace `.venv` so Enter/OK just creates it there, but allow

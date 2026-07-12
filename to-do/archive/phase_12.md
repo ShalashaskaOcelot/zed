@@ -1,8 +1,11 @@
-# Phase 12 — Create & open new notebooks
+# Phase 12 — Create & open new notebooks (COMPLETE, archived 2026-07-11)
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, unit
-> test passes. Kind: **new feature** — on confirmation that empty `.ipynb`
-> files open and "New Jupyter Notebook" works, archive; tweaks become new items.
+> ✅ STATUS: CONFIRMED by the user 2026-07-11 ("Create notebook both ways
+> works"). Kind: **new feature** — archived. Two follow-ups filed as new items
+> (not reopens): (1) the "New Jupyter Notebook" command should open a truly
+> UNSAVED buffer like Ctrl-N rather than writing `Untitled.ipynb` to disk →
+> backlog; (2) a one-off shift-enter focus jump on a brand-new notebook →
+> bug #17.
 
 Goal: VS Code parity for getting a notebook to exist. Today you must duplicate
 an existing `.ipynb` and empty it; an empty/new `.ipynb` fails to open because

@@ -189,3 +189,22 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
 - **Fix attempted:** none (deliberately — the obvious cause is ruled out; a
   speculative fix would be premature).
 - **Tested:** n/a
+
+## 17. One-off shift-enter focus jump on a brand-new notebook
+
+- **Status:** open (not reproduced)
+- **Symptom:** (user 2026-07-11) On the FIRST run in a freshly-created notebook:
+  added an import line to the first cell, pressed shift-enter to execute. It
+  advanced down, created a new cell (expected, since it was the last cell), then
+  jumped focus BACK to the first cell. Could not recreate; a second attempt
+  behaved normally.
+- **Analysis:** likely a focus/selection race specific to the just-created
+  single-cell notebook — `run_and_advance`'s last-cell branch does
+  `add_code_block` (which selects the new cell in command mode via
+  `add_code_cell_at` → `enter_command_mode`) and then `enter_command_mode`
+  again; combined with the async execute/notify and the `cx.on_focus` mode-sync
+  handler, selection may momentarily bounce. Overlaps with the phase-11 /
+  bug #15 focus work. Watch for recurrence; capture the cell count and whether
+  a kernel was attached if it happens again.
+- **Fix attempted:** none
+- **Tested:** n/a
