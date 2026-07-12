@@ -429,10 +429,20 @@ impl Output {
             },
             Some(MimeType::Html(html_content)) => match html::html_to_markdown(html_content) {
                 Ok(markdown_text) => {
-                    let content = cx.new(|cx| MarkdownView::from(markdown_text, cx));
-                    Output::Markdown {
-                        content,
-                        display_id,
+                    // HTML that is essentially one table (e.g. a pandas
+                    // DataFrame's default text/html repr) renders with the
+                    // native table grid; anything else stays markdown.
+                    if let Some(data_table) = table::table_from_markdown(&markdown_text) {
+                        Output::Table {
+                            content: cx.new(|cx| TableView::new(&data_table, window, cx)),
+                            display_id,
+                        }
+                    } else {
+                        let content = cx.new(|cx| MarkdownView::from(markdown_text, cx));
+                        Output::Markdown {
+                            content,
+                            display_id,
+                        }
                     }
                 }
                 Err(_) => Output::Plain {

@@ -55,7 +55,7 @@
 //! display(df)
 //! ```
 use gpui::{AnyElement, ClipboardItem, FontWeight, TextRun};
-use runtimelib::datatable::TableSchema;
+use runtimelib::datatable::{FieldType, TableSchema, TableSchemaField};
 use runtimelib::media::datatable::TabularDataResource;
 use serde_json::Value;
 use settings::Settings;
@@ -92,6 +92,117 @@ const TABLE_Y_PADDING_MULTIPLE: f32 = 0.5;
 /// Cap on rendered rows so a huge DataFrame doesn't create tens of thousands
 /// of elements. The clipboard content (Copy Output) still contains all rows.
 const MAX_RENDERED_ROWS: usize = 300;
+
+/// Try to interpret markdown (produced by `html_to_markdown` from an HTML
+/// output) as a single table, so DataFrame-style HTML outputs (e.g. pandas'
+/// default `text/html` repr) can be rendered with the native `TableView` grid
+/// instead of as markdown text. Returns `None` when the markdown is not
+/// essentially just one table — callers should fall back to markdown
+/// rendering.
+pub fn table_from_markdown(markdown: &str) -> Option<TabularDataResource> {
+    let mut table_rows: Vec<Vec<String>> = Vec::new();
+
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with('|') {
+            let cells: Vec<String> = trimmed
+                .trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().to_string())
+                .collect();
+            // Skip markdown separator rows (| --- | --- |).
+            let is_separator = cells
+                .iter()
+                .all(|cell| !cell.is_empty() && cell.trim_matches(':').chars().all(|c| c == '-'));
+            if !is_separator {
+                table_rows.push(cells);
+            }
+        } else {
+            // Tolerate pandas' trailing "N rows × M columns" summary line;
+            // anything else means this output is more than a table.
+            let is_shape_summary = trimmed.contains("rows") && trimmed.contains("columns");
+            if !is_shape_summary {
+                return None;
+            }
+        }
+    }
+
+    let (header, data_rows) = table_rows.split_first()?;
+    if header.is_empty() {
+        return None;
+    }
+
+    // Column names must be unique to key the row objects (pandas' index column
+    // has an empty header; duplicates get a numeric suffix).
+    let mut names: Vec<String> = Vec::with_capacity(header.len());
+    for (index, name) in header.iter().enumerate() {
+        let base = if name.is_empty() {
+            // Most likely the DataFrame index column. The field name is also
+            // the header label, so use (unique) whitespace to display blank.
+            " ".repeat(index + 1)
+        } else {
+            name.clone()
+        };
+        let mut candidate = base.clone();
+        let mut suffix = 2;
+        while names.contains(&candidate) {
+            candidate = format!("{base} ({suffix})");
+            suffix += 1;
+        }
+        names.push(candidate);
+    }
+
+    // A column is numeric (right-aligned) when every non-empty cell parses as
+    // a number, ignoring pandas' "..." truncation markers.
+    let fields = names
+        .iter()
+        .enumerate()
+        .map(|(column, name)| {
+            let mut any_value = false;
+            let numeric = data_rows.iter().all(|row| {
+                let value = row.get(column).map(String::as_str).unwrap_or("");
+                if value.is_empty() || value == "..." || value == "…" {
+                    return true;
+                }
+                any_value = true;
+                value.replace(',', "").parse::<f64>().is_ok()
+            });
+            TableSchemaField {
+                name: name.clone(),
+                field_type: if numeric && any_value {
+                    FieldType::Number
+                } else {
+                    FieldType::String
+                },
+                ..Default::default()
+            }
+        })
+        .collect();
+
+    let data = data_rows
+        .iter()
+        .map(|row| {
+            let mut object = serde_json::Map::new();
+            for (column, name) in names.iter().enumerate() {
+                let value = row.get(column).cloned().unwrap_or_default();
+                object.insert(name.clone(), Value::String(value));
+            }
+            Value::Object(object)
+        })
+        .collect();
+
+    Some(TabularDataResource {
+        schema: TableSchema {
+            fields,
+            ..Default::default()
+        },
+        data: Some(data),
+        ..Default::default()
+    })
+}
 
 impl TableView {
     pub fn new(table: &TabularDataResource, window: &mut Window, cx: &mut App) -> Self {
@@ -331,5 +442,75 @@ impl OutputContent for TableView {
 
     fn has_clipboard_content(&self, _window: &Window, _cx: &App) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The shape produced by html_to_markdown for a pandas DataFrame repr:
+    /// an index column with an empty header, and a trailing shape summary.
+    #[test]
+    fn test_table_from_markdown_pandas_dataframe() {
+        let markdown = "\
+|  | name | age |
+| --- | --- | --- |
+| 0 | Alice | 30 |
+| 1 | Bob | 28 |
+5 rows × 2 columns";
+
+        let table = table_from_markdown(markdown).expect("should parse as a table");
+        assert_eq!(table.schema.fields.len(), 3);
+        // Index column header displays blank but is a unique field name.
+        assert!(table.schema.fields[0].name.trim().is_empty());
+        assert_eq!(table.schema.fields[1].name, "name");
+        // The index and age columns are numeric (right-aligned); name is not.
+        assert_eq!(table.schema.fields[0].field_type, FieldType::Number);
+        assert_eq!(table.schema.fields[1].field_type, FieldType::String);
+        assert_eq!(table.schema.fields[2].field_type, FieldType::Number);
+
+        let data = table.data.expect("table has data");
+        assert_eq!(data.len(), 2);
+        assert_eq!(data[0].get("name"), Some(&Value::String("Alice".into())));
+    }
+
+    #[test]
+    fn test_table_from_markdown_truncation_markers_stay_numeric() {
+        let markdown = "\
+| a |
+| --- |
+| 1 |
+| ... |
+| 3 |";
+        let table = table_from_markdown(markdown).expect("should parse");
+        assert_eq!(table.schema.fields[0].field_type, FieldType::Number);
+    }
+
+    #[test]
+    fn test_table_from_markdown_rejects_mixed_content() {
+        let markdown = "\
+# A heading
+
+| a | b |
+| --- | --- |
+| 1 | 2 |";
+        assert!(
+            table_from_markdown(markdown).is_none(),
+            "markdown with non-table content should fall back to markdown rendering"
+        );
+    }
+
+    #[test]
+    fn test_table_from_markdown_duplicate_headers() {
+        let markdown = "\
+| x | x |
+| --- | --- |
+| 1 | 2 |";
+        let table = table_from_markdown(markdown).expect("should parse");
+        assert_eq!(table.schema.fields[0].name, "x");
+        assert_ne!(table.schema.fields[1].name, "x");
+        let data = table.data.expect("has data");
+        assert_eq!(data[0].as_object().map(|obj| obj.len()), Some(2));
     }
 }
