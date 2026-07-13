@@ -18,42 +18,32 @@ Scheduled into phases (kept here only as a pointer):
 - Move execution status/time into the cell + center gutter run button →
   **phase 18**.
 - Configurable post-run landing mode (command/edit/remember) → **phase 19**.
+- Per-cell scoped stop/interrupt → **phase 20**.
+- Live elapsed-time counter while running → **phase 21**.
+- Multi-select cells → **phase 22**.
+- Collapse/expand cell input & output → **phase 23**.
 
 Small follow-ups:
 - Paste cell ABOVE (`shift-v`) — phase 7 wired only paste-below.
 
 ## Medium priority
 
-- Per-cell stop/interrupt should be scoped to the cell, not global (user
-  2026-07-11): the gutter stop button currently dispatches `InterruptKernel`,
-  which interrupts the kernel AND cancels the whole batch. Desired: stopping a
-  RUNNING cell interrupts that execution (kernel interrupt is inherently
-  global — only one cell runs at a time — but it should NOT cancel the rest of
-  the batch unless that's the running cell); stopping a PENDING/queued cell
-  just removes THAT cell from the queue (mark it idle/cancelled) and lets the
-  cells above and below it still run. Needs the stop button to know whether
-  the cell is running vs pending and act per-cell on the run_queue instead of
-  calling the global interrupt.
+- (Moved to **phase 20**) Per-cell stop/interrupt should be scoped to the cell,
+  not global (user 2026-07-11): the gutter stop button dispatches the global
+  `InterruptKernel`; stopping a queued cell should remove just that cell and
+  leave the rest running.
 - Dedicated REPL / Notebook section in the GUI settings UI (user 2026-07-11):
   as notebook config grows (landing mode, and future options), surface a
   grouped settings page/section so they're discoverable and editable in one
   place rather than only via settings.json. (Depends on how Zed's settings UI
   registers sections.)
 
-- Multi-select cells (user 2026-07-11), VS Code / file-explorer / Excel style:
-  - shift + down/up in command mode: keep the originally-focused cell selected
-    and extend the selection to the adjacent cell (contiguous range).
-  - shift + click a cell: select the whole contiguous range from the anchor to
-    the clicked cell, inclusive.
-  - ctrl + click: toggle individual cells into a discontiguous multi-selection.
-  - ctrl + arrows: do nothing (no selection change).
-  Then make the cell actions (delete, copy/cut, run, move, convert) operate on
-  the full selection. Sizeable — the notebook currently tracks a single
-  `selected_cell_index`; this needs a selection set + anchor and updates across
-  rendering and every action. Schedule as its own phase when picked up.
-- Live elapsed-time counter while a cell runs (user 2026-07-11): show a ticking
-  timer during execution instead of only revealing the total once the cell
-  finishes. Pairs with the phase-17 execution states / phase-18 status display.
+- (Moved to **phase 22**) Multi-select cells (user 2026-07-11), VS Code /
+  file-explorer / Excel style (shift+arrow range, shift+click range, ctrl+click
+  toggle, ctrl+arrows no-op); actions operate on the whole selection.
+- (Moved to **phase 21**) Live elapsed-time counter while a cell runs (user
+  2026-07-11): a ticking timer during execution instead of only the total on
+  finish.
 - Further DataFrame/table polish (user 2026-07-11, "could be done better"):
   follow-up refinements to the phase-16 table rendering (spacing, column
   sizing/eliding, header styling, very wide frames, dark/light contrast).
@@ -112,8 +102,8 @@ Small follow-ups:
 - Persist the per-notebook kernel choice across full Zed restarts (currently
   only within a session; user: "not a big deal"). Likely via the saved .ipynb
   metadata match or a persisted `ReplStore`. (Spun off from phase 6.)
-- Collapse/expand cell input and output (a `CellControlType` scaffold exists).
-  Useful for cells with large outputs.
+- (Moved to **phase 23**) Collapse/expand cell input and output (a
+  `CellControlType` scaffold exists). Useful for cells with large outputs.
 - Bind the "smart arrows" (`NotebookMoveUp`/`NotebookMoveDown`) to up/down in
   edit mode so arrow travel crosses cell boundaries at the first/last line
   (Jupyter/VS Code style). Deferred from phase 3: handlers exist but are
