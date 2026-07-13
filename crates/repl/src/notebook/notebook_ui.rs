@@ -105,6 +105,11 @@ pub(crate) const GUTTER_WIDTH: f32 = 26.0;
 /// Hover group shared by every cell's root element, so gutters and toolbars
 /// can show/hide on cell hover regardless of cell type.
 pub(crate) const CELL_HOVER_GROUP: &str = "notebook-cell";
+
+/// Marker for the "notebook changed on disk" conflict toast, shared between
+/// showing it (external change under unsaved edits) and dismissing it (any
+/// reload of the notebook resolves the conflict).
+struct NotebookConflictToast;
 pub(crate) const CODE_BLOCK_INSET: f32 = MEDIUM_SPACING_SIZE;
 pub(crate) const CONTROL_SIZE: f32 = 20.0;
 
@@ -800,8 +805,15 @@ impl NotebookEditor {
         self.pending_executions.clear();
         self.cells_awaiting_kernel_choice.clear();
         self.cancel_run_queue();
-        // We now reflect the on-disk content, so any prior conflict is moot.
+        // We now reflect the on-disk content, so any prior conflict is moot:
+        // clear the flag and take down the conflict toast (reloading from the
+        // command palette must dismiss it too, not just the toast's button).
         self.disk_changed_externally = false;
+        if let Some(workspace) = Workspace::for_window(window, cx) {
+            workspace.update(cx, |workspace, cx| {
+                workspace.dismiss_toast(&NotificationId::unique::<NotebookConflictToast>(), cx);
+            });
+        }
 
         self.cell_order = cell_order.clone();
         self.original_cell_order = cell_order;
@@ -828,7 +840,6 @@ impl NotebookEditor {
     ) {
         if self.is_dirty(cx) {
             self.disk_changed_externally = true;
-            struct NotebookConflictToast;
             let notification_id = NotificationId::unique::<NotebookConflictToast>();
             let this = cx.entity().downgrade();
             let project = self.project.clone();

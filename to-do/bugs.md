@@ -236,16 +236,17 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
 
 ## 19. Reloading doesn't clear the conflict notification toast
 
-- **Status:** open
+- **Status:** fix attempted - untested
 - **Symptom:** (user 2026-07-11) After the "notebook changed on disk but you
-  have unsaved changes" toast appears, using the Reload command (or the toast's
-  Reload button) reloads the file but leaves the toast sitting in the corner.
-  Any reload of that file should dismiss the toast, since the conflict is
-  resolved.
+  have unsaved changes" toast appears, reloading via the COMMAND PALETTE
+  leaves the toast sitting in the corner. (Clarified: the toast's own Reload
+  button DOES clear it — clicking a toast action auto-dismisses that toast —
+  only reloads from outside the toast leave it up.) Any reload of that file
+  should dismiss the toast, since the conflict is resolved.
 - **Analysis:** the toast is shown via `workspace.show_toast` with a
-  `NotificationId` (`NotebookConflictToast`); nothing dismisses it on reload.
-  `reload_cells_from_notebook` (and/or `reload`) should call
-  `workspace.dismiss_toast` for that id (and clear `disk_changed_externally`,
-  which it already does). Phase 14 follow-up.
-- **Fix attempted:** none
-- **Tested:** n/a
+  `NotificationId` (`NotebookConflictToast`); nothing dismissed it on reload.
+- **Fix attempted (2026-07-11):** `reload_cells_from_notebook` — the shared
+  sink for every reload path (command palette, toast button, external-change
+  auto-reload) — now calls `workspace.dismiss_toast` for the conflict toast id
+  (the marker type was hoisted to module scope so show and dismiss share it).
+- **Tested:** no — needs user confirmation
