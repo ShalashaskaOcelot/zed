@@ -24,6 +24,22 @@ Small follow-ups:
 
 ## Medium priority
 
+- Per-cell stop/interrupt should be scoped to the cell, not global (user
+  2026-07-11): the gutter stop button currently dispatches `InterruptKernel`,
+  which interrupts the kernel AND cancels the whole batch. Desired: stopping a
+  RUNNING cell interrupts that execution (kernel interrupt is inherently
+  global — only one cell runs at a time — but it should NOT cancel the rest of
+  the batch unless that's the running cell); stopping a PENDING/queued cell
+  just removes THAT cell from the queue (mark it idle/cancelled) and lets the
+  cells above and below it still run. Needs the stop button to know whether
+  the cell is running vs pending and act per-cell on the run_queue instead of
+  calling the global interrupt.
+- Dedicated REPL / Notebook section in the GUI settings UI (user 2026-07-11):
+  as notebook config grows (landing mode, and future options), surface a
+  grouped settings page/section so they're discoverable and editable in one
+  place rather than only via settings.json. (Depends on how Zed's settings UI
+  registers sections.)
+
 - Multi-select cells (user 2026-07-11), VS Code / file-explorer / Excel style:
   - shift + down/up in command mode: keep the originally-focused cell selected
     and extend the selection to the adjacent cell (contiguous range).
