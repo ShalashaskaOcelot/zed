@@ -2583,6 +2583,15 @@
     // Maximum number of columns of output to display before scaling images.
     // Set to 0 to disable output width limits.
     "output_max_width_columns": 0,
+    // Which mode a notebook lands in after running a cell (ctrl-enter /
+    // shift-enter). May take 3 values:
+    //  1. Always land in command mode (single-key cell shortcuts active):
+    //     "notebook_run_landing_mode": "command"
+    //  2. Always land in edit mode (cursor in the cell's editor):
+    //     "notebook_run_landing_mode": "edit"
+    //  3. Land in whatever mode was active when the run was triggered:
+    //     "notebook_run_landing_mode": "remember"
+    "notebook_run_landing_mode": "command",
   },
   // Vim settings
   "vim": {

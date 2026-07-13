@@ -1,4 +1,4 @@
-use settings::{RegisterSetting, Settings};
+use settings::{NotebookRunLandingMode, RegisterSetting, Settings};
 
 /// Settings for configuring REPL display and behavior.
 #[derive(Clone, Debug, RegisterSetting)]
@@ -27,6 +27,12 @@ pub struct ReplSettings {
     ///
     /// Default: 0
     pub output_max_height_lines: usize,
+    /// Which mode a notebook lands in after running a cell (ctrl-enter /
+    /// shift-enter): always command, always edit, or whatever mode the run
+    /// was triggered from.
+    ///
+    /// Default: command
+    pub notebook_run_landing_mode: NotebookRunLandingMode,
 }
 
 impl Settings for ReplSettings {
@@ -39,6 +45,7 @@ impl Settings for ReplSettings {
             inline_output: repl.inline_output.unwrap_or(true),
             inline_output_max_length: repl.inline_output_max_length.unwrap_or(50),
             output_max_height_lines: repl.output_max_height_lines.unwrap_or(0),
+            notebook_run_landing_mode: repl.notebook_run_landing_mode.unwrap_or_default(),
         }
     }
 }

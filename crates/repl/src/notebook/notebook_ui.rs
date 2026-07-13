@@ -18,7 +18,7 @@ use jupyter_protocol::JupyterKernelspec;
 use language::{Buffer, Language, LanguageRegistry};
 use log;
 use project::{Project, ProjectEntryId, ProjectPath};
-use settings::Settings as _;
+use settings::{NotebookRunLandingMode, Settings as _};
 use ui::{CommonAnimationExt, Tooltip, prelude::*};
 use workspace::item::{ItemEvent, SaveOptions, TabContentParams};
 use workspace::notifications::NotificationId;
@@ -41,6 +41,7 @@ use crate::kernels::{
     WslRunningKernel,
 };
 use crate::notebook::MovementDirection;
+use crate::repl_settings::ReplSettings;
 use crate::repl_store::ReplStore;
 
 use picker::Picker;
@@ -1382,6 +1383,8 @@ impl NotebookEditor {
     }
 
     fn run_current_cell(&mut self, _: &Run, window: &mut Window, cx: &mut Context<Self>) {
+        // Capture the mode BEFORE running, for the `remember` landing mode.
+        let was_edit_mode = self.notebook_mode == NotebookMode::Edit;
         let Some(cell_id) = self.cell_order.get(self.selected_cell_index).cloned() else {
             return;
         };
@@ -1403,13 +1406,12 @@ impl NotebookEditor {
             }
             Cell::Raw(_) => {}
         }
-        // Running a cell (ctrl/cmd-enter) always returns to command mode,
-        // regardless of the mode it was triggered from, so the cursor leaves
-        // the editor and single-key command shortcuts keep working.
-        self.enter_command_mode(window, cx);
+        self.apply_post_run_landing(was_edit_mode, window, cx);
     }
 
     fn run_and_advance(&mut self, _: &RunAndAdvance, window: &mut Window, cx: &mut Context<Self>) {
+        // Capture the mode BEFORE running, for the `remember` landing mode.
+        let was_edit_mode = self.notebook_mode == NotebookMode::Edit;
         if let Some(cell_id) = self.cell_order.get(self.selected_cell_index).cloned() {
             if let Some(cell) = self.cell_map.get(&cell_id) {
                 match cell {
@@ -1430,10 +1432,35 @@ impl NotebookEditor {
 
         let is_last_cell = self.selected_cell_index == self.cell_count().saturating_sub(1);
         if is_last_cell {
+            // Adds AND selects a fresh cell below (in command mode).
             self.add_code_block(window, cx);
-            self.enter_command_mode(window, cx);
         } else {
             self.advance_in_command_mode(window, cx);
+        }
+        self.apply_post_run_landing(was_edit_mode, window, cx);
+    }
+
+    /// Land in the configured mode after running a cell
+    /// (`repl.notebook_run_landing_mode`): always command, always edit, or the
+    /// mode the run was triggered from (`remember`).
+    fn apply_post_run_landing(
+        &mut self,
+        was_edit_mode: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let want_edit = match ReplSettings::get_global(cx).notebook_run_landing_mode {
+            NotebookRunLandingMode::Command => false,
+            NotebookRunLandingMode::Edit => true,
+            NotebookRunLandingMode::Remember => was_edit_mode,
+        };
+        // Entering edit mode focuses the cell's editor, which would dismiss an
+        // open kernel picker (dropping the cells awaiting the kernel choice) —
+        // fall back to command mode in that case.
+        if want_edit && !self.kernel_picker_handle.is_deployed() {
+            self.enter_edit_mode(&EnterEditMode, window, cx);
+        } else {
+            self.enter_command_mode(window, cx);
         }
     }
 

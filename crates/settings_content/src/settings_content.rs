@@ -1320,6 +1320,28 @@ pub struct ReplSettingsContent {
     ///
     /// Default: 0
     pub output_max_height_lines: Option<usize>,
+    /// Which mode a notebook lands in after running a cell (ctrl-enter /
+    /// shift-enter).
+    ///
+    /// Default: command
+    pub notebook_run_landing_mode: Option<NotebookRunLandingMode>,
+}
+
+/// Which mode a notebook lands in after running a cell.
+///
+/// Default: command
+#[derive(
+    Copy, Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, MergeFrom,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum NotebookRunLandingMode {
+    /// Always land in command mode (single-key cell shortcuts active).
+    #[default]
+    Command,
+    /// Always land in edit mode (cursor in the cell's editor).
+    Edit,
+    /// Land in whatever mode was active when the run was triggered.
+    Remember,
 }
 
 /// Settings for configuring the which-key popup behaviour.

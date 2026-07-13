@@ -189,6 +189,22 @@ To configure a different default kernel for a language, you can assign a kernel 
 }
 ```
 
+### Notebook Run Landing Mode
+
+In a notebook, running a cell with `ctrl-enter` (run) or `shift-enter` (run and advance) lands in command mode by default, so single-key cell shortcuts stay active. You can change this with the `repl.notebook_run_landing_mode` setting in your `settings.json`:
+
+```json [settings]
+{
+  "repl": {
+    "notebook_run_landing_mode": "command"
+  }
+}
+```
+
+- `command` (default): always land in command mode.
+- `edit`: always land in edit mode, with the cursor in the cell's editor.
+- `remember`: land in whatever mode you were in when you triggered the run — running from the editor keeps you editing (the next cell, for `shift-enter`); running from command mode stays in command mode.
+
 ## Interactive Input
 
 When code execution requires user input (such as Python's `input()` function), the REPL displays an input prompt below the cell output.
