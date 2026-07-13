@@ -179,6 +179,11 @@ pub struct NotebookEditor {
     /// without this, an executed-but-unedited notebook reported itself clean
     /// and an external save would silently auto-reload over the run results.
     execution_state_changed: bool,
+    /// Exactly what we last wrote to disk (or loaded from it). Used to
+    /// recognize our OWN save when the file watcher reports the file changed,
+    /// even if new outputs arrived in the meantime — otherwise a save during
+    /// a long-running cell would raise a spurious conflict toast.
+    last_saved_disk_text: Option<String>,
 }
 
 impl NotebookEditor {
@@ -301,6 +306,8 @@ impl NotebookEditor {
             kernel_picker_handle: PopoverMenuHandle::default(),
             disk_changed_externally: false,
             execution_state_changed: false,
+            // What we loaded IS what is on disk right now.
+            last_saved_disk_text: Some(notebook_item.read(cx).buffer.read(cx).text()),
         };
         // Lazy start: don't launch a kernel on open. Show the remembered
         // kernel's name if we can resolve one now (a real launch happens on
@@ -845,6 +852,17 @@ impl NotebookEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Our OWN save landing back via the file watcher is not an external
+        // change. Check against what we last wrote BEFORE the dirty check:
+        // outputs from a still-running cell may have arrived since the save,
+        // which would otherwise count as dirty and raise a spurious conflict.
+        let disk_text = buffer.read(cx).text();
+        if let Some(last_saved) = &self.last_saved_disk_text
+            && disk_text.trim() == last_saved.trim()
+        {
+            return;
+        }
+
         if self.is_dirty(cx) {
             self.disk_changed_externally = true;
             let notification_id = NotificationId::unique::<NotebookConflictToast>();
@@ -875,8 +893,8 @@ impl NotebookEditor {
             return;
         }
 
-        let disk_text = buffer.read(cx).text();
-        // Skip if the disk content already matches ours (e.g. our own save).
+        // Secondary guard: skip if the disk content already matches our
+        // current state.
         if let Ok(current) = serde_json::to_string_pretty(&self.to_notebook(cx))
             && current.trim() == disk_text.trim()
         {
@@ -884,7 +902,10 @@ impl NotebookEditor {
         }
 
         match Self::parse_notebook_text(&disk_text) {
-            Ok(notebook) => self.reload_cells_from_notebook(&notebook, window, cx),
+            Ok(notebook) => {
+                self.reload_cells_from_notebook(&notebook, window, cx);
+                self.last_saved_disk_text = Some(disk_text);
+            }
             Err(error) => {
                 log::warn!("notebook: failed to parse externally-changed .ipynb: {error}")
             }
@@ -3240,9 +3261,14 @@ impl Item for NotebookEditor {
 
         if !self.disk_changed_externally {
             self.mark_as_saved(cx);
-            return cx.spawn(async move |_this, _cx| {
+            return cx.spawn(async move |this, cx| {
                 let json = serde_json::to_string_pretty(&notebook)
                     .context("Failed to serialize notebook")?;
+                // Recorded so the file watcher's reload event for this write
+                // is recognized as our own save (see handle_external_change).
+                this.update(cx, |this, _| {
+                    this.last_saved_disk_text = Some(json.clone());
+                })?;
                 fs.atomic_write(path, json).await?;
                 Ok(())
             });
@@ -3262,12 +3288,13 @@ impl Item for NotebookEditor {
             if answer.await != Ok(0) {
                 return Ok(());
             }
-            this.update(cx, |this, cx| {
-                this.disk_changed_externally = false;
-                this.mark_as_saved(cx);
-            })?;
             let json =
                 serde_json::to_string_pretty(&notebook).context("Failed to serialize notebook")?;
+            this.update(cx, |this, cx| {
+                this.disk_changed_externally = false;
+                this.last_saved_disk_text = Some(json.clone());
+                this.mark_as_saved(cx);
+            })?;
             fs.atomic_write(path, json).await?;
             Ok(())
         })
@@ -3287,10 +3314,13 @@ impl Item for NotebookEditor {
 
         self.mark_as_saved(cx);
 
-        cx.spawn(async move |_this, _cx| {
+        cx.spawn(async move |this, cx| {
             let abs_path = abs_path.context("Failed to get absolute path")?;
             let json =
                 serde_json::to_string_pretty(&notebook).context("Failed to serialize notebook")?;
+            this.update(cx, |this, _| {
+                this.last_saved_disk_text = Some(json.clone());
+            })?;
             fs.atomic_write(abs_path, json).await?;
             Ok(())
         })
@@ -3317,6 +3347,7 @@ impl Item for NotebookEditor {
 
             this.update_in(cx, |this, window, cx| {
                 this.reload_cells_from_notebook(&notebook, window, cx);
+                this.last_saved_disk_text = Some(file_content);
             })?;
 
             Ok(())
@@ -3370,8 +3401,20 @@ impl KernelSession for NotebookEditor {
         if let Some(parent_header) = &message.parent_header {
             if let Some(cell_id) = self.execution_requests.get(&parent_header.msg_id) {
                 if let Some(Cell::Code(cell)) = self.cell_map.get(cell_id) {
-                    // Outputs / execution counts arriving are savable state.
-                    self.execution_state_changed = true;
+                    // Outputs / execution counts arriving are savable state —
+                    // but only for messages that actually change it. Status
+                    // (busy/idle) broadcasts and replies must not re-dirty a
+                    // notebook that was just saved.
+                    if matches!(
+                        &message.content,
+                        JupyterMessageContent::StreamContent(_)
+                            | JupyterMessageContent::DisplayData(_)
+                            | JupyterMessageContent::ExecuteResult(_)
+                            | JupyterMessageContent::ExecuteInput(_)
+                            | JupyterMessageContent::ErrorOutput(_)
+                    ) {
+                        self.execution_state_changed = true;
+                    }
                     cell.update(cx, |cell, cx| {
                         cell.handle_message(message, window, cx);
                     });

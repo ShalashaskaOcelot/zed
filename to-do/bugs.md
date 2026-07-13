@@ -246,6 +246,14 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
   executed-but-unedited notebook counts as dirty → an external save now shows
   the conflict toast instead of silently auto-reloading over the run results,
   and the tab dirty-dot/save-prompt reflect execution state too.
+- **Refined (same day, from self-review before user testing):** (1) the flag
+  is only set for kernel messages that change savable content (stream/display/
+  result/input/error) — Status busy/idle broadcasts no longer re-dirty a
+  just-saved notebook; (2) new `last_saved_disk_text` records exactly what we
+  last wrote/loaded, and `handle_external_change` recognizes our OWN save by
+  comparing against it BEFORE the dirty check — otherwise saving during a
+  long-running cell (outputs arriving between the write and the file-watcher
+  event) raised a spurious conflict toast for our own save.
 - **Tested:** no — needs user confirmation
 
 ## 19. Reloading doesn't clear the conflict notification toast
