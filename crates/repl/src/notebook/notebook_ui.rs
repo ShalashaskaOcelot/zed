@@ -1359,6 +1359,21 @@ impl NotebookEditor {
 
     /// Run a batch of cells sequentially, stopping the remainder if one fails.
     fn run_cell_batch(&mut self, cells: Vec<CellId>, window: &mut Window, cx: &mut Context<Self>) {
+        // A batch run (Run All / Run Above / Run Below) supersedes any run
+        // already in flight: interrupt it and drop its routing so trailing
+        // messages don't touch the new run. Without this, `advance_run_queue`
+        // refuses to start while a cell is active, leaving the new batch stuck
+        // Pending forever. (A single-cell run does NOT go through here — it
+        // just queues at the kernel like Jupyter.)
+        if self.active_run_cell.is_some() || !self.run_queue.is_empty() {
+            if let Kernel::RunningKernel(kernel) = &self.kernel {
+                kernel.interrupt();
+            }
+            self.cancel_run_queue(cx);
+            self.stop_executing_cells(cx);
+            self.execution_requests.clear();
+        }
+
         // Every code cell in the batch shows as pending immediately — a
         // previously-executed cell's ✓ makes way for the pending marker, but
         // its OUTPUT stays until the cell actually re-executes.

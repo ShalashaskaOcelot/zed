@@ -64,6 +64,30 @@ is_executing / execution_start_time, plus a new "pending" state).
 - [x] Debug logging around promote/dismiss/flush of queued cells (also serves
       as the bug #16 instrumentation pass).
 
+## Follow-up fixes from user testing (2026-07-11)
+
+User CONFIRMED: pending appears, per-cell times behind a long cell are correct,
+cancelled status works, Run All marks pending. Remaining issues found and fixed:
+
+- [x] Cells stuck "Running" (and two showing Running at once): shell
+      `ExecuteReply` could arrive before iopub `ExecuteInput` for a fast cell,
+      and `begin_running` then resurrected the finished cell. Made the status
+      transition monotonic (begin_running won't revive a Finished/Cancelled
+      cell; it still clears the previous outputs). (commit 5fcfca1)
+- [x] Reworded the pending indicator "…Pending" → "Pending…".
+- [x] Run All (batch) while a run is in flight left every new cell stuck
+      Pending, because `advance_run_queue` won't start while a cell is active.
+      A batch now SUPERSEDES the in-flight run: interrupt it, drop its routing
+      (`execution_requests.clear()`), cancel its cells, then start fresh. A
+      single-cell run still just queues at the kernel (Jupyter behaviour).
+
+## Still to verify / open
+
+- [ ] "Execute All with no kernel selected does nothing" — expected to prompt.
+      Believed to be a side effect of the stuck-active-cell state above; should
+      be retested after these fixes. If it still fails, investigate the batch +
+      no-kernel (Prompt) interaction (run_queue vs pending_executions).
+
 ## Manual test checklist (for the user)
 
 - [ ] Shift-enter down a stack with a kernel running: waiting cells show a
