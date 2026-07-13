@@ -27,9 +27,7 @@ use workspace::{
     Item, ItemHandle, OpenOptions, OpenVisible, Pane, ProjectItem, ToolbarItemLocation, Workspace,
 };
 
-use super::{
-    Cell, CellEvent, CellPosition, CellToolbarAction, MarkdownCellEvent, RenderableCell,
-};
+use super::{Cell, CellEvent, CellPosition, CellToolbarAction, MarkdownCellEvent, RenderableCell};
 
 use nbformat::v4::CellId;
 use nbformat::v4::Metadata as NotebookMetadata;
@@ -101,7 +99,7 @@ pub(crate) const MAX_TEXT_BLOCK_WIDTH: f32 = 9999.0;
 pub(crate) const SMALL_SPACING_SIZE: f32 = 8.0;
 pub(crate) const MEDIUM_SPACING_SIZE: f32 = 12.0;
 pub(crate) const LARGE_SPACING_SIZE: f32 = 16.0;
-pub(crate) const GUTTER_WIDTH: f32 = 26.0;
+pub(crate) const GUTTER_WIDTH: f32 = 30.0;
 /// Hover group shared by every cell's root element, so gutters and toolbars
 /// can show/hide on cell hover regardless of cell type.
 pub(crate) const CELL_HOVER_GROUP: &str = "notebook-cell";
@@ -529,49 +527,49 @@ impl NotebookEditor {
         let create_task = cx.background_spawn(async move {
             // Create the venv unless one already exists (reuse it if so).
             if !fs.is_file(&venv_python).await {
-                    let mut last_error = String::new();
-                    let mut created = false;
-                    for base_python in ["python3", "python"] {
-                        match util::command::new_command(base_python)
-                            .arg("-m")
-                            .arg("venv")
-                            .arg(&venv_dir)
-                            .output()
-                            .await
-                        {
-                            Ok(output) if output.status.success() => {
-                                created = true;
-                                break;
-                            }
-                            Ok(output) => {
-                                last_error = String::from_utf8_lossy(&output.stderr)
-                                    .lines()
-                                    .last()
-                                    .unwrap_or("")
-                                    .to_string();
-                            }
-                            Err(error) => last_error = error.to_string(),
+                let mut last_error = String::new();
+                let mut created = false;
+                for base_python in ["python3", "python"] {
+                    match util::command::new_command(base_python)
+                        .arg("-m")
+                        .arg("venv")
+                        .arg(&venv_dir)
+                        .output()
+                        .await
+                    {
+                        Ok(output) if output.status.success() => {
+                            created = true;
+                            break;
                         }
+                        Ok(output) => {
+                            last_error = String::from_utf8_lossy(&output.stderr)
+                                .lines()
+                                .last()
+                                .unwrap_or("")
+                                .to_string();
+                        }
+                        Err(error) => last_error = error.to_string(),
                     }
-                    anyhow::ensure!(
-                        created,
-                        "could not create .venv (is Python installed and on PATH?): {last_error}"
-                    );
                 }
-
-                let output = util::command::new_command(venv_python.to_string_lossy().as_ref())
-                    .args(["-m", "pip", "install", "ipykernel"])
-                    .output()
-                    .await
-                    .context("failed to run pip install ipykernel")?;
                 anyhow::ensure!(
-                    output.status.success(),
-                    "failed to install ipykernel: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                        .lines()
-                        .last()
-                        .unwrap_or("unknown error")
+                    created,
+                    "could not create .venv (is Python installed and on PATH?): {last_error}"
                 );
+            }
+
+            let output = util::command::new_command(venv_python.to_string_lossy().as_ref())
+                .args(["-m", "pip", "install", "ipykernel"])
+                .output()
+                .await
+                .context("failed to run pip install ipykernel")?;
+            anyhow::ensure!(
+                output.status.success(),
+                "failed to install ipykernel: {}",
+                String::from_utf8_lossy(&output.stderr)
+                    .lines()
+                    .last()
+                    .unwrap_or("unknown error")
+            );
 
             anyhow::Ok(venv_python)
         });
@@ -859,13 +857,16 @@ impl NotebookEditor {
                             "This notebook changed on disk, but you have unsaved changes \
                              here. Saving will ask before overwriting the on-disk version.",
                         )
-                        .on_click("Reload (discard my changes)", move |window, cx| {
-                            this.update(cx, |this, cx| {
-                                this.reload(project.clone(), window, cx)
-                                    .detach_and_log_err(cx);
-                            })
-                            .log_err();
-                        }),
+                        .on_click(
+                            "Reload (discard my changes)",
+                            move |window, cx| {
+                                this.update(cx, |this, cx| {
+                                    this.reload(project.clone(), window, cx)
+                                        .detach_and_log_err(cx);
+                                })
+                                .log_err();
+                            },
+                        ),
                         cx,
                     );
                 });
@@ -1167,7 +1168,9 @@ impl NotebookEditor {
             /// Queued to run when the (launching/starting) kernel is ready;
             /// shows the running spinner now. `launch` starts a remembered
             /// kernel.
-            Queued { launch: bool },
+            Queued {
+                launch: bool,
+            },
             /// No kernel selected: prompt for one. The cell is held in
             /// `cells_awaiting_kernel_choice` WITHOUT a spinner, so dismissing
             /// the picker leaves it idle; it runs only if a kernel is chosen.
@@ -1326,12 +1329,7 @@ impl NotebookEditor {
     }
 
     /// Run a batch of cells sequentially, stopping the remainder if one fails.
-    fn run_cell_batch(
-        &mut self,
-        cells: Vec<CellId>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn run_cell_batch(&mut self, cells: Vec<CellId>, window: &mut Window, cx: &mut Context<Self>) {
         // Every code cell in the batch shows as pending immediately — a
         // previously-executed cell's ✓ makes way for the pending marker, but
         // its OUTPUT stays until the cell actually re-executes.
@@ -1841,7 +1839,10 @@ impl NotebookEditor {
         };
 
         // Capture the cell (with live content) for undo before removing it.
-        let serialized = self.cell_map.get(&cell_id).map(|cell| cell.to_nbformat_cell(cx));
+        let serialized = self
+            .cell_map
+            .get(&cell_id)
+            .map(|cell| cell.to_nbformat_cell(cx));
 
         self.raw_remove_cell(index, cx);
         if let Some(serialized) = serialized {
@@ -1853,7 +1854,8 @@ impl NotebookEditor {
 
         self.notebook_mode = NotebookMode::Command;
         self.focus_handle.focus(window, cx);
-        self.cell_list.scroll_to_reveal_item(self.selected_cell_index);
+        self.cell_list
+            .scroll_to_reveal_item(self.selected_cell_index);
         cx.notify();
     }
 
@@ -2022,7 +2024,8 @@ impl NotebookEditor {
         }
         let old_id = self.cell_order[index].clone();
         self.cell_map.remove(&old_id);
-        self.execution_requests.retain(|_, mapped| mapped != &old_id);
+        self.execution_requests
+            .retain(|_, mapped| mapped != &old_id);
         self.pending_executions.retain(|mapped| mapped != &old_id);
         self.cells_awaiting_kernel_choice
             .retain(|mapped| mapped != &old_id);
@@ -2123,7 +2126,11 @@ impl NotebookEditor {
             return;
         }
 
-        let Some(before) = self.cell_map.get(&cell_id).map(|cell| cell.to_nbformat_cell(cx)) else {
+        let Some(before) = self
+            .cell_map
+            .get(&cell_id)
+            .map(|cell| cell.to_nbformat_cell(cx))
+        else {
             return;
         };
         let source = self.cell_source_text(&cell_id, cx);
@@ -2808,20 +2815,26 @@ impl Render for NotebookEditor {
             .on_action(
                 cx.listener(|this, action, window, cx| this.duplicate_cell(action, window, cx)),
             )
-            .on_action(cx.listener(|this, action, window, cx| this.undo_cell_op(action, window, cx)))
-            .on_action(cx.listener(|this, action, window, cx| this.redo_cell_op(action, window, cx)))
+            .on_action(
+                cx.listener(|this, action, window, cx| this.undo_cell_op(action, window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, action, window, cx| this.redo_cell_op(action, window, cx)),
+            )
             .on_action(
                 cx.listener(|this, action, window, cx| this.convert_to_code(action, window, cx)),
             )
-            .on_action(cx.listener(|this, action, window, cx| {
-                this.convert_to_markdown(action, window, cx)
-            }))
+            .on_action(
+                cx.listener(|this, action, window, cx| {
+                    this.convert_to_markdown(action, window, cx)
+                }),
+            )
             .on_action(
                 cx.listener(|this, action, window, cx| this.run_cells_above(action, window, cx)),
             )
-            .on_action(cx.listener(|this, action, window, cx| {
-                this.run_cell_and_below(action, window, cx)
-            }))
+            .on_action(
+                cx.listener(|this, action, window, cx| this.run_cell_and_below(action, window, cx)),
+            )
             .on_action(
                 cx.listener(|this, action, window, cx| this.enter_edit_mode(action, window, cx)),
             )

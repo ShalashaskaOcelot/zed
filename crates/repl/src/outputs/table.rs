@@ -330,7 +330,8 @@ impl TableView {
                     _ => div(),
                 };
 
-                let is_null = !is_header && matches!(row.get(&field.name), Some(Value::Null) | None);
+                let is_null =
+                    !is_header && matches!(row.get(&field.name), Some(Value::Null) | None);
                 let value = cell_content(row, &field.name);
 
                 let cell = container

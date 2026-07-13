@@ -1047,19 +1047,30 @@ impl CodeCell {
             .border_color(cx.theme().colors().border)
             .bg(cx.theme().colors().element_background)
             .child(
-                button("cell-run-above", IconName::ArrowUp, CellToolbarAction::RunAbove).tooltip(
-                    |_window, cx| Tooltip::for_action("Run cells above", &RunCellsAbove, cx),
-                ),
+                button(
+                    "cell-run-above",
+                    IconName::ArrowUp,
+                    CellToolbarAction::RunAbove,
+                )
+                .tooltip(|_window, cx| Tooltip::for_action("Run cells above", &RunCellsAbove, cx)),
             )
             .child(
-                button("cell-run-below", IconName::ArrowDown, CellToolbarAction::RunBelow)
-                    .tooltip(|_window, cx| {
-                        Tooltip::for_action("Run cell and below", &RunCellAndBelow, cx)
-                    }),
+                button(
+                    "cell-run-below",
+                    IconName::ArrowDown,
+                    CellToolbarAction::RunBelow,
+                )
+                .tooltip(|_window, cx| {
+                    Tooltip::for_action("Run cell and below", &RunCellAndBelow, cx)
+                }),
             )
             .child(
-                button("cell-add-below", IconName::Plus, CellToolbarAction::AddBelow)
-                    .tooltip(|_window, cx| Tooltip::for_action("Add cell below", &AddCellBelow, cx)),
+                button(
+                    "cell-add-below",
+                    IconName::Plus,
+                    CellToolbarAction::AddBelow,
+                )
+                .tooltip(|_window, cx| Tooltip::for_action("Add cell below", &AddCellBelow, cx)),
             )
             .child(
                 button("cell-delete", IconName::Trash, CellToolbarAction::Delete)
@@ -1167,12 +1178,16 @@ impl CodeCell {
                                                 }
                                             })
                                             .separator()
-                                            .entry("Clear Output", None, move |_, cx| {
-                                                cell.update(cx, |cell, cx| {
-                                                    cell.clear_outputs();
-                                                    cx.notify();
-                                                });
-                                            })
+                                            .entry(
+                                                "Clear Output",
+                                                None,
+                                                move |_, cx| {
+                                                    cell.update(cx, |cell, cx| {
+                                                        cell.clear_outputs();
+                                                        cx.notify();
+                                                    });
+                                                },
+                                            )
                                         }))
                                     }
                                 }),
@@ -1347,6 +1362,7 @@ impl Render for CodeCell {
                             div()
                                 .relative()
                                 .flex()
+                                .flex_col()
                                 .size_full()
                                 .flex_1()
                                 .py_3()
@@ -1361,6 +1377,17 @@ impl Render for CodeCell {
                                         .w_full()
                                         .child(self.editor.clone()),
                                 )
+                                // VS Code-style cell status bar: the execution
+                                // status + time sit INSIDE the cell, in its
+                                // bottom-left corner.
+                                .when_some(
+                                    self.execution_status_element(cx),
+                                    |this, status_element| {
+                                        this.child(
+                                            h_flex().mt_2().justify_start().child(status_element),
+                                        )
+                                    },
+                                )
                                 // per-cell action toolbar in the top-right,
                                 // shown when the cell is selected or hovered
                                 .child(
@@ -1369,10 +1396,10 @@ impl Render for CodeCell {
                                         .top_1()
                                         .right_2()
                                         .when(!is_selected, |this| {
-                                            this.invisible().group_hover(
-                                                CELL_HOVER_GROUP,
-                                                |style| style.visible(),
-                                            )
+                                            this.invisible()
+                                                .group_hover(CELL_HOVER_GROUP, |style| {
+                                                    style.visible()
+                                                })
                                         })
                                         .child(self.cell_toolbar(cx)),
                                 )
@@ -1397,55 +1424,46 @@ impl Render for CodeCell {
                         ),
                     ),
             )
-            .when(
-                self.has_outputs() || self.execution_status != CellExecutionStatus::Idle,
-                |this| {
-                    let status_element = self.execution_status_element(cx);
-                    this.child(
-                        h_flex()
-                            .w_full()
-                            .pr_6()
-                            .rounded_xs()
-                            .items_start()
-                            .gap(DynamicSpacing::Base08.rems(cx))
-                            .bg(self.selected_bg_color(window, cx))
-                            .child(self.gutter_output(window, cx))
-                            .child(
-                                div().py_1p5().w_full().child(
-                                    v_flex()
-                                        .size_full()
-                                        .flex_1()
-                                        .py_3()
-                                        .px_5()
-                                        .rounded_lg()
-                                        .border_1()
-                                        // execution status/time at the TOP
-                                        .when_some(status_element, |this, status_element| {
-                                            this.child(div().mb_2().child(status_element))
-                                        })
-                                        // output at bottom
-                                        .child(
-                                            div()
-                                                .id((
-                                                    ElementId::from(self.id.to_string()),
-                                                    "output-scroll",
-                                                ))
-                                                .w_full()
-                                                .when_some(output_max_width, |div, max_width| {
-                                                    div.max_w(max_width).overflow_x_scroll()
-                                                })
-                                                .when_some(output_max_height, |div, max_height| {
-                                                    div.max_h(max_height).overflow_y_scroll()
-                                                })
-                                                .children(self.outputs.iter().map(|output| {
-                                                    div().children(output.content(window, cx))
-                                                })),
-                                        ),
-                                ),
+            .when(self.has_outputs(), |this| {
+                this.child(
+                    h_flex()
+                        .w_full()
+                        .pr_6()
+                        .rounded_xs()
+                        .items_start()
+                        .gap(DynamicSpacing::Base08.rems(cx))
+                        .bg(self.selected_bg_color(window, cx))
+                        .child(self.gutter_output(window, cx))
+                        .child(
+                            div().py_1p5().w_full().child(
+                                v_flex()
+                                    .size_full()
+                                    .flex_1()
+                                    .py_3()
+                                    .px_5()
+                                    .rounded_lg()
+                                    .border_1()
+                                    .child(
+                                        div()
+                                            .id((
+                                                ElementId::from(self.id.to_string()),
+                                                "output-scroll",
+                                            ))
+                                            .w_full()
+                                            .when_some(output_max_width, |div, max_width| {
+                                                div.max_w(max_width).overflow_x_scroll()
+                                            })
+                                            .when_some(output_max_height, |div, max_height| {
+                                                div.max_h(max_height).overflow_y_scroll()
+                                            })
+                                            .children(self.outputs.iter().map(|output| {
+                                                div().children(output.content(window, cx))
+                                            })),
+                                    ),
                             ),
-                    )
-                },
-            )
+                        ),
+                )
+            })
             // TODO: Move base cell render into trait impl so we don't have to repeat this
             .children(self.cell_position_spacer(false, window, cx))
     }

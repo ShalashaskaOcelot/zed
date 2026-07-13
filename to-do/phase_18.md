@@ -1,7 +1,11 @@
 # Phase 18 — In-cell execution status display (VS Code style)
 
-Kind: **change to existing behaviour** (relocate/restyle the execution status
-chrome). Not yet started — this is a plan. Requested by the user 2026-07-11.
+> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, tests
+> pass.
+> Kind: **change to existing behaviour** — keep OPEN until the user confirms
+> the status sits inside the cell and the button reads centered.
+
+Requested by the user 2026-07-11.
 
 Goal: match VS Code's placement — show the run status (running spinner /
 completed ✓ / pending / cancelled) and the execution time INSIDE the cell, in
@@ -13,31 +17,32 @@ Primary files: `crates/repl/src/notebook/cell.rs` (the code cell render — the
 status/time row currently rendered above/around the output block, and the
 gutter run button), possibly `notebook_ui.rs` for spacing constants.
 
-## Tasks
+## Implemented
 
-- [ ] Move the execution status indicator + execution time out of the current
-      out-of-cell position into the cell's bottom-left corner, inside the cell
-      padding (VS Code layout). Applies to running / completed / pending /
-      cancelled states (statuses come from phase 17).
-- [ ] Center the gutter run button (and the `[N]` number) properly between the
-      indicator bar and the cell edge — the current `left(px(3.))` +
-      `GUTTER_WIDTH - 3` still reads as left-of-center (likely the icon
-      button's own metrics); tune until it looks centered at runtime.
-- [ ] Keep the status readable in both selected/hovered and idle states.
+- [x] The execution status + time now render INSIDE the cell as a VS Code-
+      style status bar row in the bottom-left (below the code, within the
+      cell's border/padding), for all phase-17 states: pending / running /
+      finished ✓ + time / cancelled ✕. Removed from the old position above the
+      output block — the output section now appears only when there are actual
+      outputs (no more empty output box just to show a time).
+- [x] Gutter centering: widened the gutter 26→30px so the run button and the
+      `[N]` number center in the bar-to-cell-edge span with symmetric (~3.5px)
+      clearance on both sides, instead of sitting tight against the bar.
+- [x] Status row does not collide with the toolbar (top-right) or the language
+      badge (bottom-right, absolute) — the status row is in normal flow on the
+      left.
 
-## Dependencies / ordering
+## Manual test checklist (for the user)
 
-- Best done WITH or AFTER phase 17, since the set of statuses (pending,
-  cancelled) it must display is defined there.
+- [ ] Run a cell: "Running…" appears inside the cell, bottom-left; on finish
+      it becomes ✓ + time in the same spot.
+- [ ] Pending/cancelled states (batch runs, restart) show in the same in-cell
+      spot.
+- [ ] A cell with no outputs no longer grows an empty output box — the status
+      lives in the cell itself.
+- [ ] The gutter run button and `[N]` now read as centered between the accent
+      bar and the cell.
 
-## Risks / gaps
+## Verification (automated)
 
-- Bottom-left placement must not collide with output content or the output
-  gutter's "..." menu.
-- Pure styling — verify in-app; no unit coverage.
-
-## Verification
-
-- `cargo check -p repl` + `./script/clippy -p repl` clean.
-- User test: status + time sit neatly in the cell's bottom-left; run button
-  visually centered in the gutter.
+- `cargo check -p repl` + `./script/clippy -p repl` clean; 42 tests pass.
