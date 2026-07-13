@@ -381,11 +381,12 @@ pub trait RenderableCell: Render {
                     div()
                         .absolute()
                         .top(px(CODE_BLOCK_INSET - 2.0))
-                        // centered between the indicator bar and the cell edge
-                        .left(px(3.))
+                        // nudged right of the accent bar so the control reads
+                        // centered in the gutter rather than hugging the bar
+                        .left(px(7.))
                         .flex()
                         .flex_none()
-                        .w(px(GUTTER_WIDTH - 3.0))
+                        .w(px(GUTTER_WIDTH - 7.0))
                         .h(px(GUTTER_WIDTH + 12.0))
                         .items_center()
                         .justify_center()
@@ -1157,11 +1158,12 @@ impl CodeCell {
                     div()
                         .absolute()
                         .top(px(CODE_BLOCK_INSET - 2.0))
-                        // centered between the indicator bar and the cell edge
-                        .left(px(3.))
+                        // nudged right of the accent bar so the control reads
+                        // centered in the gutter rather than hugging the bar
+                        .left(px(7.))
                         .flex()
                         .flex_none()
-                        .w(px(GUTTER_WIDTH - 3.0))
+                        .w(px(GUTTER_WIDTH - 7.0))
                         .h(px(GUTTER_WIDTH + 12.0))
                         .items_center()
                         .justify_center()
@@ -1286,9 +1288,10 @@ impl RenderableCell for CodeCell {
                     v_flex()
                         .absolute()
                         .top(px(CODE_BLOCK_INSET - 2.0))
-                        // centered between the indicator bar and the cell edge
-                        .left(px(3.))
-                        .w(px(GUTTER_WIDTH - 3.0))
+                        // nudged right of the accent bar so the control reads
+                        // centered in the gutter rather than hugging the bar
+                        .left(px(7.))
+                        .w(px(GUTTER_WIDTH - 7.0))
                         .items_center()
                         .gap_0p5()
                         // VS Code style: a bare hovering run button, only shown
