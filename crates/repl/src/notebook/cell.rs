@@ -879,13 +879,26 @@ impl CodeCell {
     }
 
     /// The kernel started executing this cell (its `execute_input` arrived):
-    /// start the timer and drop the previous run's outputs so the new ones
-    /// replace them.
+    /// drop the previous run's outputs so the new ones replace them, and — if
+    /// the run hasn't already resolved — start the timer and go Running.
+    ///
+    /// The shell `ExecuteReply` and the iopub `ExecuteInput` travel on separate
+    /// channels, so for a fast cell the reply (which finishes the cell) can
+    /// arrive BEFORE the input. In that case the cell is already Finished, and
+    /// we must NOT resurrect it into Running (which left cells stuck spinning).
+    /// The input still precedes this run's outputs on iopub, so clearing here
+    /// is safe either way.
     pub fn begin_running(&mut self) {
+        self.clear_outputs();
+        if matches!(
+            self.execution_status,
+            CellExecutionStatus::Finished | CellExecutionStatus::Cancelled
+        ) {
+            return;
+        }
         self.execution_status = CellExecutionStatus::Running;
         self.execution_start_time = Some(Instant::now());
         self.execution_duration = None;
-        self.clear_outputs();
     }
 
     pub fn finish_execution(&mut self) {
@@ -975,7 +988,7 @@ impl CodeCell {
                         .size(IconSize::XSmall)
                         .color(Color::Muted),
                 )
-                .child(label("Pending".to_string(), cx)),
+                .child(label("Pending...".to_string(), cx)),
             CellExecutionStatus::Running => h_flex()
                 .gap_1()
                 .items_center()
