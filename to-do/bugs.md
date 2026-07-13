@@ -190,9 +190,18 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
   per-message-session quirk; (c) a display/index issue where the output lands
   on the cell at a stale index. Needs targeted logging of the actual
   `msg_id ↔ cell_id` map and the misrouted error's `parent_header` at runtime.
-- **Fix attempted:** none (deliberately — the obvious cause is ruled out; a
-  speculative fix would be premature).
-- **Tested:** n/a
+- **Fix attempted:** none directly (the obvious cause is ruled out; a
+  speculative fix would be premature). HOWEVER, phase 17 (2026-07-11) made two
+  changes to the same span-kernel-selection path that plausibly resolve or at
+  least reshape this: (1) the focus-grab that dismissed the kernel picker and
+  DROPPED awaiting cells is gone — cells queued before/after selection now
+  survive in order; (2) outputs are now cleared and attributed at each cell's
+  own `execute_input`, so an output can no longer land on a cell whose state
+  was stale from the queue-time clear. Debug logging was added around
+  promote/dismiss/flush (`log::debug`, scope `repl`) to capture the queue
+  contents if it recurs.
+- **Tested:** no — re-test the original repro (queue 2 cells pre-selection,
+  1 post, second cell errors) after phase 17 lands.
 
 ## 17. One-off shift-enter focus jump on a brand-new notebook
 

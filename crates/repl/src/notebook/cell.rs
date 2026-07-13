@@ -10,7 +10,7 @@ use gpui::{
 use language::{Buffer, Language, LanguageRegistry};
 use markdown::{Markdown, MarkdownElement, MarkdownFont, MarkdownStyle};
 use nbformat::v4::{CellId, CellMetadata, CellType};
-use runtimelib::{JupyterMessage, JupyterMessageContent};
+use runtimelib::{JupyterMessage, JupyterMessageContent, ReplyStatus};
 use settings::Settings as _;
 use ui::{CommonAnimationExt, ContextMenu, IconButtonShape, PopoverMenu, Tooltip, prelude::*};
 use util::ResultExt;
@@ -676,6 +676,22 @@ impl Render for MarkdownCell {
     }
 }
 
+/// Lifecycle of a code cell's execution. `Pending` (queued, waiting for the
+/// kernel to reach it) is distinct from `Running` (the kernel is actively
+/// executing it) so queued cells don't show a running spinner or accrue the
+/// wait time behind a long-running cell, and `Cancelled` (interrupt/restart/
+/// abort before completion) is distinct from `Finished` so a cell that never
+/// ran doesn't get a completed tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CellExecutionStatus {
+    #[default]
+    Idle,
+    Pending,
+    Running,
+    Finished,
+    Cancelled,
+}
+
 pub struct CodeCell {
     id: CellId,
     metadata: CellMetadata,
@@ -688,7 +704,7 @@ pub struct CodeCell {
     _language_task: Task<()>,
     execution_start_time: Option<Instant>,
     execution_duration: Option<Duration>,
-    is_executing: bool,
+    execution_status: CellExecutionStatus,
 }
 
 impl EventEmitter<CellEvent> for CodeCell {}
@@ -769,7 +785,7 @@ impl CodeCell {
             cell_position: None,
             execution_start_time: None,
             execution_duration: None,
-            is_executing: false,
+            execution_status: CellExecutionStatus::Idle,
             _language_task: language_task,
         }
     }
@@ -852,21 +868,60 @@ impl CodeCell {
         parts.join("\n")
     }
 
-    pub fn start_execution(&mut self) {
+    /// Mark the cell as queued for execution: the previous tick/time make way
+    /// for a pending indicator, but the OUTPUT is kept until the cell actually
+    /// re-executes (see `begin_running`). The timer does NOT start here — a
+    /// pending cell must not accrue the wait time behind earlier cells.
+    pub fn mark_pending(&mut self) {
+        self.execution_status = CellExecutionStatus::Pending;
+        self.execution_start_time = None;
+        self.execution_duration = None;
+    }
+
+    /// The kernel started executing this cell (its `execute_input` arrived):
+    /// start the timer and drop the previous run's outputs so the new ones
+    /// replace them.
+    pub fn begin_running(&mut self) {
+        self.execution_status = CellExecutionStatus::Running;
         self.execution_start_time = Some(Instant::now());
         self.execution_duration = None;
-        self.is_executing = true;
+        self.clear_outputs();
     }
 
     pub fn finish_execution(&mut self) {
         if let Some(start_time) = self.execution_start_time.take() {
             self.execution_duration = Some(start_time.elapsed());
         }
-        self.is_executing = false;
+        self.execution_status = CellExecutionStatus::Finished;
+    }
+
+    /// The cell never completed (interrupt/restart/kernel loss/aborted batch):
+    /// no completed tick and no bogus time.
+    pub fn cancel_execution(&mut self) {
+        if matches!(
+            self.execution_status,
+            CellExecutionStatus::Pending | CellExecutionStatus::Running
+        ) {
+            self.execution_status = CellExecutionStatus::Cancelled;
+            self.execution_start_time = None;
+            self.execution_duration = None;
+        }
     }
 
     pub fn is_executing(&self) -> bool {
-        self.is_executing
+        self.execution_status == CellExecutionStatus::Running
+    }
+
+    /// Running or queued: an execution is in flight for this cell.
+    pub fn is_execution_in_flight(&self) -> bool {
+        matches!(
+            self.execution_status,
+            CellExecutionStatus::Pending | CellExecutionStatus::Running
+        )
+    }
+
+    pub fn execution_status(&self) -> CellExecutionStatus {
+        self.execution_status
     }
 
     /// Forget the kernel-session execution number (`In [N]`). Used on kernel
@@ -891,12 +946,69 @@ impl CodeCell {
             traceback: cx.new(|cx| TerminalOutput::from(error_message, window, cx)),
         }));
         self.execution_start_time = None;
-        self.is_executing = false;
+        // The cell never ran — no completed tick, no time.
+        self.execution_status = CellExecutionStatus::Cancelled;
         cx.notify();
     }
 
     pub fn execution_duration(&self) -> Option<Duration> {
         self.execution_duration
+    }
+
+    /// The small status line for the cell's last/current run: spinner while
+    /// running, a queued indicator while pending, ✓ + time when finished, and
+    /// a muted ✕ when cancelled. `None` for an idle cell.
+    fn execution_status_element(&self, cx: &App) -> Option<AnyElement> {
+        let label = |text: String, cx: &App| {
+            div()
+                .text_xs()
+                .text_color(cx.theme().colors().text_muted)
+                .child(text)
+        };
+        let element = match self.execution_status {
+            CellExecutionStatus::Idle => return None,
+            CellExecutionStatus::Pending => h_flex()
+                .gap_1()
+                .items_center()
+                .child(
+                    Icon::new(IconName::Ellipsis)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .child(label("Pending".to_string(), cx)),
+            CellExecutionStatus::Running => h_flex()
+                .gap_1()
+                .items_center()
+                .child(
+                    Icon::new(IconName::ArrowCircle)
+                        .size(IconSize::XSmall)
+                        .color(Color::Warning)
+                        .with_rotate_animation(2),
+                )
+                .child(label("Running...".to_string(), cx)),
+            CellExecutionStatus::Finished => h_flex()
+                .gap_1()
+                .items_center()
+                .child(
+                    Icon::new(IconName::Check)
+                        .size(IconSize::XSmall)
+                        .color(Color::Success),
+                )
+                .when_some(
+                    self.execution_duration.map(Self::format_duration),
+                    |this, duration_text| this.child(label(duration_text, cx)),
+                ),
+            CellExecutionStatus::Cancelled => h_flex()
+                .gap_1()
+                .items_center()
+                .child(
+                    Icon::new(IconName::XCircle)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .child(label("Cancelled".to_string(), cx)),
+        };
+        Some(element.into_any_element())
     }
 
     fn format_duration(duration: Duration) -> String {
@@ -976,13 +1088,25 @@ impl CodeCell {
                     .push(Output::new(&execute_result.data, None, window, cx));
             }
             JupyterMessageContent::ExecuteInput(input) => {
+                // The kernel started executing THIS cell: only now does it
+                // become Running and start its timer (queued cells must not
+                // accrue the wait behind earlier cells), and only now are the
+                // previous outputs dropped.
+                self.begin_running();
                 self.execution_count = serde_json::to_value(&input.execution_count)
                     .ok()
                     .and_then(|v| v.as_i64())
                     .map(|v| v as i32);
             }
-            JupyterMessageContent::ExecuteReply(_) => {
-                self.finish_execution();
+            JupyterMessageContent::ExecuteReply(reply) => {
+                // A kernel aborts the requests queued behind an error or
+                // interrupt without executing them — those cells were never
+                // run, so they must not get a completed tick.
+                if matches!(reply.status, ReplyStatus::Aborted) {
+                    self.cancel_execution();
+                } else {
+                    self.finish_execution();
+                }
             }
             JupyterMessageContent::ErrorOutput(error) => {
                 self.outputs.push(Output::ErrorOutput(ErrorView {
@@ -1078,7 +1202,8 @@ impl RenderableCell for CodeCell {
     }
 
     fn control(&self, _window: &mut Window, cx: &mut Context<Self>) -> Option<CellControl> {
-        let control_type = if self.is_executing {
+        // Running or queued: the button interrupts. Otherwise it runs.
+        let control_type = if self.is_execution_in_flight() {
             CellControlType::StopCell
         } else if self.has_outputs() {
             CellControlType::RerunCell
@@ -1089,7 +1214,7 @@ impl RenderableCell for CodeCell {
         Some(
             CellControl::new(control_type.id(), control_type).on_click(cx.listener(
                 move |this, _, window, cx| {
-                    if this.is_executing {
+                    if this.is_execution_in_flight() {
                         window.dispatch_action(Box::new(InterruptKernel), cx);
                     } else {
                         this.run(window, cx);
@@ -1119,9 +1244,9 @@ impl RenderableCell for CodeCell {
 
     fn gutter(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let execution_count = self.execution_count;
-        // The stop button on a RUNNING cell must stay visible even when the
-        // cell is neither selected nor hovered.
-        let always_show_control = self.selected() || self.is_executing;
+        // The stop button on a running/queued cell must stay visible even when
+        // the cell is neither selected nor hovered.
+        let always_show_control = self.selected() || self.is_execution_in_flight();
 
         div()
             .relative()
@@ -1273,10 +1398,9 @@ impl Render for CodeCell {
                     ),
             )
             .when(
-                self.has_outputs() || self.execution_duration.is_some() || self.is_executing,
+                self.has_outputs() || self.execution_status != CellExecutionStatus::Idle,
                 |this| {
-                    let execution_time_label = self.execution_duration.map(Self::format_duration);
-                    let is_executing = self.is_executing;
+                    let status_element = self.execution_status_element(cx);
                     this.child(
                         h_flex()
                             .w_full()
@@ -1296,55 +1420,9 @@ impl Render for CodeCell {
                                         .rounded_lg()
                                         .border_1()
                                         // execution status/time at the TOP
-                                        .when(
-                                            is_executing || execution_time_label.is_some(),
-                                            |this| {
-                                                let time_element = if is_executing {
-                                                    h_flex()
-                                                        .gap_1()
-                                                        .items_center()
-                                                        .child(
-                                                            Icon::new(IconName::ArrowCircle)
-                                                                .size(IconSize::XSmall)
-                                                                .color(Color::Warning)
-                                                                .with_rotate_animation(2)
-                                                                .into_any_element(),
-                                                        )
-                                                        .child(
-                                                            div()
-                                                                .text_xs()
-                                                                .text_color(
-                                                                    cx.theme().colors().text_muted,
-                                                                )
-                                                                .child("Running..."),
-                                                        )
-                                                        .into_any_element()
-                                                } else if let Some(duration_text) =
-                                                    execution_time_label.clone()
-                                                {
-                                                    h_flex()
-                                                        .gap_1()
-                                                        .items_center()
-                                                        .child(
-                                                            Icon::new(IconName::Check)
-                                                                .size(IconSize::XSmall)
-                                                                .color(Color::Success),
-                                                        )
-                                                        .child(
-                                                            div()
-                                                                .text_xs()
-                                                                .text_color(
-                                                                    cx.theme().colors().text_muted,
-                                                                )
-                                                                .child(duration_text),
-                                                        )
-                                                        .into_any_element()
-                                                } else {
-                                                    div().into_any_element()
-                                                };
-                                                this.child(div().mb_2().child(time_element))
-                                            },
-                                        )
+                                        .when_some(status_element, |this, status_element| {
+                                            this.child(div().mb_2().child(status_element))
+                                        })
                                         // output at bottom
                                         .child(
                                             div()

@@ -1,11 +1,14 @@
 # Phase 17 — Execution status & queue correctness
 
-Kind: **change to existing behaviour** (fix how cell execution status and
-timing are tracked across queued/batch runs). Not yet started — this is a plan.
+> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, tests
+> pass.
+> Kind: **change to existing behaviour** — keep OPEN until the user confirms
+> the statuses/timings actually behave as described.
+
 These items were all reported by the user 2026-07-11 while running cells with
-shift-enter and Run All; they share a root cause (queued cells are marked
-"Running" and start their timer the moment they are queued, not when the kernel
-actually begins executing them).
+shift-enter and Run All; they share a root cause (queued cells were marked
+"Running" and started their timer the moment they were queued, not when the
+kernel actually began executing them).
 
 Primary files: `crates/repl/src/notebook/notebook_ui.rs` (execute_cell,
 run_cell_batch/advance_run_queue, route, restart/interrupt),
@@ -32,36 +35,50 @@ is_executing / execution_start_time, plus a new "pending" state).
   selected a kernel but SKIPPED the first cell (only happens when no kernel was
   pre-selected; see also bug #16, same span-kernel-selection path).
 
-## Tasks
+## Implemented
 
-- [ ] Introduce an explicit per-cell execution state: `Idle → Pending →
-      Running → {Done | Cancelled | Error}` (replace the single `is_executing`
-      bool). Queued cells are Pending (distinct icon), not Running.
-- [ ] Start the execution timer only when the cell actually begins running
-      (on ExecuteInput / when submitted to the kernel as the active cell), not
-      when it is queued. Fixes the inherited long-cell time.
-- [ ] `advance_run_queue` / the shift-enter queue: mark queued cells Pending
-      up front; promote to Running one at a time as each is submitted.
-- [ ] Run All: set Pending on all target cells; on a previously-executed cell,
-      replace the ✓ with Pending but KEEP its old output until it re-executes
-      and overwrites it.
-- [ ] Restart / interrupt: any Running or Pending cell becomes Cancelled (no ✓,
-      no bogus time); do not mark cells that never ran as complete. (Refines
-      the phase-10 cancel path + bug #3/#1 restart path.)
-- [ ] Shift-enter with no kernel: ensure the first queued cell is not dropped
-      when the kernel is chosen (fix the promote/skip off-by-one; verify against
-      bug #16's misrouting in the same path).
+- [x] Explicit per-cell execution state: `CellExecutionStatus` — `Idle →
+      Pending → Running → {Finished | Cancelled}` (replaces the `is_executing`
+      bool). Queued cells are Pending (muted "…" indicator), not Running.
+- [x] The timer starts (and the previous output is dropped) only when the
+      kernel's `execute_input` for that cell arrives — i.e. when it actually
+      begins executing. Queued cells no longer inherit the wait behind a long
+      cell (the two ~20ms cells behind a 20s cell now report ~20ms).
+- [x] Shift-enter stacking and the kernel-starting flush both leave cells
+      Pending until their own `execute_input`.
+- [x] Run All / batch runs (`run_cell_batch`): every code cell in the batch is
+      marked Pending immediately — a previously-executed cell's ✓ makes way
+      for the pending marker, but its OUTPUT stays until it re-executes.
+- [x] Restart / kernel loss / kernel switch (`stop_executing_cells`) now
+      CANCEL running/queued cells (muted ✕, no time) instead of finishing
+      them with a bogus ✓ + elapsed time. `cancel_run_queue` clears the
+      pending markers of still-queued batch cells.
+- [x] Kernel `aborted` replies (the requests a kernel discards after an error
+      or interrupt) mark their cells Cancelled instead of Finished, and abort
+      the batch like an error.
+- [x] Shift-enter with no kernel skipping the first cell: root cause found —
+      after the picker opened, `enter_command_mode`/`advance_in_command_mode`
+      re-focused the notebook, which DISMISSED the picker popover, whose
+      dismiss callback drops the awaiting cells (so cell 1 was discarded).
+      Both now skip the focus grab while the kernel picker is deployed.
+- [x] Debug logging around promote/dismiss/flush of queued cells (also serves
+      as the bug #16 instrumentation pass).
 
-## Risks / gaps
+## Manual test checklist (for the user)
 
-- Touches the batch state machine (phase 10) and the restart/interrupt paths
-  (bug #1/#3) — regression-test stop-on-error and restart-cancels-batch.
-- Coordinate the new state with the status display work in phase 18 (icons).
+- [ ] Shift-enter down a stack with a kernel running: waiting cells show a
+      muted "… Pending", only the executing cell shows "Running", and each
+      cell's finished time is ITS OWN (the cells after a 20s cell show ~ms).
+- [ ] Run All over previously-executed cells: ✓ ticks become Pending, old
+      outputs stay until each cell re-executes.
+- [ ] Restart mid-batch: the running cell and the queued cells show a muted ✕
+      "Cancelled" — no ✓, no inherited time.
+- [ ] Interrupt mid-batch: the running cell finishes with the
+      KeyboardInterrupt error (✓ + its real time); the rest are Cancelled.
+- [ ] Shift-enter through a stack with NO kernel selected, pick a kernel from
+      the picker: ALL queued cells run, including the first.
+- [ ] Stop-on-error still works (a failing cell cancels the rest).
 
-## Verification
+## Verification (automated)
 
-- `cargo check -p repl` + `./script/clippy -p repl` clean; add unit tests for
-  the state transitions where feasible (timer start, pending vs running).
-- User test: shift-enter a stack (correct per-cell times, pending icons);
-  Run All (pending + tick reset, output kept); restart mid-run (cancelled, no
-  bogus times); shift-enter with no kernel (first cell runs).
+- `cargo check -p repl` + `./script/clippy -p repl` clean; 42 tests pass.

@@ -811,7 +811,7 @@ impl NotebookEditor {
         self.execution_requests.clear();
         self.pending_executions.clear();
         self.cells_awaiting_kernel_choice.clear();
-        self.cancel_run_queue();
+        self.cancel_run_queue(cx);
         // We now reflect the on-disk content, so any prior conflict is moot:
         // clear the flags and take down the conflict toast (reloading from the
         // command palette must dismiss it too, not just the toast's button).
@@ -972,7 +972,12 @@ impl NotebookEditor {
                         this.update_in(cx, |editor, window, cx| {
                             editor.kernel = Kernel::RunningKernel(kernel);
                             cx.notify();
-                            for cell_id in std::mem::take(&mut editor.pending_executions) {
+                            let queued = std::mem::take(&mut editor.pending_executions);
+                            log::debug!(
+                                "notebook: kernel ready; submitting {} queued cell(s) in order",
+                                queued.len(),
+                            );
+                            for cell_id in queued {
                                 editor.execute_cell(cell_id, window, cx);
                             }
                         })
@@ -984,7 +989,7 @@ impl NotebookEditor {
                             let error_message = err.to_string();
                             editor.kernel = Kernel::ErroredLaunch(error_message.clone());
                             // The launch failed, so no queued cell can run.
-                            editor.cancel_run_queue();
+                            editor.cancel_run_queue(cx);
                             cx.notify();
                             for cell_id in std::mem::take(&mut editor.pending_executions) {
                                 if let Some(Cell::Code(cell)) = editor.cell_map.get(&cell_id) {
@@ -1031,7 +1036,7 @@ impl NotebookEditor {
         // picking a kernel to satisfy a batch that was waiting for one, keep
         // the queue so it runs on the new kernel.
         if self.cells_awaiting_kernel_choice.is_empty() {
-            self.cancel_run_queue();
+            self.cancel_run_queue(cx);
         }
         self.stop_executing_cells(cx);
 
@@ -1055,7 +1060,7 @@ impl NotebookEditor {
 
         let kernel = std::mem::replace(&mut self.kernel, Kernel::Restarting);
         self.execution_requests.clear();
-        self.cancel_run_queue();
+        self.cancel_run_queue(cx);
         self.stop_executing_cells(cx);
         // The restarted kernel's execution counter starts over at 1, so the
         // cells' `In [N]` numbers from the old session are stale — clear them
@@ -1110,12 +1115,15 @@ impl NotebookEditor {
         }
     }
 
+    /// Cancel every running/queued cell (kernel restart/loss/switch). The
+    /// cells never completed, so they get a cancelled marker — NOT a completed
+    /// tick with a bogus time.
     fn stop_executing_cells(&mut self, cx: &mut Context<Self>) {
         for cell in self.cell_map.values() {
             if let Cell::Code(code_cell) = cell {
                 code_cell.update(cx, |cell, cx| {
-                    if cell.is_executing() {
-                        cell.finish_execution();
+                    if cell.is_execution_in_flight() {
+                        cell.cancel_execution();
                         cx.notify();
                     }
                 });
@@ -1130,7 +1138,7 @@ impl NotebookEditor {
         cx: &mut Context<Self>,
     ) {
         // Interrupting stops the whole batch, not just the current cell.
-        self.cancel_run_queue();
+        self.cancel_run_queue(cx);
         match &self.kernel {
             Kernel::RunningKernel(kernel) => {
                 kernel.interrupt();
@@ -1217,18 +1225,24 @@ impl NotebookEditor {
 
         if let Some(Cell::Code(cell)) = self.cell_map.get(&cell_id) {
             // Everything but Prompt mutates the cell's execution state
-            // (clears outputs, starts a run, or records an error), which is
-            // savable notebook content.
+            // (queues a run or records an error), which is savable content.
             if !matches!(disposition, Disposition::Prompt) {
                 self.execution_state_changed = true;
             }
             cell.update(cx, |cell, cx| {
-                if cell.has_outputs() {
-                    cell.clear_outputs();
-                }
                 match &disposition {
-                    Disposition::Failed(error) => cell.show_kernel_error(error, window, cx),
-                    Disposition::Sent(_) | Disposition::Queued { .. } => cell.start_execution(),
+                    Disposition::Failed(error) => {
+                        if cell.has_outputs() {
+                            cell.clear_outputs();
+                        }
+                        cell.show_kernel_error(error, window, cx);
+                    }
+                    // Submitted or queued cells are PENDING: no spinner, no
+                    // timer, and the old output stays until the kernel
+                    // actually starts the cell (its `execute_input` arrives —
+                    // see `begin_running`). This keeps queued cells from
+                    // accruing the wait behind a long-running cell.
+                    Disposition::Sent(_) | Disposition::Queued { .. } => cell.mark_pending(),
                     Disposition::Prompt => {}
                 }
                 cx.notify();
@@ -1251,6 +1265,11 @@ impl NotebookEditor {
     /// Promote cells that were waiting for a kernel choice into the pending
     /// queue (they run once the newly-selected kernel is ready).
     fn promote_awaiting_cells(&mut self) {
+        log::debug!(
+            "notebook: promoting {} awaiting cell(s) into the pending queue ({} already pending)",
+            self.cells_awaiting_kernel_choice.len(),
+            self.pending_executions.len(),
+        );
         for cell_id in std::mem::take(&mut self.cells_awaiting_kernel_choice) {
             if !self.pending_executions.contains(&cell_id) {
                 self.pending_executions.push(cell_id);
@@ -1263,8 +1282,12 @@ impl NotebookEditor {
     /// was waiting on the kernel choice is aborted.
     fn clear_awaiting_cells(&mut self, cx: &mut Context<Self>) {
         if !self.cells_awaiting_kernel_choice.is_empty() {
+            log::debug!(
+                "notebook: kernel picker dismissed; dropping {} awaiting cell(s)",
+                self.cells_awaiting_kernel_choice.len(),
+            );
             self.cells_awaiting_kernel_choice.clear();
-            self.cancel_run_queue();
+            self.cancel_run_queue(cx);
             cx.notify();
         }
     }
@@ -1309,6 +1332,18 @@ impl NotebookEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Every code cell in the batch shows as pending immediately — a
+        // previously-executed cell's ✓ makes way for the pending marker, but
+        // its OUTPUT stays until the cell actually re-executes.
+        for cell_id in &cells {
+            if let Some(Cell::Code(cell)) = self.cell_map.get(cell_id) {
+                self.execution_state_changed = true;
+                cell.update(cx, |cell, cx| {
+                    cell.mark_pending();
+                    cx.notify();
+                });
+            }
+        }
         self.run_queue = cells;
         self.advance_run_queue(window, cx);
     }
@@ -1333,9 +1368,18 @@ impl NotebookEditor {
     }
 
     /// Abort any in-progress multi-cell run (e.g. on error, interrupt, kernel
-    /// loss, or a structural change).
-    fn cancel_run_queue(&mut self) {
-        self.run_queue.clear();
+    /// loss, or a structural change). Cells still waiting in the queue lose
+    /// their pending marker — they will not run. The active cell is left to
+    /// resolve via its kernel reply (or `stop_executing_cells` on kernel loss).
+    fn cancel_run_queue(&mut self, cx: &mut Context<Self>) {
+        for cell_id in std::mem::take(&mut self.run_queue) {
+            if let Some(Cell::Code(cell)) = self.cell_map.get(&cell_id) {
+                cell.update(cx, |cell, cx| {
+                    cell.cancel_execution();
+                    cx.notify();
+                });
+            }
+        }
         self.active_run_cell = None;
     }
 
@@ -1447,7 +1491,13 @@ impl NotebookEditor {
 
     fn enter_command_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.notebook_mode = NotebookMode::Command;
-        self.focus_handle.focus(window, cx);
+        // Don't steal focus from an open kernel picker — grabbing focus
+        // dismisses the popover, and the dismiss callback drops the cells
+        // waiting on the kernel choice (this skipped the first cell when
+        // shift-enter opened the picker and then advanced).
+        if !self.kernel_picker_handle.is_deployed() {
+            self.focus_handle.focus(window, cx);
+        }
         cx.notify();
     }
 
@@ -1521,7 +1571,11 @@ impl NotebookEditor {
                 .scroll_to_reveal_item(self.selected_cell_index);
         }
         self.notebook_mode = NotebookMode::Command;
-        self.focus_handle.focus(window, cx);
+        // See enter_command_mode: focusing while the kernel picker is open
+        // dismisses it and drops the awaiting cells.
+        if !self.kernel_picker_handle.is_deployed() {
+            self.focus_handle.focus(window, cx);
+        }
         cx.notify();
     }
 
@@ -1789,7 +1843,7 @@ impl NotebookEditor {
         // Capture the cell (with live content) for undo before removing it.
         let serialized = self.cell_map.get(&cell_id).map(|cell| cell.to_nbformat_cell(cx));
 
-        self.raw_remove_cell(index);
+        self.raw_remove_cell(index, cx);
         if let Some(serialized) = serialized {
             self.record_edit(CellEdit::Deleted {
                 index,
@@ -1927,7 +1981,7 @@ impl NotebookEditor {
     }
 
     /// Remove the cell at `index`, cleaning up execution/queue state.
-    fn raw_remove_cell(&mut self, index: usize) {
+    fn raw_remove_cell(&mut self, index: usize, cx: &mut Context<Self>) {
         if index >= self.cell_order.len() {
             return;
         }
@@ -1939,7 +1993,7 @@ impl NotebookEditor {
         self.cells_awaiting_kernel_choice
             .retain(|mapped| mapped != &cell_id);
         if self.active_run_cell.as_ref() == Some(&cell_id) || self.run_queue.contains(&cell_id) {
-            self.cancel_run_queue();
+            self.cancel_run_queue(cx);
         }
         self.cell_list.splice(index..index + 1, 0);
         self.selected_cell_index = index.min(self.cell_order.len().saturating_sub(1));
@@ -2000,7 +2054,7 @@ impl NotebookEditor {
             return;
         };
         match &edit {
-            CellEdit::Inserted { index, .. } => self.raw_remove_cell(*index),
+            CellEdit::Inserted { index, .. } => self.raw_remove_cell(*index, cx),
             CellEdit::Deleted { index, cell } => {
                 self.raw_insert_cell(*index, cell.clone(), window, cx)
             }
@@ -2021,7 +2075,7 @@ impl NotebookEditor {
             CellEdit::Inserted { index, cell } => {
                 self.raw_insert_cell(*index, cell.clone(), window, cx)
             }
-            CellEdit::Deleted { index, .. } => self.raw_remove_cell(*index),
+            CellEdit::Deleted { index, .. } => self.raw_remove_cell(*index, cx),
             CellEdit::Moved { from, to } => self.raw_move_cell(*from, *to),
             CellEdit::Converted { index, after, .. } => {
                 self.raw_replace_cell(*index, after.clone(), window, cx)
@@ -3295,14 +3349,16 @@ impl KernelSession for NotebookEditor {
                 && self.active_run_cell.as_ref() == Some(&finished_cell)
             {
                 self.active_run_cell = None;
-                if matches!(reply.status, ReplyStatus::Error) {
-                    // Stop-on-error: cancel the rest of the batch.
+                if matches!(reply.status, ReplyStatus::Error | ReplyStatus::Aborted) {
+                    // Stop-on-error (or the kernel aborting after an
+                    // interrupt): cancel the rest of the batch, clearing the
+                    // queued cells' pending markers.
                     if !self.run_queue.is_empty() {
                         log::info!(
-                            "notebook: cell errored; cancelling {} queued cell(s)",
+                            "notebook: cell errored/aborted; cancelling {} queued cell(s)",
                             self.run_queue.len()
                         );
-                        self.run_queue.clear();
+                        self.cancel_run_queue(cx);
                     }
                 } else {
                     self.advance_run_queue(window, cx);
@@ -3320,7 +3376,7 @@ impl KernelSession for NotebookEditor {
         }
         self.kernel = Kernel::ErroredLaunch(error_message);
         self.execution_requests.clear();
-        self.cancel_run_queue();
+        self.cancel_run_queue(cx);
         self.stop_executing_cells(cx);
         cx.notify();
     }
@@ -3331,7 +3387,7 @@ impl KernelSession for NotebookEditor {
         }
         self.kernel = Kernel::Shutdown;
         self.execution_requests.clear();
-        self.cancel_run_queue();
+        self.cancel_run_queue(cx);
         self.stop_executing_cells(cx);
         cx.notify();
     }
