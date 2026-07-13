@@ -1453,16 +1453,26 @@ impl NotebookEditor {
     }
 
     /// Whether a cell already has an execution in flight — actively running,
-    /// queued in a batch, waiting on a kernel start/choice, or submitted to
-    /// the kernel and awaiting its reply. Used so repeatedly running a cell
-    /// (e.g. shift-enter cycling past an already-running/queued cell) doesn't
-    /// double-queue or re-run it.
-    fn is_cell_in_flight(&self, cell_id: &CellId) -> bool {
-        self.active_run_cell.as_ref() == Some(cell_id)
+    /// queued in a batch, or waiting on a kernel start/choice. Used so
+    /// repeatedly running a cell (e.g. shift-enter cycling past an already
+    /// running/queued cell) doesn't double-queue or re-run it.
+    ///
+    /// This is driven by the cell's own Pending/Running status (which resolves
+    /// to Finished/Cancelled when the run ends) rather than `execution_requests`
+    /// — that map is not pruned per-cell, so using it would keep every
+    /// previously-run cell "in flight" forever and block re-running.
+    fn is_cell_in_flight(&self, cell_id: &CellId, cx: &App) -> bool {
+        if self.active_run_cell.as_ref() == Some(cell_id)
             || self.run_queue.contains(cell_id)
             || self.pending_executions.contains(cell_id)
             || self.cells_awaiting_kernel_choice.contains(cell_id)
-            || self.execution_requests.values().any(|id| id == cell_id)
+        {
+            return true;
+        }
+        matches!(
+            self.cell_map.get(cell_id),
+            Some(Cell::Code(cell)) if cell.read(cx).is_execution_in_flight()
+        )
     }
 
     fn run_current_cell(&mut self, _: &Run, window: &mut Window, cx: &mut Context<Self>) {
@@ -1477,7 +1487,7 @@ impl NotebookEditor {
         match cell {
             Cell::Code(_) => {
                 // Don't re-run a cell whose execution is already in flight.
-                if !self.is_cell_in_flight(&cell_id) {
+                if !self.is_cell_in_flight(&cell_id, cx) {
                     self.execute_cell(cell_id, window, cx);
                 }
             }
@@ -1505,7 +1515,7 @@ impl NotebookEditor {
                         // Don't re-run a cell whose execution is already in
                         // flight — cycling shift-enter past a running/queued
                         // cell must leave it untouched.
-                        if !self.is_cell_in_flight(&cell_id) {
+                        if !self.is_cell_in_flight(&cell_id, cx) {
                             self.execute_cell(cell_id, window, cx);
                         }
                     }
