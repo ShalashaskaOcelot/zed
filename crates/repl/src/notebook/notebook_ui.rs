@@ -46,7 +46,8 @@ use crate::repl_store::ReplStore;
 
 use picker::Picker;
 use runtimelib::{
-    ExecuteRequest, JupyterMessage, JupyterMessageContent, ReplyStatus, ShutdownRequest,
+    ExecuteRequest, ExecutionState, JupyterMessage, JupyterMessageContent, ReplyStatus,
+    ShutdownRequest,
 };
 use ui::{ContextMenu, PopoverMenu, PopoverMenuHandle};
 use util::ResultExt as _;
@@ -184,6 +185,11 @@ pub struct NotebookEditor {
     /// even if new outputs arrived in the meantime — otherwise a save during
     /// a long-running cell would raise a spurious conflict toast.
     last_saved_disk_text: Option<String>,
+    /// A batch run superseded an in-flight run: we interrupted the old run and
+    /// must wait for the kernel to finish aborting (return to Idle) before
+    /// submitting the new queue. Submitting during the kernel's "aborting"
+    /// state would get the new requests aborted too.
+    resume_run_queue_on_idle: bool,
 }
 
 impl NotebookEditor {
@@ -308,6 +314,7 @@ impl NotebookEditor {
             execution_state_changed: false,
             // What we loaded IS what is on disk right now.
             last_saved_disk_text: Some(notebook_item.read(cx).buffer.read(cx).text()),
+            resume_run_queue_on_idle: false,
         };
         // Lazy start: don't launch a kernel on open. Show the remembered
         // kernel's name if we can resolve one now (a real launch happens on
@@ -1375,7 +1382,8 @@ impl NotebookEditor {
         // refuses to start while a cell is active, leaving the new batch stuck
         // Pending forever. (A single-cell run does NOT go through here — it
         // just queues at the kernel like Jupyter.)
-        if self.active_run_cell.is_some() || !self.run_queue.is_empty() {
+        let superseded = self.active_run_cell.is_some() || !self.run_queue.is_empty();
+        if superseded {
             if let Kernel::RunningKernel(kernel) = &self.kernel {
                 kernel.interrupt();
             }
@@ -1397,7 +1405,15 @@ impl NotebookEditor {
             }
         }
         self.run_queue = cells;
-        self.advance_run_queue(window, cx);
+        if superseded {
+            // Wait for the interrupted run to finish aborting (kernel returns
+            // to Idle) before submitting — otherwise these requests land in
+            // the kernel's "aborting" state and come back Aborted (see the
+            // Status handling in `route`).
+            self.resume_run_queue_on_idle = true;
+        } else {
+            self.advance_run_queue(window, cx);
+        }
     }
 
     /// Submit the next queued cell, if nothing from the batch is already
@@ -1433,6 +1449,20 @@ impl NotebookEditor {
             }
         }
         self.active_run_cell = None;
+        self.resume_run_queue_on_idle = false;
+    }
+
+    /// Whether a cell already has an execution in flight — actively running,
+    /// queued in a batch, waiting on a kernel start/choice, or submitted to
+    /// the kernel and awaiting its reply. Used so repeatedly running a cell
+    /// (e.g. shift-enter cycling past an already-running/queued cell) doesn't
+    /// double-queue or re-run it.
+    fn is_cell_in_flight(&self, cell_id: &CellId) -> bool {
+        self.active_run_cell.as_ref() == Some(cell_id)
+            || self.run_queue.contains(cell_id)
+            || self.pending_executions.contains(cell_id)
+            || self.cells_awaiting_kernel_choice.contains(cell_id)
+            || self.execution_requests.values().any(|id| id == cell_id)
     }
 
     fn run_current_cell(&mut self, _: &Run, window: &mut Window, cx: &mut Context<Self>) {
@@ -1446,7 +1476,10 @@ impl NotebookEditor {
         };
         match cell {
             Cell::Code(_) => {
-                self.execute_cell(cell_id, window, cx);
+                // Don't re-run a cell whose execution is already in flight.
+                if !self.is_cell_in_flight(&cell_id) {
+                    self.execute_cell(cell_id, window, cx);
+                }
             }
             Cell::Markdown(markdown_cell) => {
                 // for markdown, finish editing
@@ -1469,7 +1502,12 @@ impl NotebookEditor {
             if let Some(cell) = self.cell_map.get(&cell_id) {
                 match cell {
                     Cell::Code(_) => {
-                        self.execute_cell(cell_id, window, cx);
+                        // Don't re-run a cell whose execution is already in
+                        // flight — cycling shift-enter past a running/queued
+                        // cell must leave it untouched.
+                        if !self.is_cell_in_flight(&cell_id) {
+                            self.execute_cell(cell_id, window, cx);
+                        }
                     }
                     Cell::Markdown(markdown_cell) => {
                         if markdown_cell.read(cx).is_editing() {
@@ -3415,6 +3453,17 @@ impl KernelSession for NotebookEditor {
         // Handle kernel status updates (these are broadcast to all)
         if let JupyterMessageContent::Status(status) = &message.content {
             self.kernel.set_execution_state(&status.execution_state);
+            // A batch that superseded an in-flight run waited for the
+            // interrupted run to finish aborting; now that the kernel is idle
+            // again, submit the new queue.
+            if self.resume_run_queue_on_idle
+                && matches!(status.execution_state, ExecutionState::Idle)
+                && self.active_run_cell.is_none()
+                && !self.run_queue.is_empty()
+            {
+                self.resume_run_queue_on_idle = false;
+                self.advance_run_queue(window, cx);
+            }
             cx.notify();
         }
 

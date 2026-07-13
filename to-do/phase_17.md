@@ -81,12 +81,29 @@ cancelled status works, Run All marks pending. Remaining issues found and fixed:
       (`execution_requests.clear()`), cancel its cells, then start fresh. A
       single-cell run still just queues at the kernel (Jupyter behaviour).
 
+## Follow-up round 2 (user testing 2026-07-11)
+
+- [x] Escape on the kernel picker left the triggering cell stuck "Pending":
+      `clear_awaiting_cells` now cancels the awaiting cells' status too.
+- [x] Pending icon changed from Ellipsis to Clock (kept the "Pending…" text).
+- [x] Shift-enter cycling past an already running/queued cell re-ran it (and
+      reset the running cell to Pending). Added `is_cell_in_flight` (active /
+      run_queue / pending_executions / awaiting / submitted-awaiting-reply) and
+      the single-cell run paths skip cells already in flight — only eligible
+      (idle/finished) cells get re-queued.
+- [x] Run All while running cancelled the NEW run: interrupting puts ipykernel
+      into an "aborting" state, so requests submitted immediately came back
+      Aborted. The batch now defers submitting until the kernel returns to Idle
+      (`resume_run_queue_on_idle`, resolved in `route`'s Status handler).
+
 ## Still to verify / open
 
 - [ ] "Execute All with no kernel selected does nothing" — expected to prompt.
-      Believed to be a side effect of the stuck-active-cell state above; should
-      be retested after these fixes. If it still fails, investigate the batch +
-      no-kernel (Prompt) interaction (run_queue vs pending_executions).
+      Believed to be a side effect of the stuck-active-cell state; retest after
+      these fixes.
+- [ ] Kernel picker shows NO kernels on a fresh app start (should list the two
+      global Pythons + the workspace `.venv`); a second attempt runs fine. See
+      bug #20 (async kernelspec discovery / picker opened before specs load).
 
 ## Manual test checklist (for the user)
 
