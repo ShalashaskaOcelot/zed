@@ -28,10 +28,10 @@ gutter run button), possibly `notebook_ui.rs` for spacing constants.
 - [x] Gutter centering: widened the gutter 26→30px so the run button and the
       `[N]` number center in the bar-to-cell-edge span with symmetric (~3.5px)
       clearance on both sides, instead of sitting tight against the bar.
-- [x] Centering round 2 (user 2026-07-11: still not quite centered): center the
-      controls across the FULL gutter width (`left_0` + `w(GUTTER_WIDTH)`)
-      rather than the bar-to-edge span, per the user's preference to ignore the
-      accent bar. The button box clears the 3px bar regardless.
+- [x] Centering: settled on centering the controls between the accent bar and
+      the cell edge (`left(px(3.))` + `w(GUTTER_WIDTH - 3.0)`). A brief
+      full-gutter-width variant was tried per an earlier request but the user
+      preferred the bar-to-edge centering (2026-07-11).
 - [x] Status row does not collide with the toolbar (top-right) or the language
       badge (bottom-right, absolute) — the status row is in normal flow on the
       left.

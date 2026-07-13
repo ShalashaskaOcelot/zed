@@ -381,12 +381,11 @@ pub trait RenderableCell: Render {
                     div()
                         .absolute()
                         .top(px(CODE_BLOCK_INSET - 2.0))
-                        // centered across the full gutter (ignoring the 3px
-                        // indicator bar, which the button clears anyway)
-                        .left_0()
+                        // centered between the indicator bar and the cell edge
+                        .left(px(3.))
                         .flex()
                         .flex_none()
-                        .w(px(GUTTER_WIDTH))
+                        .w(px(GUTTER_WIDTH - 3.0))
                         .h(px(GUTTER_WIDTH + 12.0))
                         .items_center()
                         .justify_center()
@@ -1158,12 +1157,11 @@ impl CodeCell {
                     div()
                         .absolute()
                         .top(px(CODE_BLOCK_INSET - 2.0))
-                        // centered across the full gutter (ignoring the 3px
-                        // indicator bar, which the button clears anyway)
-                        .left_0()
+                        // centered between the indicator bar and the cell edge
+                        .left(px(3.))
                         .flex()
                         .flex_none()
-                        .w(px(GUTTER_WIDTH))
+                        .w(px(GUTTER_WIDTH - 3.0))
                         .h(px(GUTTER_WIDTH + 12.0))
                         .items_center()
                         .justify_center()
@@ -1288,10 +1286,9 @@ impl RenderableCell for CodeCell {
                     v_flex()
                         .absolute()
                         .top(px(CODE_BLOCK_INSET - 2.0))
-                        // centered across the full gutter (ignoring the 3px
-                        // indicator bar, which the button clears anyway)
-                        .left_0()
-                        .w(px(GUTTER_WIDTH))
+                        // centered between the indicator bar and the cell edge
+                        .left(px(3.))
+                        .w(px(GUTTER_WIDTH - 3.0))
                         .items_center()
                         .gap_0p5()
                         // VS Code style: a bare hovering run button, only shown

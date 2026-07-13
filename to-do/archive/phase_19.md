@@ -1,9 +1,7 @@
 # Phase 19 — Configurable post-run landing mode (shift-enter / ctrl-enter)
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, repl +
-> settings tests pass.
-> Kind: **new feature** (a setting) — on confirmation the three values behave
-> as described, archive; tweaks become new items.
+> ✅ STATUS: CONFIRMED & archived 2026-07-11. User: "that works. Just tested
+> remember and it works perfectly." Kind: **new feature** (a setting).
 
 Requested by the user 2026-07-11.
 
