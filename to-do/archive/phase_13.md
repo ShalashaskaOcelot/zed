@@ -1,8 +1,9 @@
 # Phase 13 — Per-cell hover/selection toolbar
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, tests
-> pass. Kind: **new feature** — on confirmation the toolbar appears and each
-> button fires the right action, archive; tweaks become new items.
+> ✅ STATUS: CONFIRMED & archived 2026-07-11. Toolbar, hover behaviour, and the
+> edge indicator bar all work. Kind: **new feature**. One remaining nit — the
+> gutter run button / execution number are not quite centered — rolls into
+> **phase 18** (in-cell execution status display), which reworks that chrome.
 
 Goal: a VS Code-style per-cell toolbar shown on the selected/hovered cell so the
 common actions are discoverable without the "More options" menu or memorising

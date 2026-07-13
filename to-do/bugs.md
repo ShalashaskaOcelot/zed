@@ -212,3 +212,40 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
   a kernel was attached if it happens again.
 - **Fix attempted:** none
 - **Tested:** n/a
+
+## 18. Executing a notebook doesn't mark it dirty (external save discards runs)
+
+- **Status:** open
+- **Symptom:** (user 2026-07-11) Opened the same .ipynb in Zed and VS Code.
+  In Zed, executed the first 3 cells but did NOT change any cell content. Edited
+  the file in VS Code and saved. Zed auto-reloaded and LOST the execution
+  state, because with no content edits Zed didn't consider itself dirty and so
+  treated the disk version as authoritative. A notebook whose execution
+  outputs / counts have changed should count as modified (VS Code stores
+  execution metadata in the JSON, so the in-memory and on-disk versions do
+  differ).
+- **Analysis:** `is_dirty` = `has_structural_changes() || has_content_changes()`
+  — neither accounts for outputs / execution_count having changed since load.
+  The external-change handler (`handle_external_change`) auto-reloads when not
+  dirty. Include "outputs/execution state changed since last save" in the dirty
+  check (e.g. compare serialized notebook to the last-saved snapshot), so an
+  executed-but-unedited notebook resists silent auto-reload. Relates to
+  phase 14 (save-conflict) and phase 9 (reload).
+- **Fix attempted:** none
+- **Tested:** n/a
+
+## 19. Reloading doesn't clear the conflict notification toast
+
+- **Status:** open
+- **Symptom:** (user 2026-07-11) After the "notebook changed on disk but you
+  have unsaved changes" toast appears, using the Reload command (or the toast's
+  Reload button) reloads the file but leaves the toast sitting in the corner.
+  Any reload of that file should dismiss the toast, since the conflict is
+  resolved.
+- **Analysis:** the toast is shown via `workspace.show_toast` with a
+  `NotificationId` (`NotebookConflictToast`); nothing dismisses it on reload.
+  `reload_cells_from_notebook` (and/or `reload`) should call
+  `workspace.dismiss_toast` for that id (and clear `disk_changed_externally`,
+  which it already does). Phase 14 follow-up.
+- **Fix attempted:** none
+- **Tested:** n/a

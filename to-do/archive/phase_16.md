@@ -1,8 +1,9 @@
 # Phase 16 — Better DataFrame (table) output rendering
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING.
-> Kind: **change to existing behaviour** (restyle/harden the existing
-> TableView) — keep open until the user confirms tables actually render nicer.
+> ✅ STATUS: CONFIRMED & archived 2026-07-11. User: "Dataframe prints look a lot
+> better now." Kind: **change to existing behaviour**. Further table polish
+> (the user earlier felt it "could be done better") is a backlog item, not a
+> reopen.
 
 Context (investigated 2026-07-11): Zed has three DataFrame display paths,
 ranked best→worst: (1) native `TableView` grid, used when pandas emits

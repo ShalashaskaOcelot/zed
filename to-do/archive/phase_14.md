@@ -1,10 +1,13 @@
 # Phase 14 — Notebook data safety: save-conflict guard + reload affordance
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, tests
-> pass.
-> Kind: **mixed** — a bug fix (bug #14: keep OPEN until the user confirms the
-> save prompt actually appears) plus a new feature (Reload command/button:
-> archive once confirmed present and working).
+> ✅ STATUS: CONFIRMED & archived 2026-07-11. The Overwrite/Cancel save prompt
+> appears on an external-change conflict (bug #14 confirmed fixed), and the
+> Reload command works. Kind: **mixed**. Two follow-up defects found during
+> testing, filed as new bugs (NOT reopens of this phase):
+> - bug #18: executing a notebook doesn't mark it dirty, so an external save
+>   auto-reloads and discards the execution state;
+> - bug #19: reloading (command or toast button) doesn't clear the conflict
+>   notification toast.
 
 Goal: never silently lose on-disk changes, and give the user a one-click way to
 pull external changes in. Phase 9 already handles the READ side (a toast when

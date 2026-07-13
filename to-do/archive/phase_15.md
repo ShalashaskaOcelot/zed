@@ -1,10 +1,8 @@
 # Phase 15 — Cell output & execution-state management
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, tests
-> pass.
-> Kind: **mixed** — a change to existing behaviour (reset counters on restart:
-> keep OPEN until confirmed to take effect) plus a new feature (clear-cell-
-> outputs action: archive once confirmed present and working).
+> ✅ STATUS: CONFIRMED & archived 2026-07-11. User: "Execution numbers do reset
+> on kernel restart" and "clear cell outputs command works well, I like that."
+> Kind: **mixed** — both parts confirmed.
 
 Goal: keep the per-cell execution counters and outputs coherent with the kernel
 state, and give a first-class way to clear a single cell's outputs.

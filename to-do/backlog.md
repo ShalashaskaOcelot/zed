@@ -12,12 +12,35 @@ Scheduled into phases (kept here only as a pointer):
 - Per-cell hover/selection toolbar → **phase 13**.
 - Save-conflict guard + Reload affordance (with bug #14) → **phase 14**.
 - Reset execution counter on restart + `ClearCellOutputs` action → **phase 15**.
+- Better DataFrame/table output rendering → **phase 16**.
+- Execution status & timing correctness (pending vs running, per-cell timing,
+  batch status, restart-cancel) → **phase 17**.
+- Move execution status/time into the cell + center gutter run button →
+  **phase 18**.
+- Configurable post-run landing mode (command/edit/remember) → **phase 19**.
 
 Small follow-ups:
 - Paste cell ABOVE (`shift-v`) — phase 7 wired only paste-below.
 
 ## Medium priority
 
+- Multi-select cells (user 2026-07-11), VS Code / file-explorer / Excel style:
+  - shift + down/up in command mode: keep the originally-focused cell selected
+    and extend the selection to the adjacent cell (contiguous range).
+  - shift + click a cell: select the whole contiguous range from the anchor to
+    the clicked cell, inclusive.
+  - ctrl + click: toggle individual cells into a discontiguous multi-selection.
+  - ctrl + arrows: do nothing (no selection change).
+  Then make the cell actions (delete, copy/cut, run, move, convert) operate on
+  the full selection. Sizeable — the notebook currently tracks a single
+  `selected_cell_index`; this needs a selection set + anchor and updates across
+  rendering and every action. Schedule as its own phase when picked up.
+- Live elapsed-time counter while a cell runs (user 2026-07-11): show a ticking
+  timer during execution instead of only revealing the total once the cell
+  finishes. Pairs with the phase-17 execution states / phase-18 status display.
+- Further DataFrame/table polish (user 2026-07-11, "could be done better"):
+  follow-up refinements to the phase-16 table rendering (spacing, column
+  sizing/eliding, header styling, very wide frames, dark/light contrast).
 - Selectable output text (user 2026-07-11): allow selecting a PORTION of a
   cell's output to copy, instead of only the whole output via the "..." menu's
   Copy Output. Outputs render as TerminalOutput / markdown / table elements
