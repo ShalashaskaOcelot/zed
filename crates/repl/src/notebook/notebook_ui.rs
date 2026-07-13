@@ -1,4 +1,5 @@
 #![allow(unused, dead_code)]
+use std::collections::BTreeSet;
 use std::future::Future;
 use std::time::Duration;
 use std::{path::PathBuf, sync::Arc};
@@ -58,10 +59,10 @@ use zed_actions::editor::{MoveDown, MoveUp};
 use zed_actions::notebook::{
     AddCellAbove, AddCellBelow, AddCodeBlock, AddMarkdownBlock, ClearCellOutputs, ClearOutputs,
     ConvertToCode, ConvertToMarkdown, CopyCell, CutCell, DeleteCell, DuplicateCell,
-    EnterCommandMode, EnterEditMode, InterruptKernel, MoveCellDown, MoveCellUp, NewNotebook,
-    NotebookMoveDown, NotebookMoveUp, OpenNotebook, PasteCell, RedoCellOp, ReloadNotebook,
-    RestartKernel, Run, RunAll, RunAndAdvance, RunCellAndBelow, RunCellsAbove, SelectFirstCell,
-    SelectLastCell, UndoCellOp,
+    EnterCommandMode, EnterEditMode, ExtendSelectionDown, ExtendSelectionUp, InterruptKernel,
+    MoveCellDown, MoveCellUp, NewNotebook, NotebookMoveDown, NotebookMoveUp, OpenNotebook,
+    PasteCell, RedoCellOp, ReloadNotebook, RestartKernel, Run, RunAll, RunAndAdvance,
+    RunCellAndBelow, RunCellsAbove, SelectFirstCell, SelectLastCell, UndoCellOp,
 };
 
 /// A structural cell operation, stored so it can be undone/redone. Restored
@@ -85,6 +86,10 @@ enum CellEdit {
         before: nbformat::v4::Cell,
         after: nbformat::v4::Cell,
     },
+    /// Several edits applied as ONE logical operation (multi-cell delete,
+    /// block move, multi-convert). Stored in applied order; undo replays them
+    /// in reverse, redo replays them forward.
+    Group(Vec<CellEdit>),
 }
 
 /// Whether the notebook is in command mode (navigating cells) or edit mode (editing a cell).
@@ -193,6 +198,13 @@ pub struct NotebookEditor {
     /// submitting the new queue. Submitting during the kernel's "aborting"
     /// state would get the new requests aborted too.
     resume_run_queue_on_idle: bool,
+    /// Multi-selection: every selected index INCLUDING the primary
+    /// (`selected_cell_index`). Empty when only a single cell is selected.
+    /// Index-based, so any structural change collapses the selection.
+    selected_indices: BTreeSet<usize>,
+    /// The fixed end of a shift-range selection (the cell selection started
+    /// from). `None` means the anchor is the primary cell.
+    selection_anchor: Option<usize>,
 }
 
 impl NotebookEditor {
@@ -240,6 +252,9 @@ impl NotebookEditor {
                             CellEvent::Stop(cell_id) => {
                                 this.handle_cell_stop(cell_id, window, cx)
                             }
+                            CellEvent::ModifiedClick { id, shift } => {
+                                this.handle_modified_click(id, *shift, window, cx)
+                            }
                         }
                     })
                     .detach();
@@ -273,6 +288,17 @@ impl NotebookEditor {
                     )
                     .detach();
 
+                    cx.subscribe_in(
+                        markdown_cell,
+                        window,
+                        |this, _cell, event: &CellEvent, window, cx| {
+                            if let CellEvent::ModifiedClick { id, shift } = event {
+                                this.handle_modified_click(id, *shift, window, cx);
+                            }
+                        },
+                    )
+                    .detach();
+
                     let cell_id_for_editor = cell_id.clone();
                     let editor = markdown_cell.read(cx).editor().clone();
                     cx.subscribe(&editor, move |this, _editor, event, cx| {
@@ -280,7 +306,18 @@ impl NotebookEditor {
                     })
                     .detach();
                 }
-                Cell::Raw(_) => {}
+                Cell::Raw(raw_cell) => {
+                    cx.subscribe_in(
+                        raw_cell,
+                        window,
+                        |this, _cell, event: &CellEvent, window, cx| {
+                            if let CellEvent::ModifiedClick { id, shift } = event {
+                                this.handle_modified_click(id, *shift, window, cx);
+                            }
+                        },
+                    )
+                    .detach();
+                }
             }
 
             cell_map.insert(cell_id.clone(), cell_entity);
@@ -321,6 +358,8 @@ impl NotebookEditor {
             // What we loaded IS what is on disk right now.
             last_saved_disk_text: Some(notebook_item.read(cx).buffer.read(cx).text()),
             resume_run_queue_on_idle: false,
+            selected_indices: BTreeSet::new(),
+            selection_anchor: None,
         };
         // Lazy start: don't launch a kernel on open. Show the remembered
         // kernel's name if we can resolve one now (a real launch happens on
@@ -1530,6 +1569,17 @@ impl NotebookEditor {
     fn run_current_cell(&mut self, _: &Run, window: &mut Window, cx: &mut Context<Self>) {
         // Capture the mode BEFORE running, for the `remember` landing mode.
         let was_edit_mode = self.notebook_mode == NotebookMode::Edit;
+        // Run on a multi-selection executes every selected cell, in order.
+        if self.has_multi_selection() {
+            let cells: Vec<CellId> = self
+                .effective_selection()
+                .into_iter()
+                .filter_map(|index| self.cell_order.get(index).cloned())
+                .collect();
+            self.run_cell_batch(cells, window, cx);
+            self.apply_post_run_landing(was_edit_mode, window, cx);
+            return;
+        }
         let Some(cell_id) = self.cell_order.get(self.selected_cell_index).cloned() else {
             return;
         };
@@ -1726,14 +1776,16 @@ impl NotebookEditor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(cell_id) = self.cell_order.get(self.selected_cell_index)
-            && let Some(Cell::Code(cell)) = self.cell_map.get(cell_id)
-        {
-            self.execution_state_changed = true;
-            cell.update(cx, |cell, cx| {
-                cell.clear_outputs();
-                cx.notify();
-            });
+        for index in self.effective_selection() {
+            if let Some(cell_id) = self.cell_order.get(index)
+                && let Some(Cell::Code(cell)) = self.cell_map.get(cell_id)
+            {
+                self.execution_state_changed = true;
+                cell.update(cx, |cell, cx| {
+                    cell.clear_outputs();
+                    cx.notify();
+                });
+            }
         }
     }
 
@@ -1789,26 +1841,97 @@ impl NotebookEditor {
         println!("Open notebook triggered");
     }
 
+    /// Whether the multi-selection is one contiguous block. Block moves only
+    /// support contiguous selections (a discontiguous move is ambiguous).
+    fn selection_is_contiguous(&self) -> bool {
+        let selection = self.effective_selection();
+        match (selection.first(), selection.last()) {
+            (Some(first), Some(last)) => last - first + 1 == selection.len(),
+            _ => false,
+        }
+    }
+
     fn move_cell_up(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.selected_cell_index > 0 {
+        let selection = self.effective_selection();
+        let Some(&first) = selection.first() else {
+            return;
+        };
+        if first == 0 {
+            return;
+        }
+        if selection.len() == 1 {
             let from = self.selected_cell_index;
             let to = from - 1;
             self.cell_order.swap(from, to);
             self.selected_cell_index = to;
+            self.collapse_selection();
             self.record_edit(CellEdit::Moved { from, to });
             cx.notify();
+            return;
         }
+        if !self.selection_is_contiguous() {
+            log::info!("notebook: move ignored for a discontiguous multi-selection");
+            return;
+        }
+        // Shift the whole block up one: move each member (top-down) one slot
+        // up. Grouped so undo restores the block in one step.
+        let primary = self.selected_cell_index;
+        let anchor = self.selection_anchor;
+        let mut edits = Vec::with_capacity(selection.len());
+        for &index in &selection {
+            self.raw_move_cell(index, index - 1);
+            edits.push(CellEdit::Moved {
+                from: index,
+                to: index - 1,
+            });
+        }
+        self.record_edit(CellEdit::Group(edits));
+        // Re-establish the (shifted) selection that raw_move_cell collapsed.
+        self.selected_cell_index = primary - 1;
+        self.selection_anchor = anchor.map(|a| a - 1);
+        self.selected_indices = selection.iter().map(|index| index - 1).collect();
+        cx.notify();
     }
 
     fn move_cell_down(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if !self.cell_order.is_empty() && self.selected_cell_index < self.cell_order.len() - 1 {
+        let selection = self.effective_selection();
+        let count = self.cell_order.len();
+        let Some(&last) = selection.last() else {
+            return;
+        };
+        if count == 0 || last >= count - 1 {
+            return;
+        }
+        if selection.len() == 1 {
             let from = self.selected_cell_index;
             let to = from + 1;
             self.cell_order.swap(from, to);
             self.selected_cell_index = to;
+            self.collapse_selection();
             self.record_edit(CellEdit::Moved { from, to });
             cx.notify();
+            return;
         }
+        if !self.selection_is_contiguous() {
+            log::info!("notebook: move ignored for a discontiguous multi-selection");
+            return;
+        }
+        // Shift the block down one: move each member bottom-up.
+        let primary = self.selected_cell_index;
+        let anchor = self.selection_anchor;
+        let mut edits = Vec::with_capacity(selection.len());
+        for &index in selection.iter().rev() {
+            self.raw_move_cell(index, index + 1);
+            edits.push(CellEdit::Moved {
+                from: index,
+                to: index + 1,
+            });
+        }
+        self.record_edit(CellEdit::Group(edits));
+        self.selected_cell_index = primary + 1;
+        self.selection_anchor = anchor.map(|a| a + 1);
+        self.selected_indices = selection.iter().map(|index| index + 1).collect();
+        cx.notify();
     }
 
     /// Inserts a cell at `index` (clamped), updates the list, and selects it.
@@ -1817,6 +1940,8 @@ impl NotebookEditor {
         self.cell_order.insert(index, cell_id.clone());
         self.cell_map.insert(cell_id, cell);
         self.selected_cell_index = index;
+        // Indices shifted — a stale multi-selection would select wrong cells.
+        self.collapse_selection();
         self.cell_list.splice(index..index, 1);
         self.cell_list.scroll_to_reveal_item(index);
     }
@@ -1870,6 +1995,9 @@ impl NotebookEditor {
                     this.handle_cell_toolbar_action(cell_id, *action, window, cx)
                 }
                 CellEvent::Stop(cell_id) => this.handle_cell_stop(cell_id, window, cx),
+                CellEvent::ModifiedClick { id, shift } => {
+                    this.handle_modified_click(id, *shift, window, cx)
+                }
             },
         )
         .detach();
@@ -1886,7 +2014,7 @@ impl NotebookEditor {
         &mut self,
         cell_id: CellId,
         markdown_cell: &Entity<super::MarkdownCell>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         cx.subscribe(
@@ -1896,6 +2024,17 @@ impl NotebookEditor {
                     cell.update(cx, |cell, cx| {
                         cell.reparse_markdown(cx);
                     });
+                }
+            },
+        )
+        .detach();
+
+        cx.subscribe_in(
+            markdown_cell,
+            window,
+            |this, _cell, event: &CellEvent, window, cx| {
+                if let CellEvent::ModifiedClick { id, shift } = event {
+                    this.handle_modified_click(id, *shift, window, cx);
                 }
             },
         )
@@ -2008,29 +2147,38 @@ impl NotebookEditor {
     }
 
     fn delete_cell(&mut self, _: &DeleteCell, window: &mut Window, cx: &mut Context<Self>) {
-        if self.cell_order.len() <= 1 {
+        let targets = self.effective_selection();
+        if targets.len() >= self.cell_order.len() {
             // Keep at least one cell so the notebook is never empty (which would
             // leave nowhere to type and no cell to select).
-            log::info!("notebook: refusing to delete the only remaining cell");
+            log::info!("notebook: refusing to delete every remaining cell");
             return;
         }
-        let index = self.selected_cell_index;
-        let Some(cell_id) = self.cell_order.get(index).cloned() else {
-            return;
-        };
 
-        // Capture the cell (with live content) for undo before removing it.
-        let serialized = self
-            .cell_map
-            .get(&cell_id)
-            .map(|cell| cell.to_nbformat_cell(cx));
-
-        self.raw_remove_cell(index, cx);
-        if let Some(serialized) = serialized {
-            self.record_edit(CellEdit::Deleted {
-                index,
-                cell: serialized,
-            });
+        // Delete bottom-up so earlier indices stay valid; group the edits so
+        // undo restores the whole selection in one step.
+        let mut edits = Vec::with_capacity(targets.len());
+        for &index in targets.iter().rev() {
+            let Some(cell_id) = self.cell_order.get(index).cloned() else {
+                continue;
+            };
+            // Capture the cell (with live content) for undo before removing it.
+            let serialized = self
+                .cell_map
+                .get(&cell_id)
+                .map(|cell| cell.to_nbformat_cell(cx));
+            self.raw_remove_cell(index, cx);
+            if let Some(serialized) = serialized {
+                edits.push(CellEdit::Deleted {
+                    index,
+                    cell: serialized,
+                });
+            }
+        }
+        match edits.len() {
+            0 => {}
+            1 => self.record_edit(edits.remove(0)),
+            _ => self.record_edit(CellEdit::Group(edits)),
         }
 
         self.notebook_mode = NotebookMode::Command;
@@ -2041,16 +2189,26 @@ impl NotebookEditor {
     }
 
     fn copy_cell(&mut self, _: &CopyCell, _window: &mut Window, cx: &mut Context<Self>) {
-        let Some(cell_id) = self.cell_order.get(self.selected_cell_index) else {
+        let cells: Vec<nbformat::v4::Cell> = self
+            .effective_selection()
+            .into_iter()
+            .filter_map(|index| self.cell_order.get(index))
+            .filter_map(|cell_id| self.cell_map.get(cell_id))
+            .map(|cell| cell.to_nbformat_cell(cx))
+            .collect();
+        if cells.is_empty() {
             return;
+        }
+        // A single cell keeps the original single-object format (compatible
+        // with older copies); a multi-selection serializes as a JSON array.
+        let json = if cells.len() == 1 {
+            serde_json::to_string(&cells[0])
+        } else {
+            serde_json::to_string(&cells)
         };
-        let Some(cell) = self.cell_map.get(cell_id) else {
-            return;
-        };
-        let nbformat_cell = cell.to_nbformat_cell(cx);
-        match serde_json::to_string(&nbformat_cell) {
+        match json {
             Ok(json) => cx.write_to_clipboard(ClipboardItem::new_string(json)),
-            Err(error) => log::error!("notebook: failed to copy cell: {error}"),
+            Err(error) => log::error!("notebook: failed to copy cell(s): {error}"),
         }
     }
 
@@ -2059,18 +2217,33 @@ impl NotebookEditor {
         self.delete_cell(&DeleteCell, window, cx);
     }
 
-    /// Parse an nbformat cell from clipboard text, if present.
-    fn clipboard_cell(cx: &mut Context<Self>) -> Option<nbformat::v4::Cell> {
-        let text = cx.read_from_clipboard()?.text()?;
-        serde_json::from_str::<nbformat::v4::Cell>(&text).ok()
+    /// Parse nbformat cell(s) from clipboard text, if present: either a single
+    /// cell object or an array of cells (multi-selection copy).
+    fn clipboard_cells(cx: &mut Context<Self>) -> Vec<nbformat::v4::Cell> {
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+            return Vec::new();
+        };
+        if let Ok(cell) = serde_json::from_str::<nbformat::v4::Cell>(&text) {
+            return vec![cell];
+        }
+        serde_json::from_str::<Vec<nbformat::v4::Cell>>(&text).unwrap_or_default()
     }
 
     fn paste_cell(&mut self, _: &PasteCell, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(cell) = Self::clipboard_cell(cx) else {
+        let cells = Self::clipboard_cells(cx);
+        if cells.is_empty() {
             return;
-        };
-        let index = self.index_below_selection();
-        self.insert_nbformat_cell(index, cell, window, cx);
+        }
+        let base = self.index_below_selection();
+        let mut edits = Vec::with_capacity(cells.len());
+        for (offset, cell) in cells.into_iter().enumerate() {
+            edits.push(self.insert_nbformat_cell(base + offset, cell, window, cx));
+        }
+        match edits.len() {
+            0 => {}
+            1 => self.record_edit(edits.remove(0)),
+            _ => self.record_edit(CellEdit::Group(edits)),
+        }
     }
 
     fn duplicate_cell(&mut self, _: &DuplicateCell, window: &mut Window, cx: &mut Context<Self>) {
@@ -2082,7 +2255,8 @@ impl NotebookEditor {
         };
         let nbformat_cell = cell.to_nbformat_cell(cx);
         let index = self.selected_cell_index + 1;
-        self.insert_nbformat_cell(index, nbformat_cell, window, cx);
+        let edit = self.insert_nbformat_cell(index, nbformat_cell, window, cx);
+        self.record_edit(edit);
     }
 
     /// Build a live cell from an nbformat cell (with a fresh id), wire it, and
@@ -2093,7 +2267,7 @@ impl NotebookEditor {
         cell: nbformat::v4::Cell,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> CellEdit {
         // A pasted/duplicated cell must get a fresh id, or it would collide
         // with the source cell's id.
         let new_cell_id: CellId = Uuid::new_v4().into();
@@ -2132,10 +2306,10 @@ impl NotebookEditor {
         };
 
         self.raw_insert_cell(index, cell.clone(), window, cx);
-        self.record_edit(CellEdit::Inserted { index, cell });
         self.notebook_mode = NotebookMode::Command;
         self.focus_handle.focus(window, cx);
         cx.notify();
+        CellEdit::Inserted { index, cell }
     }
 
     // --- Structural primitives (no undo recording, no focus/mode side effects) ---
@@ -2180,6 +2354,7 @@ impl NotebookEditor {
         }
         self.cell_list.splice(index..index + 1, 0);
         self.selected_cell_index = index.min(self.cell_order.len().saturating_sub(1));
+        self.collapse_selection();
     }
 
     /// Move the cell at `from` to `to` (count unchanged; no list splice needed).
@@ -2190,6 +2365,9 @@ impl NotebookEditor {
         let cell_id = self.cell_order.remove(from);
         self.cell_order.insert(to, cell_id);
         self.selected_cell_index = to;
+        // Callers that move a multi-selected block re-establish the selection
+        // themselves after all the moves.
+        self.collapse_selection();
     }
 
     /// Replace the cell at `index` with a fresh live cell built from `cell`.
@@ -2233,11 +2411,10 @@ impl NotebookEditor {
         self.redo_stack.clear();
     }
 
-    fn undo_cell_op(&mut self, _: &UndoCellOp, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(edit) = self.undo_stack.pop() else {
-            return;
-        };
-        match &edit {
+    /// Reverse one edit (recursively for groups, whose members are undone in
+    /// reverse of the order they were applied).
+    fn apply_undo_edit(&mut self, edit: &CellEdit, window: &mut Window, cx: &mut Context<Self>) {
+        match edit {
             CellEdit::Inserted { index, .. } => self.raw_remove_cell(*index, cx),
             CellEdit::Deleted { index, cell } => {
                 self.raw_insert_cell(*index, cell.clone(), window, cx)
@@ -2246,16 +2423,17 @@ impl NotebookEditor {
             CellEdit::Converted { index, before, .. } => {
                 self.raw_replace_cell(*index, before.clone(), window, cx)
             }
+            CellEdit::Group(edits) => {
+                for edit in edits.iter().rev() {
+                    self.apply_undo_edit(edit, window, cx);
+                }
+            }
         }
-        self.redo_stack.push(edit);
-        self.after_undo_redo(window, cx);
     }
 
-    fn redo_cell_op(&mut self, _: &RedoCellOp, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(edit) = self.redo_stack.pop() else {
-            return;
-        };
-        match &edit {
+    /// Re-apply one edit (recursively for groups, in applied order).
+    fn apply_redo_edit(&mut self, edit: &CellEdit, window: &mut Window, cx: &mut Context<Self>) {
+        match edit {
             CellEdit::Inserted { index, cell } => {
                 self.raw_insert_cell(*index, cell.clone(), window, cx)
             }
@@ -2264,7 +2442,28 @@ impl NotebookEditor {
             CellEdit::Converted { index, after, .. } => {
                 self.raw_replace_cell(*index, after.clone(), window, cx)
             }
+            CellEdit::Group(edits) => {
+                for edit in edits {
+                    self.apply_redo_edit(edit, window, cx);
+                }
+            }
         }
+    }
+
+    fn undo_cell_op(&mut self, _: &UndoCellOp, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(edit) = self.undo_stack.pop() else {
+            return;
+        };
+        self.apply_undo_edit(&edit, window, cx);
+        self.redo_stack.push(edit);
+        self.after_undo_redo(window, cx);
+    }
+
+    fn redo_cell_op(&mut self, _: &RedoCellOp, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(edit) = self.redo_stack.pop() else {
+            return;
+        };
+        self.apply_redo_edit(&edit, window, cx);
         self.undo_stack.push(edit);
         self.after_undo_redo(window, cx);
     }
@@ -2298,22 +2497,54 @@ impl NotebookEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let index = self.selected_cell_index;
-        let Some(cell_id) = self.cell_order.get(index).cloned() else {
-            return;
-        };
-        let is_markdown = matches!(self.cell_map.get(&cell_id), Some(Cell::Markdown(_)));
-        if is_markdown == to_markdown {
-            return;
+        // Converting collapses the multi-selection (cell entities are rebuilt),
+        // so capture the target indices first and group the edits for undo.
+        let selection = self.effective_selection();
+        let primary = self.selected_cell_index;
+        let anchor = self.selection_anchor;
+        let multi = selection.len() > 1;
+        let mut edits = Vec::with_capacity(selection.len());
+        for index in &selection {
+            if let Some(edit) = self.convert_cell_at(*index, to_markdown, window, cx) {
+                edits.push(edit);
+            }
+        }
+        match edits.len() {
+            0 => return,
+            1 => self.record_edit(edits.remove(0)),
+            _ => self.record_edit(CellEdit::Group(edits)),
+        }
+        if multi {
+            // Conversion keeps cells in place — restore the selection.
+            self.selected_cell_index = primary;
+            self.selection_anchor = anchor;
+            self.selected_indices = selection.into_iter().collect();
         }
 
-        let Some(before) = self
+        self.notebook_mode = NotebookMode::Command;
+        self.focus_handle.focus(window, cx);
+        cx.notify();
+    }
+
+    /// Convert one cell (by index) to markdown/code, returning the undo edit.
+    /// No-op (None) when the cell is already the requested type.
+    fn convert_cell_at(
+        &mut self,
+        index: usize,
+        to_markdown: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<CellEdit> {
+        let cell_id = self.cell_order.get(index).cloned()?;
+        let is_markdown = matches!(self.cell_map.get(&cell_id), Some(Cell::Markdown(_)));
+        if is_markdown == to_markdown {
+            return None;
+        }
+
+        let before = self
             .cell_map
             .get(&cell_id)
-            .map(|cell| cell.to_nbformat_cell(cx))
-        else {
-            return;
-        };
+            .map(|cell| cell.to_nbformat_cell(cx))?;
         let source = self.cell_source_text(&cell_id, cx);
         let new_cell_id: CellId = Uuid::new_v4().into();
         let after = if to_markdown {
@@ -2334,15 +2565,11 @@ impl NotebookEditor {
         };
 
         self.raw_replace_cell(index, after.clone(), window, cx);
-        self.record_edit(CellEdit::Converted {
+        Some(CellEdit::Converted {
             index,
             before,
             after,
-        });
-
-        self.notebook_mode = NotebookMode::Command;
-        self.focus_handle.focus(window, cx);
-        cx.notify();
+        })
     }
 
     fn run_cells_above(&mut self, _: &RunCellsAbove, window: &mut Window, cx: &mut Context<Self>) {
@@ -2373,9 +2600,110 @@ impl NotebookEditor {
         self.selected_cell_index
     }
 
+    /// Collapse any multi-selection down to the primary cell.
+    fn collapse_selection(&mut self) {
+        self.selected_indices.clear();
+        self.selection_anchor = None;
+    }
+
+    /// The full selection, sorted: the multi-selection when active, otherwise
+    /// just the primary cell.
+    fn effective_selection(&self) -> Vec<usize> {
+        if self.selected_indices.len() > 1 {
+            self.selected_indices.iter().copied().collect()
+        } else {
+            vec![self.selected_cell_index]
+        }
+    }
+
+    fn has_multi_selection(&self) -> bool {
+        self.selected_indices.len() > 1
+    }
+
+    fn is_index_selected(&self, index: usize) -> bool {
+        if self.selected_indices.len() > 1 {
+            self.selected_indices.contains(&index)
+        } else {
+            index == self.selected_cell_index
+        }
+    }
+
+    /// Replace the selection with the contiguous range anchor..=primary.
+    fn select_range(&mut self, anchor: usize, primary: usize) {
+        self.selection_anchor = Some(anchor);
+        self.selected_cell_index = primary;
+        self.selected_indices = (anchor.min(primary)..=anchor.max(primary)).collect();
+    }
+
+    /// Extend the shift-range selection one cell down/up (shift-down/up in
+    /// command mode).
+    fn extend_selection(&mut self, direction: i32, window: &mut Window, cx: &mut Context<Self>) {
+        let count = self.cell_count();
+        if count == 0 {
+            return;
+        }
+        let anchor = self.selection_anchor.unwrap_or(self.selected_cell_index);
+        let primary = if direction > 0 {
+            (self.selected_cell_index + 1).min(count - 1)
+        } else {
+            self.selected_cell_index.saturating_sub(1)
+        };
+        self.select_range(anchor, primary);
+        self.cell_list.scroll_to_reveal_item(primary);
+        self.notebook_mode = NotebookMode::Command;
+        if !self.kernel_picker_handle.is_deployed() {
+            self.focus_handle.focus(window, cx);
+        }
+        cx.notify();
+    }
+
+    /// A shift- or ctrl/cmd-click on a cell (see `CellEvent::ModifiedClick`).
+    fn handle_modified_click(
+        &mut self,
+        cell_id: &CellId,
+        shift: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.cell_order.iter().position(|id| id == cell_id) else {
+            return;
+        };
+        if shift {
+            // Range from the anchor (or current primary) to the clicked cell.
+            let anchor = self.selection_anchor.unwrap_or(self.selected_cell_index);
+            self.select_range(anchor, index);
+        } else {
+            // ctrl/cmd-click: toggle the cell in a discontiguous selection.
+            let mut set = if self.selected_indices.len() > 1 {
+                self.selected_indices.clone()
+            } else {
+                BTreeSet::from([self.selected_cell_index])
+            };
+            if set.contains(&index) && set.len() > 1 {
+                set.remove(&index);
+                self.selected_cell_index = *set.iter().next().unwrap_or(&0);
+            } else {
+                set.insert(index);
+                self.selected_cell_index = index;
+            }
+            self.selection_anchor = Some(self.selected_cell_index);
+            if set.len() > 1 {
+                self.selected_indices = set;
+            } else {
+                self.collapse_selection();
+            }
+        }
+        self.notebook_mode = NotebookMode::Command;
+        if !self.kernel_picker_handle.is_deployed() {
+            self.focus_handle.focus(window, cx);
+        }
+        cx.notify();
+    }
+
     fn select_cell_by_id(&mut self, cell_id: &CellId, cx: &mut Context<Self>) {
         if let Some(index) = self.cell_order.iter().position(|id| id == cell_id) {
             self.selected_cell_index = index;
+            self.collapse_selection();
             self.notebook_mode = NotebookMode::Edit;
             cx.notify();
         }
@@ -2388,8 +2716,8 @@ impl NotebookEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // let previous_index = self.selected_cell_index;
         self.selected_cell_index = index;
+        self.collapse_selection();
         let current_index = self.selected_cell_index;
 
         // in the future we may have some `on_cell_change` event that we want to fire here
@@ -2914,7 +3242,7 @@ impl NotebookEditor {
     ) -> impl IntoElement {
         let cell_position = self.cell_position(index);
 
-        let is_selected = index == self.selected_cell_index;
+        let is_selected = self.is_index_selected(index);
 
         match cell {
             Cell::Code(cell) => {
@@ -3030,6 +3358,12 @@ impl Render for NotebookEditor {
             }))
             .on_action(cx.listener(Self::select_first))
             .on_action(cx.listener(Self::select_last))
+            .on_action(cx.listener(|this, _: &ExtendSelectionDown, window, cx| {
+                this.extend_selection(1, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ExtendSelectionUp, window, cx| {
+                this.extend_selection(-1, window, cx)
+            }))
             .on_action(cx.listener(|this, _: &MoveDown, window, cx| {
                 this.select_next(
                     &Default::default(),

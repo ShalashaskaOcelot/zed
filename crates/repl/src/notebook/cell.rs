@@ -52,6 +52,27 @@ pub enum CellEvent {
     /// it if running, or drop it from the queue if only pending — scoped to
     /// this cell rather than the whole kernel/batch.
     Stop(CellId),
+    /// The cell was clicked with a selection modifier held: shift extends the
+    /// contiguous selection from the anchor to this cell; ctrl/cmd (`!shift`)
+    /// toggles this cell in a discontiguous multi-selection.
+    ModifiedClick { id: CellId, shift: bool },
+}
+
+/// Capture-phase mouse-down filter shared by every cell root: a click with a
+/// selection modifier held becomes a `ModifiedClick` (and stops propagating,
+/// so the click doesn't also focus the cell's editor); plain clicks pass
+/// through untouched.
+fn selection_modifiers(event: &gpui::MouseDownEvent) -> Option<bool> {
+    if event.button != gpui::MouseButton::Left {
+        return None;
+    }
+    if event.modifiers.shift {
+        Some(true)
+    } else if event.modifiers.secondary() {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 /// Actions offered by the per-cell hover/selection toolbar. Each maps to an
@@ -429,6 +450,8 @@ pub struct MarkdownCell {
 }
 
 impl EventEmitter<MarkdownCellEvent> for MarkdownCell {}
+impl EventEmitter<CellEvent> for MarkdownCell {}
+impl EventEmitter<CellEvent> for RawCell {}
 
 impl MarkdownCell {
     pub fn new(
@@ -613,6 +636,15 @@ impl Render for MarkdownCell {
             return v_flex()
                 .size_full()
                 .group(CELL_HOVER_GROUP)
+                .capture_any_mouse_down(cx.listener(|this, event, _window, cx| {
+                    if let Some(shift) = selection_modifiers(event) {
+                        cx.emit(CellEvent::ModifiedClick {
+                            id: this.id.clone(),
+                            shift,
+                        });
+                        cx.stop_propagation();
+                    }
+                }))
                 .children(self.cell_position_spacer(true, window, cx))
                 .child(
                     h_flex()
@@ -649,6 +681,15 @@ impl Render for MarkdownCell {
         v_flex()
             .size_full()
             .group(CELL_HOVER_GROUP)
+            .capture_any_mouse_down(cx.listener(|this, event, _window, cx| {
+                if let Some(shift) = selection_modifiers(event) {
+                    cx.emit(CellEvent::ModifiedClick {
+                        id: this.id.clone(),
+                        shift,
+                    });
+                    cx.stop_propagation();
+                }
+            }))
             .children(self.cell_position_spacer(true, window, cx))
             .child(
                 h_flex()
@@ -1417,6 +1458,15 @@ impl Render for CodeCell {
         v_flex()
             .size_full()
             .group(CELL_HOVER_GROUP)
+            .capture_any_mouse_down(cx.listener(|this, event, _window, cx| {
+                if let Some(shift) = selection_modifiers(event) {
+                    cx.emit(CellEvent::ModifiedClick {
+                        id: this.id.clone(),
+                        shift,
+                    });
+                    cx.stop_propagation();
+                }
+            }))
             // TODO: Move base cell render into trait impl so we don't have to repeat this
             .children(self.cell_position_spacer(true, window, cx))
             // Editor portion
@@ -1604,6 +1654,15 @@ impl Render for RawCell {
         v_flex()
             .size_full()
             .group(CELL_HOVER_GROUP)
+            .capture_any_mouse_down(cx.listener(|this, event, _window, cx| {
+                if let Some(shift) = selection_modifiers(event) {
+                    cx.emit(CellEvent::ModifiedClick {
+                        id: this.id.clone(),
+                        shift,
+                    });
+                    cx.stop_propagation();
+                }
+            }))
             // TODO: Move base cell render into trait impl so we don't have to repeat this
             .children(self.cell_position_spacer(true, window, cx))
             .child(

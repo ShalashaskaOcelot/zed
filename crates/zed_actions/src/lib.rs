@@ -976,6 +976,10 @@ pub mod notebook {
             SelectFirstCell,
             /// Selects the last cell.
             SelectLastCell,
+            /// Extends the cell selection to the next cell (shift-down).
+            ExtendSelectionDown,
+            /// Extends the cell selection to the previous cell (shift-up).
+            ExtendSelectionUp,
             /// Enters the current cell's editor (edit mode).
             EnterEditMode,
             /// Exits the cell editor and returns to cell command mode.
