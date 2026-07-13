@@ -87,10 +87,14 @@ cancelled status works, Run All marks pending. Remaining issues found and fixed:
       `clear_awaiting_cells` now cancels the awaiting cells' status too.
 - [x] Pending icon changed from Ellipsis to Clock (kept the "Pending…" text).
 - [x] Shift-enter cycling past an already running/queued cell re-ran it (and
-      reset the running cell to Pending). Added `is_cell_in_flight` (active /
-      run_queue / pending_executions / awaiting / submitted-awaiting-reply) and
-      the single-cell run paths skip cells already in flight — only eligible
+      reset the running cell to Pending). Added `is_cell_in_flight` and the
+      single-cell run paths skip cells already in flight — only eligible
       (idle/finished) cells get re-queued.
+- [x] REGRESSION from the above (user 2026-07-11): `is_cell_in_flight` keyed
+      off `execution_requests`, which is never pruned per-cell, so finished
+      cells stayed "in flight" forever — nothing could be re-run without a
+      kernel restart. Re-based the check on the cell's own Pending/Running
+      status (resolves to Finished/Cancelled). (commit 93f8a96)
 - [x] Run All while running cancelled the NEW run: interrupting puts ipykernel
       into an "aborting" state, so requests submitted immediately came back
       Aborted. The batch now defers submitting until the kernel returns to Idle
@@ -100,25 +104,31 @@ cancelled status works, Run All marks pending. Remaining issues found and fixed:
 
 - [ ] "Execute All with no kernel selected does nothing" — expected to prompt.
       Believed to be a side effect of the stuck-active-cell state; retest after
-      these fixes.
+      these fixes. (Likely entangled with bug #20 — the picker being empty.)
 - [ ] Kernel picker shows NO kernels on a fresh app start (should list the two
       global Pythons + the workspace `.venv`); a second attempt runs fine. See
       bug #20 (async kernelspec discovery / picker opened before specs load).
 
 ## Manual test checklist (for the user)
 
-- [ ] Shift-enter down a stack with a kernel running: waiting cells show a
-      muted "… Pending", only the executing cell shows "Running", and each
-      cell's finished time is ITS OWN (the cells after a 20s cell show ~ms).
-- [ ] Run All over previously-executed cells: ✓ ticks become Pending, old
-      outputs stay until each cell re-executes.
-- [ ] Restart mid-batch: the running cell and the queued cells show a muted ✕
-      "Cancelled" — no ✓, no inherited time.
+- [x] Shift-enter down a stack with a kernel running: only the executing cell
+      shows "Running", each cell's finished time is ITS OWN (cells after a 20s
+      cell show ~ms). ✅ CONFIRMED (per-cell times + pending).
+- [x] Run All over previously-executed cells: ✓ ticks become Pending, old
+      outputs stay until each cell re-executes. ✅ CONFIRMED ("Run all does
+      mark everything pending").
+- [x] Restart mid-batch: the running cell and the queued cells show a muted ✕
+      "Cancelled" — no ✓, no inherited time. ✅ CONFIRMED ("Cancelled status
+      works perfectly").
 - [ ] Interrupt mid-batch: the running cell finishes with the
       KeyboardInterrupt error (✓ + its real time); the rest are Cancelled.
+- [ ] Re-run works after a run finishes / shift-enter re-queues eligible cells
+      (retest after the 93f8a96 regression fix).
 - [ ] Shift-enter through a stack with NO kernel selected, pick a kernel from
-      the picker: ALL queued cells run, including the first.
+      the picker: ALL queued cells run, including the first. (Blocked on bug #20
+      — picker currently empty on fresh start.)
 - [ ] Stop-on-error still works (a failing cell cancels the rest).
+- [ ] Cells no longer get stuck "Running" (user monitoring).
 
 ## Verification (automated)
 

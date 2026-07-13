@@ -1,9 +1,9 @@
-# Phase 18 — In-cell execution status display (VS Code style)
+# Phase 18 — In-cell execution status display (VS Code style) (COMPLETE, archived 2026-07-11)
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, tests
-> pass.
-> Kind: **change to existing behaviour** — keep OPEN until the user confirms
-> the status sits inside the cell and the button reads centered.
+> ✅ STATUS: CONFIRMED by the user 2026-07-11: status/time render inside the
+> cell ("looks good"), no empty output box ("looks good"), and the button
+> position is "now good... close enough that I can't tell just by eye" after
+> the rightward nudge. Kind: **change to existing behaviour**.
 
 Requested by the user 2026-07-11.
 
@@ -28,24 +28,23 @@ gutter run button), possibly `notebook_ui.rs` for spacing constants.
 - [x] Gutter centering: widened the gutter 26→30px so the run button and the
       `[N]` number center in the bar-to-cell-edge span with symmetric (~3.5px)
       clearance on both sides, instead of sitting tight against the bar.
-- [x] Centering: settled on centering the controls between the accent bar and
-      the cell edge (`left(px(3.))` + `w(GUTTER_WIDTH - 3.0)`). A brief
-      full-gutter-width variant was tried per an earlier request but the user
-      preferred the bar-to-edge centering (2026-07-11).
+- [x] Centering: after trying bar-to-edge and full-gutter-width variants, the
+      controls sit at `left(px(7.))` + `w(GUTTER_WIDTH - 7.0)` (nudged right of
+      the accent bar). User: "now good."
 - [x] Status row does not collide with the toolbar (top-right) or the language
       badge (bottom-right, absolute) — the status row is in normal flow on the
       left.
 
 ## Manual test checklist (for the user)
 
-- [ ] Run a cell: "Running…" appears inside the cell, bottom-left; on finish
-      it becomes ✓ + time in the same spot.
-- [ ] Pending/cancelled states (batch runs, restart) show in the same in-cell
-      spot.
-- [ ] A cell with no outputs no longer grows an empty output box — the status
-      lives in the cell itself.
-- [ ] The gutter run button and `[N]` now read as centered between the accent
-      bar and the cell.
+- [x] Run a cell: "Running…" appears inside the cell, bottom-left; on finish
+      it becomes ✓ + time in the same spot. ✅ CONFIRMED.
+- [x] Pending/cancelled states (batch runs, restart) show in the same in-cell
+      spot. ✅ CONFIRMED.
+- [x] A cell with no outputs no longer grows an empty output box — the status
+      lives in the cell itself. ✅ CONFIRMED.
+- [x] The gutter run button and `[N]` now read as centered. ✅ CONFIRMED
+      ("now good... close enough").
 
 ## Verification (automated)
 
