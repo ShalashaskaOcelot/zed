@@ -823,11 +823,7 @@ impl NotebookEditor {
         // command palette must dismiss it too, not just the toast's button).
         self.disk_changed_externally = false;
         self.execution_state_changed = false;
-        if let Some(workspace) = Workspace::for_window(window, cx) {
-            workspace.update(cx, |workspace, cx| {
-                workspace.dismiss_toast(&NotificationId::unique::<NotebookConflictToast>(), cx);
-            });
-        }
+        self.dismiss_conflict_toast(window, cx);
 
         self.cell_order = cell_order.clone();
         self.original_cell_order = cell_order;
@@ -841,6 +837,17 @@ impl NotebookEditor {
         });
         self.refresh_language(cx);
         cx.notify();
+    }
+
+    /// Take down the "notebook changed on disk" conflict toast. Called by any
+    /// path that re-aligns us with disk — reload (command or toast button) and
+    /// a confirmed overwrite save.
+    fn dismiss_conflict_toast(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(workspace) = Workspace::for_window(window, cx) {
+            workspace.update(cx, |workspace, cx| {
+                workspace.dismiss_toast(&NotificationId::unique::<NotebookConflictToast>(), cx);
+            });
+        }
     }
 
     /// The .ipynb changed on disk (the project auto-reloaded the backing
@@ -3284,16 +3291,19 @@ impl Item for NotebookEditor {
             cx,
         );
 
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             if answer.await != Ok(0) {
                 return Ok(());
             }
             let json =
                 serde_json::to_string_pretty(&notebook).context("Failed to serialize notebook")?;
-            this.update(cx, |this, cx| {
+            this.update_in(cx, |this, window, cx| {
                 this.disk_changed_externally = false;
                 this.last_saved_disk_text = Some(json.clone());
                 this.mark_as_saved(cx);
+                // Overwriting the disk version resolves the conflict just like
+                // a reload does, so take down the conflict toast.
+                this.dismiss_conflict_toast(window, cx);
             })?;
             fs.atomic_write(path, json).await?;
             Ok(())

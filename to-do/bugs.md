@@ -254,7 +254,9 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
   comparing against it BEFORE the dirty check — otherwise saving during a
   long-running cell (outputs arriving between the write and the file-watcher
   event) raised a spurious conflict toast for our own save.
-- **Tested:** no — needs user confirmation
+- **Tested:** dirty tracking CONFIRMED by user 2026-07-11 (bug fixed). One
+  follow-up defect noted → see bug #19 (an Overwrite save didn't dismiss the
+  conflict toast). Otherwise confirmed.
 
 ## 19. Reloading doesn't clear the conflict notification toast
 
@@ -271,4 +273,8 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
   sink for every reload path (command palette, toast button, external-change
   auto-reload) — now calls `workspace.dismiss_toast` for the conflict toast id
   (the marker type was hoisted to module scope so show and dismiss share it).
-- **Tested:** no — needs user confirmation
+- **Reload CONFIRMED by user 2026-07-11.** Follow-up (same day): the SAVE side
+  (choosing Overwrite in the conflict prompt) also re-aligns with disk but did
+  NOT dismiss the toast. Factored the dismissal into `dismiss_conflict_toast`
+  and call it from the confirmed-overwrite save branch too.
+- **Tested:** reload path confirmed; the save-overwrite dismissal is untested.
