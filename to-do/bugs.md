@@ -278,3 +278,28 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
   NOT dismiss the toast. Factored the dismissal into `dismiss_conflict_toast`
   and call it from the confirmed-overwrite save branch too.
 - **Tested:** reload path confirmed; the save-overwrite dismissal is untested.
+
+## 20. Kernel picker shows no kernels on a fresh app start
+
+- **Status:** open
+- **Symptom:** (user 2026-07-11) On a freshly-started app, the first
+  Execute-All prompts for a kernel but the picker is EMPTY ("No matches"),
+  even though two global Pythons (3.11.15, 3.11.14) and a workspace `.venv`
+  exist. Escaping and running again does NOT prompt — it just starts (a kernel
+  got resolved by then). So the kernel list simply hadn't loaded when the
+  picker first opened.
+- **Analysis:** the picker's entries are a static snapshot built at render
+  time from `ReplStore.kernel_specifications` + discovered python toolchains
+  (`build_grouped_entries` in `components/kernel_options.rs`). Both are
+  populated ASYNCHRONOUSLY (`refresh_kernelspecs` / `refresh_python_kernelspecs`
+  — pet toolchain discovery). `ensure_kernelspecs` kicks the refresh once, but
+  if the picker opens before it completes the delegate captures an empty list
+  and does NOT live-update when specs arrive (RenderOnce snapshot; the open
+  Picker entity's delegate is fixed).
+- **Fix ideas (not yet done):** make the `KernelPickerDelegate` observe
+  `ReplStore` and rebuild `all_entries`/`filtered_entries` on notify while
+  open; and/or show a "Discovering kernels…" loading state; and/or start
+  discovery eagerly on notebook open (already done in `new`) and ensure the
+  picker reflects late arrivals. Needs a focused pass on the picker component.
+- **Fix attempted:** none
+- **Tested:** n/a
