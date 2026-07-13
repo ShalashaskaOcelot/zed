@@ -227,12 +227,17 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
 - **Analysis:** `is_dirty` = `has_structural_changes() || has_content_changes()`
   — neither accounts for outputs / execution_count having changed since load.
   The external-change handler (`handle_external_change`) auto-reloads when not
-  dirty. Include "outputs/execution state changed since last save" in the dirty
-  check (e.g. compare serialized notebook to the last-saved snapshot), so an
-  executed-but-unedited notebook resists silent auto-reload. Relates to
-  phase 14 (save-conflict) and phase 9 (reload).
-- **Fix attempted:** none
-- **Tested:** n/a
+  dirty. Relates to phase 14 (save-conflict) and phase 9 (reload).
+- **Fix attempted (2026-07-11):** new `execution_state_changed` flag on the
+  notebook, OR'd into `Item::is_dirty`. Set whenever execution state mutates:
+  submitting/queueing a run, kernel messages routed to a cell (outputs /
+  counts), clear-cell-outputs, clear-all-outputs, and the restart counter
+  reset. Cleared by `mark_as_saved` (save persists the state) and
+  `reload_cells_from_notebook` (state now matches disk). Result: an
+  executed-but-unedited notebook counts as dirty → an external save now shows
+  the conflict toast instead of silently auto-reloading over the run results,
+  and the tab dirty-dot/save-prompt reflect execution state too.
+- **Tested:** no — needs user confirmation
 
 ## 19. Reloading doesn't clear the conflict notification toast
 

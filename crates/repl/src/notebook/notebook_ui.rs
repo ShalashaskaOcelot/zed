@@ -175,6 +175,11 @@ pub struct NotebookEditor {
     /// conflict toast was shown). While set, saving prompts before
     /// overwriting the on-disk version. Cleared on reload or confirmed save.
     disk_changed_externally: bool,
+    /// Execution state (outputs / execution counts) changed since the last
+    /// save. Cell text edits and structural changes are tracked separately;
+    /// without this, an executed-but-unedited notebook reported itself clean
+    /// and an external save would silently auto-reload over the run results.
+    execution_state_changed: bool,
 }
 
 impl NotebookEditor {
@@ -296,6 +301,7 @@ impl NotebookEditor {
             redo_stack: Vec::new(),
             kernel_picker_handle: PopoverMenuHandle::default(),
             disk_changed_externally: false,
+            execution_state_changed: false,
         };
         // Lazy start: don't launch a kernel on open. Show the remembered
         // kernel's name if we can resolve one now (a real launch happens on
@@ -396,6 +402,7 @@ impl NotebookEditor {
 
     pub fn mark_as_saved(&mut self, cx: &mut Context<Self>) {
         self.original_cell_order = self.cell_order.clone();
+        self.execution_state_changed = false;
 
         for cell in self.cell_map.values() {
             match cell {
@@ -806,9 +813,10 @@ impl NotebookEditor {
         self.cells_awaiting_kernel_choice.clear();
         self.cancel_run_queue();
         // We now reflect the on-disk content, so any prior conflict is moot:
-        // clear the flag and take down the conflict toast (reloading from the
+        // clear the flags and take down the conflict toast (reloading from the
         // command palette must dismiss it too, not just the toast's button).
         self.disk_changed_externally = false;
+        self.execution_state_changed = false;
         if let Some(workspace) = Workspace::for_window(window, cx) {
             workspace.update(cx, |workspace, cx| {
                 workspace.dismiss_toast(&NotificationId::unique::<NotebookConflictToast>(), cx);
@@ -1052,6 +1060,7 @@ impl NotebookEditor {
         // The restarted kernel's execution counter starts over at 1, so the
         // cells' `In [N]` numbers from the old session are stale — clear them
         // so a fresh run-through is visually distinct.
+        self.execution_state_changed = true;
         for cell in self.cell_map.values() {
             if let Cell::Code(code_cell) = cell {
                 code_cell.update(cx, |code_cell, cx| {
@@ -1207,6 +1216,12 @@ impl NotebookEditor {
         }
 
         if let Some(Cell::Code(cell)) = self.cell_map.get(&cell_id) {
+            // Everything but Prompt mutates the cell's execution state
+            // (clears outputs, starts a run, or records an error), which is
+            // savable notebook content.
+            if !matches!(disposition, Disposition::Prompt) {
+                self.execution_state_changed = true;
+            }
             cell.update(cx, |cell, cx| {
                 if cell.has_outputs() {
                     cell.clear_outputs();
@@ -1271,6 +1286,7 @@ impl NotebookEditor {
     }
 
     fn clear_outputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.execution_state_changed = true;
         for cell in self.cell_map.values() {
             if let Cell::Code(code_cell) = cell {
                 code_cell.update(cx, |cell, cx| {
@@ -1485,6 +1501,7 @@ impl NotebookEditor {
         if let Some(cell_id) = self.cell_order.get(self.selected_cell_index)
             && let Some(Cell::Code(cell)) = self.cell_map.get(cell_id)
         {
+            self.execution_state_changed = true;
             cell.update(cx, |cell, cx| {
                 cell.clear_outputs();
                 cx.notify();
@@ -3213,7 +3230,9 @@ impl Item for NotebookEditor {
     }
 
     fn is_dirty(&self, cx: &App) -> bool {
-        self.has_structural_changes() || self.has_content_changes(cx)
+        self.execution_state_changed
+            || self.has_structural_changes()
+            || self.has_content_changes(cx)
     }
 }
 
@@ -3257,6 +3276,8 @@ impl KernelSession for NotebookEditor {
         if let Some(parent_header) = &message.parent_header {
             if let Some(cell_id) = self.execution_requests.get(&parent_header.msg_id) {
                 if let Some(Cell::Code(cell)) = self.cell_map.get(cell_id) {
+                    // Outputs / execution counts arriving are savable state.
+                    self.execution_state_changed = true;
                     cell.update(cx, |cell, cx| {
                         cell.handle_message(message, window, cx);
                     });
