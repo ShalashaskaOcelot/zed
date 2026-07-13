@@ -1318,7 +1318,17 @@ impl NotebookEditor {
                 "notebook: kernel picker dismissed; dropping {} awaiting cell(s)",
                 self.cells_awaiting_kernel_choice.len(),
             );
-            self.cells_awaiting_kernel_choice.clear();
+            // Cells held for a kernel choice were marked Pending; dismissing the
+            // picker means they won't run, so clear that status too (otherwise
+            // the triggering cell stays stuck showing "Pending").
+            for cell_id in std::mem::take(&mut self.cells_awaiting_kernel_choice) {
+                if let Some(Cell::Code(cell)) = self.cell_map.get(&cell_id) {
+                    cell.update(cx, |cell, cx| {
+                        cell.cancel_execution();
+                        cx.notify();
+                    });
+                }
+            }
             self.cancel_run_queue(cx);
             cx.notify();
         }

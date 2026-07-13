@@ -984,7 +984,7 @@ impl CodeCell {
                 .gap_1()
                 .items_center()
                 .child(
-                    Icon::new(IconName::Ellipsis)
+                    Icon::new(IconName::Clock)
                         .size(IconSize::XSmall)
                         .color(Color::Muted),
                 )
