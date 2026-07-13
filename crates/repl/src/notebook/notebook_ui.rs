@@ -27,7 +27,10 @@ use workspace::{
     Item, ItemHandle, OpenOptions, OpenVisible, Pane, ProjectItem, ToolbarItemLocation, Workspace,
 };
 
-use super::{Cell, CellEvent, CellPosition, CellToolbarAction, MarkdownCellEvent, RenderableCell};
+use super::{
+    Cell, CellEvent, CellExecutionStatus, CellPosition, CellToolbarAction, MarkdownCellEvent,
+    RenderableCell,
+};
 
 use nbformat::v4::CellId;
 use nbformat::v4::Metadata as NotebookMetadata;
@@ -233,6 +236,9 @@ impl NotebookEditor {
                             }
                             CellEvent::ToolbarAction(cell_id, action) => {
                                 this.handle_cell_toolbar_action(cell_id, *action, window, cx)
+                            }
+                            CellEvent::Stop(cell_id) => {
+                                this.handle_cell_stop(cell_id, window, cx)
                             }
                         }
                     })
@@ -1475,6 +1481,48 @@ impl NotebookEditor {
         )
     }
 
+    /// Handle a per-cell stop (gutter stop button). Scoped to the cell:
+    /// - the actively-running cell → interrupt the kernel (halts the batch, as
+    ///   an interrupt always has);
+    /// - a queued (pending) batch cell → drop just that cell from the queue and
+    ///   cancel its status, leaving the rest of the batch to run;
+    /// - a single running cell (not part of a batch) → interrupt; a
+    ///   pending/awaiting single cell → cancel and forget it.
+    fn handle_cell_stop(&mut self, cell_id: &CellId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.active_run_cell.as_ref() == Some(cell_id) {
+            self.interrupt_kernel(&InterruptKernel, window, cx);
+            return;
+        }
+        if self.run_queue.contains(cell_id) {
+            self.run_queue.retain(|id| id != cell_id);
+            if let Some(Cell::Code(cell)) = self.cell_map.get(cell_id) {
+                cell.update(cx, |cell, cx| {
+                    cell.cancel_execution();
+                    cx.notify();
+                });
+            }
+            return;
+        }
+        // Not a batch cell: either a single cell running at the kernel, or one
+        // pending/awaiting a kernel.
+        let running = matches!(
+            self.cell_map.get(cell_id),
+            Some(Cell::Code(cell)) if cell.read(cx).execution_status() == CellExecutionStatus::Running
+        );
+        if running {
+            self.interrupt_kernel(&InterruptKernel, window, cx);
+        } else {
+            self.pending_executions.retain(|id| id != cell_id);
+            self.cells_awaiting_kernel_choice.retain(|id| id != cell_id);
+            if let Some(Cell::Code(cell)) = self.cell_map.get(cell_id) {
+                cell.update(cx, |cell, cx| {
+                    cell.cancel_execution();
+                    cx.notify();
+                });
+            }
+        }
+    }
+
     fn run_current_cell(&mut self, _: &Run, window: &mut Window, cx: &mut Context<Self>) {
         // Capture the mode BEFORE running, for the `remember` landing mode.
         let was_edit_mode = self.notebook_mode == NotebookMode::Edit;
@@ -1817,6 +1865,7 @@ impl NotebookEditor {
                 CellEvent::ToolbarAction(cell_id, action) => {
                     this.handle_cell_toolbar_action(cell_id, *action, window, cx)
                 }
+                CellEvent::Stop(cell_id) => this.handle_cell_stop(cell_id, window, cx),
             },
         )
         .detach();

@@ -15,7 +15,7 @@ use settings::Settings as _;
 use ui::{CommonAnimationExt, ContextMenu, IconButtonShape, PopoverMenu, Tooltip, prelude::*};
 use util::ResultExt;
 use zed_actions::notebook::{
-    AddCellBelow, DeleteCell, InterruptKernel, RunCellAndBelow, RunCellsAbove,
+    AddCellBelow, DeleteCell, RunCellAndBelow, RunCellsAbove,
 };
 
 use crate::{
@@ -48,6 +48,10 @@ pub enum CellEvent {
     /// (by id) and then performs the action, so the button always acts on its
     /// own cell even when the toolbar is shown on hover of a non-selected cell.
     ToolbarAction(CellId, CellToolbarAction),
+    /// The gutter stop button was clicked on a running/queued cell: interrupt
+    /// it if running, or drop it from the queue if only pending — scoped to
+    /// this cell rather than the whole kernel/batch.
+    Stop(CellId),
 }
 
 /// Actions offered by the per-cell hover/selection toolbar. Each maps to an
@@ -1245,7 +1249,10 @@ impl RenderableCell for CodeCell {
             CellControl::new(control_type.id(), control_type).on_click(cx.listener(
                 move |this, _, window, cx| {
                     if this.is_execution_in_flight() {
-                        window.dispatch_action(Box::new(InterruptKernel), cx);
+                        // Scoped stop: the notebook interrupts this cell if it's
+                        // running, or un-queues it if only pending, leaving the
+                        // rest of a batch running.
+                        cx.emit(CellEvent::Stop(this.id.clone()));
                     } else {
                         this.run(window, cx);
                     }

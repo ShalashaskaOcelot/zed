@@ -1,6 +1,9 @@
 # Phase 20 — Per-cell scoped stop / interrupt
 
-Kind: **change to existing behaviour**. Not yet started — this is a plan.
+> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, tests
+> pass. Kind: **change to existing behaviour** — keep OPEN until the user
+> confirms the scoped behaviour.
+
 Requested by the user 2026-07-11.
 
 Problem: the gutter stop button (shown on a running/queued cell) dispatches the
@@ -24,27 +27,34 @@ on_click currently dispatches `InterruptKernel`), `notebook_ui.rs`
 (`run_queue`, `active_run_cell`, a new per-cell stop handler; likely a new
 `CellEvent`/`CellToolbarAction` or a dedicated event).
 
-## Tasks
+## Implemented
 
-- [ ] The gutter stop button emits a per-cell "stop" (carrying the cell id)
-      instead of the global `InterruptKernel`.
-- [ ] Handler: if the cell is the `active_run_cell` (running) → interrupt the
-      kernel (current behaviour for the running cell).
-- [ ] If the cell is merely queued (in `run_queue`) → remove just that cell
-      from `run_queue`, cancel its status, and leave the rest of the queue
-      intact so it keeps running.
-- [ ] Keep the toolbar/kernel-status Stop affordances working; only the
-      per-cell gutter button changes scope.
+- [x] The gutter stop button emits `CellEvent::Stop(cell_id)` instead of the
+      global `InterruptKernel`.
+- [x] `handle_cell_stop`: the active (running) cell → interrupt the kernel
+      (halts the batch, as interrupt always has — this IS the running cell).
+- [x] A queued (pending) batch cell → removed from `run_queue` only, its status
+      cancelled; the rest of the batch keeps running.
+- [x] A single running cell (not in a batch) → interrupt; a pending/awaiting
+      single cell → cancelled and removed from `pending_executions` /
+      `cells_awaiting_kernel_choice`.
+- [x] Toolbar / kernel-status Stop affordances unchanged; only the per-cell
+      gutter button changed scope.
 
-## Risks / gaps
+## Decision (from the plan's open question)
 
-- Removing a single cell from a batch mid-run must not desync `active_run_cell`
-  or the stop-on-error/advance logic.
-- Confirm the interrupt-vs-continue decision for the running cell with the user
-  if ambiguous.
+Interrupting the ACTIVE running cell still halts the batch — an interrupt is
+kernel-global and the user previously confirmed (phase 10) that interrupting
+mid-batch stopping the rest is correct. Only the PENDING-cell case changed:
+stopping a not-yet-running cell drops just that one.
 
-## Verification
+## Manual test checklist (for the user)
 
-- `cargo check -p repl` + `./script/clippy -p repl` clean.
-- User test: stop a queued (not-yet-running) cell → it's removed, others still
-  run; stop the running cell → it interrupts.
+- [ ] Run a batch; click stop on a still-PENDING cell → only that cell is
+      removed/cancelled, the cells above and below keep running.
+- [ ] Click stop on the RUNNING cell → it interrupts (as before).
+- [ ] Stop on a single (non-batch) running cell → interrupts it.
+
+## Verification (automated)
+
+- `cargo check -p repl` + `./script/clippy -p repl` clean; 42 tests pass.
