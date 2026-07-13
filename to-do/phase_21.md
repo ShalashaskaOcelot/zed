@@ -1,7 +1,10 @@
 # Phase 21 — Live elapsed-time counter while a cell runs
 
-Kind: **change to existing behaviour** (extends the phase-17/18 status
-display). Not yet started — this is a plan. Requested by the user 2026-07-11.
+> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, tests
+> pass. Kind: **change to existing behaviour** — keep OPEN until the user
+> confirms the counter ticks.
+
+Requested by the user 2026-07-11.
 
 Goal: while a cell is running, show a live ticking elapsed time (e.g.
 "Running… 3.2s") instead of only revealing the total once it finishes. On
@@ -11,28 +14,25 @@ Primary files: `crates/repl/src/notebook/cell.rs`
 (`execution_status_element`, `execution_start_time`), and a per-second (or
 finer) refresh mechanism.
 
-## Tasks
+## Implemented
 
-- [ ] While `CellExecutionStatus::Running`, render the elapsed time from
-      `execution_start_time` next to the "Running…" label, updating live.
-- [ ] Drive the refresh with a lightweight timer (e.g. a repeating
-      `cx.spawn` + `cx.background_executor().timer` that calls `cx.notify()`
-      while any cell is running) rather than per-frame work; stop it when
-      nothing is running.
-- [ ] Format consistently with the finished time (`format_duration`): sub-second
-      as ms, then `s`, then `m s`. A running counter probably updates ~10x/s
-      for sub-second cells and ~1x/s beyond.
-- [ ] Ensure the timer is cancelled on finish/cancel and doesn't leak or keep
-      the view awake when idle.
+- [x] While Running, the in-cell status shows "Running… <elapsed>" from
+      `execution_start_time`, updating live.
+- [x] Refresh driven by a per-cell 100ms `cx.spawn` +
+      `cx.background_executor().timer` loop (`_run_timer` on `CodeCell`) that
+      notifies only while the status is Running and ends itself otherwise —
+      no timer runs when nothing is running.
+- [x] Formatting shares `format_duration` with the finished time (ms →
+      s → m s).
+- [x] The task is dropped (cancelled) by every terminal transition
+      (finish / cancel / re-pending), and self-terminates as a backstop.
 
-## Risks / gaps
+## Manual test checklist (for the user)
 
-- Don't spin a timer when no cell is running (battery / wakeups).
-- The timer must live on the notebook (or cell) and be dropped appropriately;
-  avoid multiple overlapping timers.
+- [ ] Run a multi-second cell → the time ticks up live next to "Running…",
+      then settles to the final ✓ + time.
+- [ ] No stray ticking/refreshing when nothing is running.
 
-## Verification
+## Verification (automated)
 
-- `cargo check -p repl` + `./script/clippy -p repl` clean.
-- User test: run a multi-second cell → the time ticks up live, then settles to
-  the final value with the ✓.
+- `cargo check -p repl` + `./script/clippy -p repl` clean; 42 tests pass.

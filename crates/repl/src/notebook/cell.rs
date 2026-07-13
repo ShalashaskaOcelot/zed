@@ -710,6 +710,9 @@ pub struct CodeCell {
     execution_start_time: Option<Instant>,
     execution_duration: Option<Duration>,
     execution_status: CellExecutionStatus,
+    /// Repeating notify task that keeps the live elapsed-time label ticking
+    /// while the cell is Running. Dropped (cancelling it) when the run ends.
+    _run_timer: Option<Task<()>>,
 }
 
 impl EventEmitter<CellEvent> for CodeCell {}
@@ -791,6 +794,7 @@ impl CodeCell {
             execution_start_time: None,
             execution_duration: None,
             execution_status: CellExecutionStatus::Idle,
+            _run_timer: None,
             _language_task: language_task,
         }
     }
@@ -881,6 +885,7 @@ impl CodeCell {
         self.execution_status = CellExecutionStatus::Pending;
         self.execution_start_time = None;
         self.execution_duration = None;
+        self._run_timer = None;
     }
 
     /// The kernel started executing this cell (its `execute_input` arrived):
@@ -893,7 +898,7 @@ impl CodeCell {
     /// we must NOT resurrect it into Running (which left cells stuck spinning).
     /// The input still precedes this run's outputs on iopub, so clearing here
     /// is safe either way.
-    pub fn begin_running(&mut self) {
+    pub fn begin_running(&mut self, cx: &mut Context<Self>) {
         self.clear_outputs();
         if matches!(
             self.execution_status,
@@ -904,9 +909,32 @@ impl CodeCell {
         self.execution_status = CellExecutionStatus::Running;
         self.execution_start_time = Some(Instant::now());
         self.execution_duration = None;
+        // Tick the live elapsed-time label while running. The task ends itself
+        // when the status leaves Running, and is dropped (cancelled) by the
+        // terminal transitions as well.
+        self._run_timer = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(100))
+                    .await;
+                let still_running = this
+                    .update(cx, |cell, cx| {
+                        let running = cell.execution_status == CellExecutionStatus::Running;
+                        if running {
+                            cx.notify();
+                        }
+                        running
+                    })
+                    .unwrap_or(false);
+                if !still_running {
+                    break;
+                }
+            }
+        }));
     }
 
     pub fn finish_execution(&mut self) {
+        self._run_timer = None;
         // An interrupted cell was already marked Cancelled (KeyboardInterrupt
         // on iopub); its ExecuteReply must not flip it back to a ✓.
         if self.execution_status == CellExecutionStatus::Cancelled {
@@ -928,6 +956,7 @@ impl CodeCell {
             self.execution_status = CellExecutionStatus::Cancelled;
             self.execution_start_time = None;
             self.execution_duration = None;
+            self._run_timer = None;
         }
     }
 
@@ -999,16 +1028,25 @@ impl CodeCell {
                         .color(Color::Muted),
                 )
                 .child(label("Pending...".to_string(), cx)),
-            CellExecutionStatus::Running => h_flex()
-                .gap_1()
-                .items_center()
-                .child(
-                    Icon::new(IconName::ArrowCircle)
-                        .size(IconSize::XSmall)
-                        .color(Color::Warning)
-                        .with_rotate_animation(2),
-                )
-                .child(label("Running...".to_string(), cx)),
+            CellExecutionStatus::Running => {
+                // Live elapsed time, kept ticking by `_run_timer`'s notifies.
+                let running_label = match self.execution_start_time {
+                    Some(start_time) => {
+                        format!("Running... {}", Self::format_duration(start_time.elapsed()))
+                    }
+                    None => "Running...".to_string(),
+                };
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(
+                        Icon::new(IconName::ArrowCircle)
+                            .size(IconSize::XSmall)
+                            .color(Color::Warning)
+                            .with_rotate_animation(2),
+                    )
+                    .child(label(running_label, cx))
+            }
             CellExecutionStatus::Finished => h_flex()
                 .gap_1()
                 .items_center()
@@ -1126,7 +1164,7 @@ impl CodeCell {
                 // become Running and start its timer (queued cells must not
                 // accrue the wait behind earlier cells), and only now are the
                 // previous outputs dropped.
-                self.begin_running();
+                self.begin_running(cx);
                 self.execution_count = serde_json::to_value(&input.execution_count)
                     .ok()
                     .and_then(|v| v.as_i64())
