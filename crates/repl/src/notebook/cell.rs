@@ -907,6 +907,11 @@ impl CodeCell {
     }
 
     pub fn finish_execution(&mut self) {
+        // An interrupted cell was already marked Cancelled (KeyboardInterrupt
+        // on iopub); its ExecuteReply must not flip it back to a ✓.
+        if self.execution_status == CellExecutionStatus::Cancelled {
+            return;
+        }
         if let Some(start_time) = self.execution_start_time.take() {
             self.execution_duration = Some(start_time.elapsed());
         }
@@ -1138,6 +1143,12 @@ impl CodeCell {
                 }
             }
             JupyterMessageContent::ErrorOutput(error) => {
+                // An interrupt shows as a KeyboardInterrupt error: the cell was
+                // stopped, not completed — mark it Cancelled (✕), keeping the
+                // traceback output visible. Real errors keep the finished ✓.
+                if error.ename == "KeyboardInterrupt" {
+                    self.cancel_execution();
+                }
                 self.outputs.push(Output::ErrorOutput(ErrorView {
                     ename: error.ename.clone(),
                     evalue: error.evalue.clone(),

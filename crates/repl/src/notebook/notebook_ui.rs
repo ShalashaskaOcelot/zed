@@ -1411,11 +1411,15 @@ impl NotebookEditor {
             }
         }
         self.run_queue = cells;
-        if superseded {
-            // Wait for the interrupted run to finish aborting (kernel returns
-            // to Idle) before submitting — otherwise these requests land in
-            // the kernel's "aborting" state and come back Aborted (see the
-            // Status handling in `route`).
+        // When we superseded a run on a BUSY kernel, wait for the interrupted
+        // run to finish aborting (kernel returns to Idle) before submitting —
+        // otherwise these requests land in the kernel's "aborting" state and
+        // come back Aborted (see the Status handling in `route`). If the
+        // kernel is NOT busy, no further Status(idle) transition may ever
+        // arrive, so waiting would deadlock the batch at "Pending" forever —
+        // submit immediately instead.
+        let kernel_busy = matches!(self.kernel.status(), KernelStatus::Busy);
+        if superseded && kernel_busy {
             self.resume_run_queue_on_idle = true;
         } else {
             self.advance_run_queue(window, cx);
