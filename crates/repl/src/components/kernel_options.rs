@@ -492,9 +492,9 @@ where
     TT: Fn(&mut Window, &mut App) -> AnyView + 'static,
 {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let store = ReplStore::global(cx);
-        store.update(cx, |store, cx| store.ensure_kernelspecs(cx));
-        let store = store.read(cx);
+        let store_entity = ReplStore::global(cx);
+        store_entity.update(cx, |store, cx| store.ensure_kernelspecs(cx));
+        let store = store_entity.read(cx);
 
         let all_entries = build_grouped_entries(store, self.worktree_id);
         let selected_kernelspec = store.active_kernelspec(self.worktree_id, None, cx);
@@ -519,7 +519,28 @@ where
             selected_index,
         };
 
+        let worktree_id = self.worktree_id;
         let picker_view = cx.new(|cx| {
+            // Kernelspec / toolchain discovery is asynchronous, so the picker
+            // may be built (and opened) before any kernels are known. Rebuild
+            // the entries whenever the store updates, so kernels stream into
+            // an already-open picker instead of it staying empty (bug #20).
+            cx.observe_in(
+                &store_entity,
+                window,
+                move |picker: &mut Picker<KernelPickerDelegate>, store, window, cx| {
+                    let entries = build_grouped_entries(store.read(cx), worktree_id);
+                    if picker.delegate.selected_kernelspec.is_none() {
+                        picker.delegate.selected_index =
+                            KernelPickerDelegate::first_selectable_index(&entries);
+                    }
+                    picker.delegate.all_entries = entries;
+                    // Re-applies the current query over the new entries.
+                    picker.refresh(window, cx);
+                },
+            )
+            .detach();
+
             Picker::list(delegate, window, cx)
                 .list_measure_all()
                 .popover()

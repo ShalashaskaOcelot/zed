@@ -264,7 +264,7 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
 
 ## 20. Kernel picker shows no kernels on a fresh app start
 
-- **Status:** open
+- **Status:** fix attempted - untested
 - **Symptom:** (user 2026-07-11) On a freshly-started app, the first
   Execute-All prompts for a kernel but the picker is EMPTY ("No matches"),
   even though two global Pythons (3.11.15, 3.11.14) and a workspace `.venv`
@@ -279,10 +279,11 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
   if the picker opens before it completes the delegate captures an empty list
   and does NOT live-update when specs arrive (RenderOnce snapshot; the open
   Picker entity's delegate is fixed).
-- **Fix ideas (not yet done):** make the `KernelPickerDelegate` observe
-  `ReplStore` and rebuild `all_entries`/`filtered_entries` on notify while
-  open; and/or show a "Discovering kernels…" loading state; and/or start
-  discovery eagerly on notebook open (already done in `new`) and ensure the
-  picker reflects late arrivals. Needs a focused pass on the picker component.
-- **Fix attempted:** none
-- **Tested:** n/a
+- **Fix attempted (2026-07-12):** the picker now observes `ReplStore`
+  (`cx.observe_in` wired when the picker entity is built): whenever the store
+  updates (async kernelspec/toolchain discovery completing), the delegate's
+  entries are rebuilt from `build_grouped_entries` and `picker.refresh`
+  re-applies the current query — so kernels stream into an already-open picker
+  instead of it staying empty. (User note 2026-07-12: "Sometimes kernels do
+  load in instantly" — intermittent, consistent with the async-discovery race.)
+- **Tested:** no — needs user confirmation on a fresh app start
