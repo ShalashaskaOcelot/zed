@@ -1,9 +1,11 @@
-# Phase 17 — Execution status & queue correctness
+# Phase 17 — Execution status & queue correctness (archived 2026-07-12)
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, tests
-> pass.
-> Kind: **change to existing behaviour** — keep OPEN until the user confirms
-> the statuses/timings actually behave as described.
+> ✅ STATUS: IMPLEMENTATION COMPLETE; core behaviours user-confirmed
+> (per-cell timing, pending/cancelled statuses, batch supersede, stop-on-error,
+> no-kernel prompting). Kind: **change to existing behaviour**.
+> The last few user-test items (interrupted-cell ✕, rerun-during-run hang fix,
+> re-run after finish, stuck-Running monitoring) are tracked in
+> `to-do/awaiting_testing.md` under "Phase 17".
 
 These items were all reported by the user 2026-07-11 while running cells with
 shift-enter and Run All; they share a root cause (queued cells were marked
@@ -100,14 +102,16 @@ cancelled status works, Run All marks pending. Remaining issues found and fixed:
       Aborted. The batch now defers submitting until the kernel returns to Idle
       (`resume_run_queue_on_idle`, resolved in `route`'s Status handler).
 
-## Still to verify / open
+## Follow-up round 3 (user testing 2026-07-12)
 
-- [ ] "Execute All with no kernel selected does nothing" — expected to prompt.
-      Believed to be a side effect of the stuck-active-cell state; retest after
-      these fixes. (Likely entangled with bug #20 — the picker being empty.)
-- [ ] Kernel picker shows NO kernels on a fresh app start (should list the two
-      global Pythons + the workspace `.venv`); a second attempt runs fine. See
-      bug #20 (async kernelspec discovery / picker opened before specs load).
+- [x] Rerun-during-a-run could HANG (everything stuck): the superseding batch
+      waited for a Status(idle) that never arrives when the kernel wasn't
+      actually busy at supersede time. Only wait when Busy; submit immediately
+      otherwise. (commit 051c3c6)
+- [x] Interrupted cell showed ✓ + time; user wants ✕: a KeyboardInterrupt
+      error now marks the cell Cancelled (traceback still shown), and
+      finish_execution won't flip a Cancelled cell back to Finished.
+      (commit 051c3c6)
 
 ## Manual test checklist (for the user)
 
@@ -120,15 +124,20 @@ cancelled status works, Run All marks pending. Remaining issues found and fixed:
 - [x] Restart mid-batch: the running cell and the queued cells show a muted ✕
       "Cancelled" — no ✓, no inherited time. ✅ CONFIRMED ("Cancelled status
       works perfectly").
-- [ ] Interrupt mid-batch: the running cell finishes with the
-      KeyboardInterrupt error (✓ + its real time); the rest are Cancelled.
-- [ ] Re-run works after a run finishes / shift-enter re-queues eligible cells
-      (retest after the 93f8a96 regression fix).
-- [ ] Shift-enter through a stack with NO kernel selected, pick a kernel from
-      the picker: ALL queued cells run, including the first. (Blocked on bug #20
-      — picker currently empty on fresh start.)
-- [ ] Stop-on-error still works (a failing cell cancels the rest).
-- [ ] Cells no longer get stuck "Running" (user monitoring).
+- [x] Interrupt mid-batch works ✅ CONFIRMED 2026-07-12 (with one change
+      requested and made: the interrupted cell now shows ✕ instead of ✓ —
+      retest tracked in awaiting_testing.md).
+- [x] Execute All with no kernel selected prompts kernel selection.
+      ✅ CONFIRMED 2026-07-12.
+- [x] Shift-enter through a stack with NO kernel selected: picker appears,
+      cells queue and execute once a kernel is selected. ✅ CONFIRMED
+      2026-07-12. ("Sometimes kernels do load in instantly" — the empty-picker
+      case remains bug #20.)
+- [x] Stop-on-error still works. ✅ CONFIRMED 2026-07-12.
+
+Remaining user-test items moved to `to-do/awaiting_testing.md` (phase 17
+section): interrupted-cell ✕, rerun-during-run no longer hangs, re-run after
+finish, stuck-Running monitoring.
 
 ## Verification (automated)
 

@@ -258,26 +258,9 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
   follow-up defect noted → see bug #19 (an Overwrite save didn't dismiss the
   conflict toast). Otherwise confirmed.
 
-## 19. Reloading doesn't clear the conflict notification toast
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-11) After the "notebook changed on disk but you
-  have unsaved changes" toast appears, reloading via the COMMAND PALETTE
-  leaves the toast sitting in the corner. (Clarified: the toast's own Reload
-  button DOES clear it — clicking a toast action auto-dismisses that toast —
-  only reloads from outside the toast leave it up.) Any reload of that file
-  should dismiss the toast, since the conflict is resolved.
-- **Analysis:** the toast is shown via `workspace.show_toast` with a
-  `NotificationId` (`NotebookConflictToast`); nothing dismissed it on reload.
-- **Fix attempted (2026-07-11):** `reload_cells_from_notebook` — the shared
-  sink for every reload path (command palette, toast button, external-change
-  auto-reload) — now calls `workspace.dismiss_toast` for the conflict toast id
-  (the marker type was hoisted to module scope so show and dismiss share it).
-- **Reload CONFIRMED by user 2026-07-11.** Follow-up (same day): the SAVE side
-  (choosing Overwrite in the conflict prompt) also re-aligns with disk but did
-  NOT dismiss the toast. Factored the dismissal into `dismiss_conflict_toast`
-  and call it from the confirmed-overwrite save branch too.
-- **Tested:** reload path confirmed; the save-overwrite dismissal is untested.
+(Bug #19 "Reloading doesn't clear the conflict toast" — fixed & confirmed
+2026-07-12 (reload paths AND the overwrite-save path); moved to
+`archive/bugs-fixed.md`.)
 
 ## 20. Kernel picker shows no kernels on a fresh app start
 

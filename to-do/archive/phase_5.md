@@ -1,14 +1,10 @@
-# Phase 5 — Create Python environments from the kernel picker
+# Phase 5 — Create Python environments from the kernel picker (archived 2026-07-12)
 
-> ⚠️ STATUS: MOSTLY CONFIRMED, one path pending (2026-07-08). User confirmed:
-> create venv works, reusing an existing `.venv` works, and the new env shows
-> up in the picker. STILL TO TEST: the no-Python-on-PATH error path — the user
-> will test later, so keep this OPEN until then. New feature, so on final
-> confirmation archive it and treat tweaks (e.g. custom location) as new items
-> (already backlogged).
->
-> Kind: **new feature** — on confirmation that it creates a venv, installs
-> ipykernel, and selects it, archive; any tweak/defect becomes a new item.
+> ✅ STATUS: IMPLEMENTATION COMPLETE; core flows user-confirmed (create venv,
+> reuse existing `.venv`, new env appears in the picker). The one outstanding
+> user test (the no-Python-on-PATH error toast) is tracked in
+> `to-do/awaiting_testing.md` under "Phase 5".
+> Kind: **new feature**.
 
 Goal: VS Code-style "create new environment" from the kernel selector: create
 a `.venv` in the project, install ipykernel into it, and select it — without

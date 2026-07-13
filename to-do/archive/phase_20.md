@@ -1,8 +1,9 @@
-# Phase 20 — Per-cell scoped stop / interrupt
+# Phase 20 — Per-cell scoped stop / interrupt (COMPLETE, archived 2026-07-12)
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, tests
-> pass. Kind: **change to existing behaviour** — keep OPEN until the user
-> confirms the scoped behaviour.
+> ✅ STATUS: CONFIRMED by the user 2026-07-12: "Per cell execution cancel is
+> working". Kind: **change to existing behaviour** — the change (stopping a
+> pending cell drops only that cell) is confirmed; the running-cell interrupt
+> paths are unchanged behaviour previously confirmed (phases 10/17).
 
 Requested by the user 2026-07-11.
 
@@ -50,10 +51,13 @@ stopping a not-yet-running cell drops just that one.
 
 ## Manual test checklist (for the user)
 
-- [ ] Run a batch; click stop on a still-PENDING cell → only that cell is
-      removed/cancelled, the cells above and below keep running.
-- [ ] Click stop on the RUNNING cell → it interrupts (as before).
-- [ ] Stop on a single (non-batch) running cell → interrupts it.
+- [x] Run a batch; click stop on a still-PENDING cell → only that cell is
+      removed/cancelled, the cells above and below keep running. ✅ CONFIRMED
+      2026-07-12.
+- [x] Click stop on the RUNNING cell → it interrupts. ✅ (unchanged behaviour,
+      previously confirmed.)
+- [x] Stop on a single (non-batch) running cell → interrupts it. ✅ (unchanged
+      behaviour, previously confirmed.)
 
 ## Verification (automated)
 

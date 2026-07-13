@@ -104,3 +104,26 @@ Confirmed-fixed bugs moved out of `to-do/bugs.md`.
   in COMMAND mode (select it, focus the notebook handle) instead of jumping into
   edit mode, so `enter → EnterEditMode` reliably fires. (The broader
   full-focus-loss edge remains tracked as bug #15.)
+
+## 19. Reloading doesn't clear the conflict notification toast
+
+- **Status:** fixed - confirmed (user 2026-07-12: reload clears it; "Overwrite
+  now successfully clears the toast" / "Overwrite dismisses toast correctly")
+- **Symptom:** (user 2026-07-11) After the "notebook changed on disk but you
+  have unsaved changes" toast appears, reloading via the COMMAND PALETTE
+  leaves the toast sitting in the corner. (Clarified: the toast's own Reload
+  button DOES clear it — clicking a toast action auto-dismisses that toast —
+  only reloads from outside the toast leave it up.) Any reload of that file
+  should dismiss the toast, since the conflict is resolved.
+- **Analysis:** the toast is shown via `workspace.show_toast` with a
+  `NotificationId` (`NotebookConflictToast`); nothing dismissed it on reload.
+- **Fix attempted (2026-07-11):** `reload_cells_from_notebook` — the shared
+  sink for every reload path (command palette, toast button, external-change
+  auto-reload) — now calls `workspace.dismiss_toast` for the conflict toast id
+  (the marker type was hoisted to module scope so show and dismiss share it).
+- **Reload CONFIRMED by user 2026-07-11.** Follow-up (same day): the SAVE side
+  (choosing Overwrite in the conflict prompt) also re-aligns with disk but did
+  NOT dismiss the toast. Factored the dismissal into `dismiss_conflict_toast`
+  and call it from the confirmed-overwrite save branch too.
+- **Tested:** confirmed — reload paths (2026-07-11) and the overwrite-save
+  dismissal (2026-07-12).

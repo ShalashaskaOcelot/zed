@@ -34,6 +34,10 @@ root. This system must be adhered to religiously.
 - `to-do/bugs.md` — a list of bugs. Each bug records: description, status
   (`open` / `fix attempted - untested` / `fixed - confirmed`), what fix was
   attempted (if any), and whether that fix has been tested by the user.
+- `to-do/awaiting_testing.md` — the single ledger of outstanding MANUAL TEST
+  items from phases whose implementation is complete, grouped into
+  `## Phase <n>` sections. Nothing in it needs implementation — only user
+  verification.
 - `to-do/archive/` — completed phase files and confirmed-fixed bugs are moved
   here.
 
@@ -67,6 +71,19 @@ root. This system must be adhered to religiously.
 3. **Archive completed work immediately** so it is never accidentally
    re-implemented. When a phase completes, move its file to `to-do/archive/`
    in the same commit that completes it.
+
+   **Test-only remainders move to `awaiting_testing.md`.** When a phase's
+   implementation is 100% complete and the ONLY unchecked lines are manual
+   user tests, do not keep the phase file open just for them: move those test
+   lines (with enough context to run each test, and the fixing commit where
+   relevant) into `to-do/awaiting_testing.md` under a `## Phase <n> — <title>`
+   section, note the move in the phase file, and archive the phase file in the
+   same commit. In `awaiting_testing.md`: tick an item the moment the user
+   confirms it; if a test FAILS, file the failure in `bugs.md` (or per the
+   kind rules), annotate the line with the bug number, and tick it (the
+   follow-up is tracked elsewhere); delete a section once all its boxes are
+   ticked. This keeps `to-do/` holding only phases with real implementation
+   work outstanding.
 
    **Exception — runtime-testable work needs user confirmation before
    archiving.** Most notebook/UI/kernel work can only be verified by running
