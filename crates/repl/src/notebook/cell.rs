@@ -56,6 +56,9 @@ pub enum CellEvent {
     /// contiguous selection from the anchor to this cell; ctrl/cmd (`!shift`)
     /// toggles this cell in a discontiguous multi-selection.
     ModifiedClick { id: CellId, shift: bool },
+    /// Savable cell metadata changed (e.g. input/output collapse state, which
+    /// persists to the .ipynb): the notebook should count as dirty.
+    MetadataChanged(CellId),
 }
 
 /// Capture-phase mouse-down filter shared by every cell root: a click with a
@@ -110,7 +113,7 @@ impl CellControlType {
             CellControlType::StopCell => "CellControlType::StopCell",
             CellControlType::ClearCell => "CellControlType::ClearCell",
             CellControlType::CellOptions => "CellControlType::CellOptions",
-            CellControlType::CollapseCell => "CellControlType::CollapseCelln",
+            CellControlType::CollapseCell => "CellControlType::CollapseCell",
             CellControlType::ExpandCell => "CellControlType::ExpandCell",
         }
     }
@@ -754,6 +757,11 @@ pub struct CodeCell {
     /// Repeating notify task that keeps the live elapsed-time label ticking
     /// while the cell is Running. Dropped (cancelling it) when the run ends.
     _run_timer: Option<Task<()>>,
+    /// Input (code editor) collapsed. Persisted to the .ipynb as
+    /// `metadata.jupyter.source_hidden` (VS Code / Jupyter compatible).
+    source_collapsed: bool,
+    /// Outputs collapsed. Persisted as `metadata.jupyter.outputs_hidden`.
+    outputs_collapsed: bool,
 }
 
 impl EventEmitter<CellEvent> for CodeCell {}
@@ -823,6 +831,17 @@ impl CodeCell {
 
         let (execution_count, outputs) = cell_source.into_outputs();
 
+        let source_collapsed = metadata
+            .jupyter
+            .as_ref()
+            .and_then(|jupyter| jupyter.source_hidden)
+            .unwrap_or(false);
+        let outputs_collapsed = metadata
+            .jupyter
+            .as_ref()
+            .and_then(|jupyter| jupyter.outputs_hidden)
+            .unwrap_or(false);
+
         Self {
             id,
             metadata,
@@ -836,6 +855,8 @@ impl CodeCell {
             execution_duration: None,
             execution_status: CellExecutionStatus::Idle,
             _run_timer: None,
+            source_collapsed,
+            outputs_collapsed,
             _language_task: language_task,
         }
     }
@@ -877,11 +898,47 @@ impl CodeCell {
 
         nbformat::v4::Cell::Code {
             id: self.id.clone(),
-            metadata: self.metadata.clone(),
+            metadata: self.metadata_with_visibility(),
             execution_count: self.execution_count,
             source: source_lines,
             outputs,
         }
+    }
+
+    /// The cell metadata with the current collapse state written into
+    /// `jupyter.source_hidden` / `jupyter.outputs_hidden` (VS Code / Jupyter
+    /// compatible). Expanded state omits the keys to keep the file clean,
+    /// preserving any other `jupyter.*` fields.
+    fn metadata_with_visibility(&self) -> CellMetadata {
+        let mut metadata = self.metadata.clone();
+        let mut jupyter =
+            metadata
+                .jupyter
+                .take()
+                .unwrap_or(nbformat::v4::JupyterCellMetadata {
+                    source_hidden: None,
+                    outputs_hidden: None,
+                    additional: Default::default(),
+                });
+        jupyter.source_hidden = self.source_collapsed.then_some(true);
+        jupyter.outputs_hidden = self.outputs_collapsed.then_some(true);
+        let keep = jupyter.source_hidden.is_some()
+            || jupyter.outputs_hidden.is_some()
+            || !jupyter.additional.is_empty();
+        metadata.jupyter = keep.then_some(jupyter);
+        metadata
+    }
+
+    fn toggle_source_collapsed(&mut self, cx: &mut Context<Self>) {
+        self.source_collapsed = !self.source_collapsed;
+        cx.emit(CellEvent::MetadataChanged(self.id.clone()));
+        cx.notify();
+    }
+
+    fn toggle_outputs_collapsed(&mut self, cx: &mut Context<Self>) {
+        self.outputs_collapsed = !self.outputs_collapsed;
+        cx.emit(CellEvent::MetadataChanged(self.id.clone()));
+        cx.notify();
     }
 
     fn outputs_to_nbformat(&self, cx: &App) -> Vec<nbformat::v4::Output> {
@@ -1141,6 +1198,12 @@ impl CodeCell {
                 }))
         };
 
+        let collapse_label: SharedString = if self.source_collapsed {
+            "Expand Input".into()
+        } else {
+            "Collapse Input".into()
+        };
+
         h_flex()
             .gap_0p5()
             .p_0p5()
@@ -1148,6 +1211,22 @@ impl CodeCell {
             .border_1()
             .border_color(cx.theme().colors().border)
             .bg(cx.theme().colors().element_background)
+            .child(
+                IconButton::new(
+                    "cell-collapse-input",
+                    if self.source_collapsed {
+                        IconName::ChevronRight
+                    } else {
+                        IconName::ChevronDown
+                    },
+                )
+                .icon_size(IconSize::Small)
+                .shape(IconButtonShape::Square)
+                .on_click(cx.listener(|this, _, _window, cx| {
+                    this.toggle_source_collapsed(cx);
+                }))
+                .tooltip(move |window, cx| Tooltip::text(collapse_label.clone())(window, cx)),
+            )
             .child(
                 button(
                     "cell-run-above",
@@ -1276,6 +1355,7 @@ impl CodeCell {
                                     let cell = cx.entity();
                                     move |window, cx| {
                                         let text = cell.read(cx).outputs_as_text(cx);
+                                        let collapsed = cell.read(cx).outputs_collapsed;
                                         let cell = cell.clone();
                                         Some(ContextMenu::build(window, cx, move |menu, _, _| {
                                             menu.entry("Copy Output", None, {
@@ -1287,6 +1367,22 @@ impl CodeCell {
                                                 }
                                             })
                                             .separator()
+                                            .entry(
+                                                if collapsed {
+                                                    "Expand Output"
+                                                } else {
+                                                    "Collapse Output"
+                                                },
+                                                None,
+                                                {
+                                                    let cell = cell.clone();
+                                                    move |_, cx| {
+                                                        cell.update(cx, |cell, cx| {
+                                                            cell.toggle_outputs_collapsed(cx);
+                                                        });
+                                                    }
+                                                },
+                                            )
                                             .entry(
                                                 "Clear Output",
                                                 None,
@@ -1493,12 +1589,36 @@ impl Render for CodeCell {
                                 .border_1()
                                 .border_color(cx.theme().colors().border)
                                 .bg(cx.theme().colors().editor_background)
-                                .child(
-                                    div()
-                                        .key_context("NotebookCellEditor")
-                                        .w_full()
-                                        .child(self.editor.clone()),
-                                )
+                                .map(|this| {
+                                    if self.source_collapsed {
+                                        // Collapsed input: a one-line summary
+                                        // of the source; click to expand.
+                                        let first_line = self
+                                            .current_source(cx)
+                                            .lines()
+                                            .next()
+                                            .unwrap_or_default()
+                                            .to_string();
+                                        this.child(
+                                            div()
+                                                .id("collapsed-input")
+                                                .w_full()
+                                                .cursor_pointer()
+                                                .text_color(cx.theme().colors().text_muted)
+                                                .child(format!("{first_line} ⋯"))
+                                                .on_click(cx.listener(|this, _, _window, cx| {
+                                                    this.toggle_source_collapsed(cx);
+                                                })),
+                                        )
+                                    } else {
+                                        this.child(
+                                            div()
+                                                .key_context("NotebookCellEditor")
+                                                .w_full()
+                                                .child(self.editor.clone()),
+                                        )
+                                    }
+                                })
                                 // VS Code-style cell status bar: the execution
                                 // status + time sit INSIDE the cell, in its
                                 // bottom-left corner.
@@ -1565,23 +1685,47 @@ impl Render for CodeCell {
                                     .px_5()
                                     .rounded_lg()
                                     .border_1()
-                                    .child(
-                                        div()
-                                            .id((
-                                                ElementId::from(self.id.to_string()),
-                                                "output-scroll",
-                                            ))
-                                            .w_full()
-                                            .when_some(output_max_width, |div, max_width| {
-                                                div.max_w(max_width).overflow_x_scroll()
-                                            })
-                                            .when_some(output_max_height, |div, max_height| {
-                                                div.max_h(max_height).overflow_y_scroll()
-                                            })
-                                            .children(self.outputs.iter().map(|output| {
-                                                div().children(output.content(window, cx))
-                                            })),
-                                    ),
+                                    .map(|this| {
+                                        if self.outputs_collapsed {
+                                            // Collapsed output: a slim
+                                            // placeholder; click to expand.
+                                            this.child(
+                                                div()
+                                                    .id("collapsed-output")
+                                                    .w_full()
+                                                    .cursor_pointer()
+                                                    .text_color(cx.theme().colors().text_muted)
+                                                    .text_size(TextSize::Small.rems(cx))
+                                                    .child("Output collapsed ⋯")
+                                                    .on_click(cx.listener(
+                                                        |this, _, _window, cx| {
+                                                            this.toggle_outputs_collapsed(cx);
+                                                        },
+                                                    )),
+                                            )
+                                        } else {
+                                            this.child(
+                                                div()
+                                                    .id((
+                                                        ElementId::from(self.id.to_string()),
+                                                        "output-scroll",
+                                                    ))
+                                                    .w_full()
+                                                    .when_some(output_max_width, |div, max_width| {
+                                                        div.max_w(max_width).overflow_x_scroll()
+                                                    })
+                                                    .when_some(
+                                                        output_max_height,
+                                                        |div, max_height| {
+                                                            div.max_h(max_height).overflow_y_scroll()
+                                                        },
+                                                    )
+                                                    .children(self.outputs.iter().map(|output| {
+                                                        div().children(output.content(window, cx))
+                                                    })),
+                                            )
+                                        }
+                                    }),
                             ),
                         ),
                 )

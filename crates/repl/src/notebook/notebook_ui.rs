@@ -255,6 +255,11 @@ impl NotebookEditor {
                             CellEvent::ModifiedClick { id, shift } => {
                                 this.handle_modified_click(id, *shift, window, cx)
                             }
+                            CellEvent::MetadataChanged(_) => {
+                                // Collapse state persists to the .ipynb, so it
+                                // counts as unsaved changes.
+                                this.execution_state_changed = true;
+                            }
                         }
                     })
                     .detach();
@@ -1997,6 +2002,9 @@ impl NotebookEditor {
                 CellEvent::Stop(cell_id) => this.handle_cell_stop(cell_id, window, cx),
                 CellEvent::ModifiedClick { id, shift } => {
                     this.handle_modified_click(id, *shift, window, cx)
+                }
+                CellEvent::MetadataChanged(_) => {
+                    this.execution_state_changed = true;
                 }
             },
         )
