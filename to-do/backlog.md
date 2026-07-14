@@ -8,6 +8,17 @@ high → low within each group.
 
 ## Medium priority
 
+- More multi-select gestures in command mode (user 2026-07-14, phase 22
+  follow-up). Extend the phase-22 selection model with:
+  - `ctrl/cmd-a` — select ALL cells (one contiguous selection, anchor at the
+    first cell, primary at the last).
+  - `shift-home` — select the contiguous range from the current cell up to the
+    FIRST cell; `shift-end` — from the current cell down to the LAST cell.
+  These reuse the existing `select_range` / `selected_indices` machinery; add
+  the actions + command-mode keybinds in all three keymaps (mind that ctrl-a
+  must stay text "select all" inside a focused cell editor — only bind it in
+  the command-mode notebook context).
+
 - Retain cell OUTPUT through cut/paste and delete→undo / cut→undo (user
   2026-07-12, phase 22 feedback). Cutting or deleting a cell and pasting or
   undoing restores the cell and its SOURCE but not its rendered OUTPUT — the
