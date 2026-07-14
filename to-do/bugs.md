@@ -341,15 +341,26 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   fell through with no handler, so clicking anywhere that wasn't the editor did
   nothing. Only the editor (via its focus → `FocusedIn` → `select_cell_by_id`)
   selected a cell, and that also forced edit mode.
-- **Fix attempted (2026-07-14):** a plain left click on a cell root now emits a
-  new `CellEvent::PlainClick`, handled by `handle_plain_click`, which selects
-  just that cell (collapsing any multi-selection) and enters command mode. It
-  does NOT stop propagation, so a click that lands on the editor still focuses
-  it and enters edit mode (the editor's focus event fires after and wins);
-  clicks on the gutter/margins/output select the cell in command mode.
-- **Tested:** no — needs user confirmation (click a cell's gutter/margin →
-  selects it in command mode without entering edit; click the editor text →
-  still enters edit mode; shift/ctrl-click ranges still work)
+- **Fix attempted (2026-07-14):** a plain left click on a cell root emitted a
+  new `CellEvent::PlainClick` → `handle_plain_click` (select + command mode).
+- **Update (user 2026-07-14):** partial — the gutter/margin now selects, BUT the
+  fix REGRESSED editor clicks: clicking the cell body/text also selected in
+  command mode and NEVER entered edit mode (even double-click); you could select
+  text but had to click-then-Enter to edit.
+- **Root cause of the regression:** the `PlainClick` was emitted from the
+  whole-cell CAPTURE-phase handler, which fires for editor clicks too.
+  `handle_plain_click` → `enter_command_mode` focuses the notebook root,
+  stealing focus from the editor in the same mouse-down, so the editor never
+  entered edit mode.
+- **Fix attempted (2026-07-14, follow-up):** stop emitting `PlainClick` from the
+  whole-cell capture handler; emit it only from an `on_mouse_down` on the
+  CodeCell gutter (input `gutter` + `gutter_output`), which never overlaps the
+  editor. Now a gutter click selects (command mode) and a body/editor click
+  focuses the editor (edit mode) as before. (Markdown/raw cells no longer
+  gutter-select — a minor gap; their bodies edit normally.)
+- **Tested:** no — needs user confirmation (click a code cell's gutter/accent
+  strip → selects in command mode; click the cell body/text → enters edit mode;
+  shift/ctrl-click ranges still work)
 
 ## 24. Rich cell outputs are dropped on save (don't survive close/reopen)
 
