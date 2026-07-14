@@ -318,3 +318,27 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
 - **Tested:** no — needs user confirmation (collapse a cell, save, confirm no
   toast; then have VS Code edit the file under unsaved Zed changes and confirm
   the toast still appears for a real external change)
+
+## 22. Very fast cells show a ✓ but no execution time
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-07-12, screenshot) Cells that finish almost instantly
+  (e.g. two cells run via Execute All) show the completed ✓ but no duration
+  next to it. User's theory: they complete in <1ms.
+- **Analysis:** The precise `execution_start_time` is set only in
+  `begin_running`, which fires on the iopub `execute_input`. For a very fast
+  cell the shell `ExecuteReply` (which calls `finish_execution`) can arrive
+  BEFORE that `execute_input` — the two travel on separate channels — so
+  `begin_running` is skipped (correctly, to avoid resurrecting a finished cell),
+  leaving `execution_start_time` unset. `finish_execution` then finds no start
+  time and records no duration, so the cell shows a ✓ with no time.
+- **Fix attempted (2026-07-14):** added a `submitted_at` timing anchor recorded
+  when the execute request is dispatched to a running kernel
+  (`CodeCell::record_submitted`, called from the `Disposition::Sent` path).
+  `finish_execution` now uses `execution_start_time.or(submitted_at)`, so a fast
+  cell reports the send→reply duration (near-exact for a sub-millisecond cell)
+  instead of nothing. `begin_running` still overwrites with the precise start
+  when its `execute_input` arrives first; `mark_pending` / `cancel_execution` /
+  `show_kernel_error` clear the anchor.
+- **Tested:** no — needs user confirmation (run several instant cells; each
+  should show a small ms duration next to the ✓)

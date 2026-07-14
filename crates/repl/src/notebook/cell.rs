@@ -752,6 +752,11 @@ pub struct CodeCell {
     cell_position: Option<CellPosition>,
     _language_task: Task<()>,
     execution_start_time: Option<Instant>,
+    /// When the execute request was dispatched to the kernel. Used as a timing
+    /// fallback for very fast cells whose shell `ExecuteReply` beats the iopub
+    /// `ExecuteInput` (so `execution_start_time` never gets set); without it
+    /// such cells finish showing a ✓ but no duration.
+    submitted_at: Option<Instant>,
     execution_duration: Option<Duration>,
     execution_status: CellExecutionStatus,
     /// Repeating notify task that keeps the live elapsed-time label ticking
@@ -852,6 +857,7 @@ impl CodeCell {
             selected: false,
             cell_position: None,
             execution_start_time: None,
+            submitted_at: None,
             execution_duration: None,
             execution_status: CellExecutionStatus::Idle,
             _run_timer: None,
@@ -982,8 +988,16 @@ impl CodeCell {
     pub fn mark_pending(&mut self) {
         self.execution_status = CellExecutionStatus::Pending;
         self.execution_start_time = None;
+        self.submitted_at = None;
         self.execution_duration = None;
         self._run_timer = None;
+    }
+
+    /// Record the instant the execute request was dispatched to the kernel.
+    /// Serves as a timing fallback if the iopub `ExecuteInput` (which sets the
+    /// precise `execution_start_time`) never arrives before the cell finishes.
+    pub fn record_submitted(&mut self) {
+        self.submitted_at = Some(Instant::now());
     }
 
     /// The kernel started executing this cell (its `execute_input` arrived):
@@ -1038,9 +1052,13 @@ impl CodeCell {
         if self.execution_status == CellExecutionStatus::Cancelled {
             return;
         }
-        if let Some(start_time) = self.execution_start_time.take() {
+        // Prefer the precise start (iopub `execute_input`); fall back to the
+        // submit time for fast cells whose reply beat their input, so they
+        // still show a (near-exact) duration rather than none.
+        if let Some(start_time) = self.execution_start_time.take().or(self.submitted_at.take()) {
             self.execution_duration = Some(start_time.elapsed());
         }
+        self.submitted_at = None;
         self.execution_status = CellExecutionStatus::Finished;
     }
 
@@ -1053,6 +1071,7 @@ impl CodeCell {
         ) {
             self.execution_status = CellExecutionStatus::Cancelled;
             self.execution_start_time = None;
+            self.submitted_at = None;
             self.execution_duration = None;
             self._run_timer = None;
         }
@@ -1096,6 +1115,7 @@ impl CodeCell {
             traceback: cx.new(|cx| TerminalOutput::from(error_message, window, cx)),
         }));
         self.execution_start_time = None;
+        self.submitted_at = None;
         // The cell never ran — no completed tick, no time.
         self.execution_status = CellExecutionStatus::Cancelled;
         cx.notify();

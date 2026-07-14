@@ -1351,7 +1351,14 @@ impl NotebookEditor {
                     // actually starts the cell (its `execute_input` arrives —
                     // see `begin_running`). This keeps queued cells from
                     // accruing the wait behind a long-running cell.
-                    Disposition::Sent(_) | Disposition::Queued { .. } => cell.mark_pending(),
+                    Disposition::Queued { .. } => cell.mark_pending(),
+                    // A Sent cell also anchors its submit time, so a very fast
+                    // cell whose reply beats its `execute_input` still reports a
+                    // duration (see `CodeCell::record_submitted`).
+                    Disposition::Sent(_) => {
+                        cell.mark_pending();
+                        cell.record_submitted();
+                    }
                     Disposition::Prompt => {}
                 }
                 cx.notify();
