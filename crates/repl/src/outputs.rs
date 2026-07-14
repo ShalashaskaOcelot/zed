@@ -121,20 +121,31 @@ pub enum Output {
     Image {
         content: Entity<ImageView>,
         display_id: Option<String>,
+        /// The source mime bundle, retained so the output can be written back
+        /// to the .ipynb (the rendered `ImageView` alone can't be serialized).
+        source: MimeBundle,
     },
     ErrorOutput(ErrorView),
     Message(String),
     Table {
         content: Entity<TableView>,
         display_id: Option<String>,
+        /// Source mime bundle for round-tripping to the .ipynb. A table is a
+        /// lossy render of the original `text/html` (or datatable) mime, so the
+        /// original must be kept to save it faithfully.
+        source: MimeBundle,
     },
     Markdown {
         content: Entity<MarkdownView>,
         display_id: Option<String>,
+        /// Source mime bundle for round-tripping to the .ipynb.
+        source: MimeBundle,
     },
     Json {
         content: Entity<JsonView>,
         display_id: Option<String>,
+        /// Source mime bundle for round-tripping to the .ipynb.
+        source: MimeBundle,
     },
     ClearOutputWaitMarker,
 }
@@ -170,10 +181,20 @@ impl Output {
                     traceback: traceback_lines,
                 }))
             }
-            Output::Image { .. }
-            | Output::Markdown { .. }
-            | Output::Table { .. }
-            | Output::Json { .. } => None,
+            // Rich outputs render into lossy views, so they are serialized from
+            // the retained source mime bundle rather than the view. Emitted as
+            // DisplayData (the load path treats DisplayData and ExecuteResult
+            // the same), so images, tables, HTML/markdown and JSON survive a
+            // save/reopen round-trip.
+            Output::Image { source, .. }
+            | Output::Markdown { source, .. }
+            | Output::Table { source, .. }
+            | Output::Json { source, .. } => Some(nbformat::v4::Output::DisplayData(
+                nbformat::v4::DisplayData {
+                    data: source.clone(),
+                    metadata: serde_json::Map::new(),
+                },
+            )),
             Output::Message(_) => None,
             Output::ClearOutputWaitMarker => None,
         }
@@ -397,11 +418,16 @@ impl Output {
         window: &mut Window,
         cx: &mut App,
     ) -> Self {
+        // Retain the full source bundle on the rich variants so they can be
+        // written back to the .ipynb (their rendered views are lossy — a table
+        // is derived from the original HTML, an image is decoded, etc.).
+        let source = data.clone();
         match data.richest(rank_mime_type) {
             Some(MimeType::Json(json_value)) => match JsonView::from_value(json_value.clone()) {
                 Ok(json_view) => Output::Json {
                     content: cx.new(|_| json_view),
                     display_id,
+                    source,
                 },
                 Err(_) => Output::Message("Failed to parse JSON".to_string()),
             },
@@ -414,18 +440,21 @@ impl Output {
                 Output::Markdown {
                     content,
                     display_id,
+                    source,
                 }
             }
             Some(MimeType::Png(data)) | Some(MimeType::Jpeg(data)) => match ImageView::from(data) {
                 Ok(view) => Output::Image {
                     content: cx.new(|_| view),
                     display_id,
+                    source,
                 },
                 Err(error) => Output::Message(format!("Failed to load image: {}", error)),
             },
             Some(MimeType::DataTable(data)) => Output::Table {
                 content: cx.new(|cx| TableView::new(data, window, cx)),
                 display_id,
+                source,
             },
             Some(MimeType::Html(html_content)) => match html::html_to_markdown(html_content) {
                 Ok(markdown_text) => {
@@ -436,12 +465,14 @@ impl Output {
                         Output::Table {
                             content: cx.new(|cx| TableView::new(&data_table, window, cx)),
                             display_id,
+                            source,
                         }
                     } else {
                         let content = cx.new(|cx| MarkdownView::from(markdown_text, cx));
                         Output::Markdown {
                             content,
                             display_id,
+                            source,
                         }
                     }
                 }

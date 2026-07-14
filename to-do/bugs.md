@@ -369,7 +369,7 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
 
 ## 24. Rich cell outputs are dropped on save (don't survive close/reopen)
 
-- **Status:** open
+- **Status:** fix attempted - untested
 - **Symptom:** (user 2026-07-12, phase 23 feedback) "Outputs in general do not
   survive close and reopen." This blocked testing output-collapse persistence.
 - **Analysis:** confirmed by code. Outputs ARE loaded on open
@@ -393,8 +393,19 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
   already round-trip, so if the user's lost outputs were plain text there is a
   SECOND bug (e.g. not saving before close, or a save/load gap) — needs the
   user's repro (what kind of output, and whether they saved) to disambiguate.
-- **Fix attempted:** none yet
-- **Tested:** n/a
+- **Fix attempted (2026-07-14):** the rich `Output` variants (`Image`, `Table`,
+  `Markdown`, `Json`) now retain the source `MimeBundle` they were built from
+  (captured in `Output::new`, where the bundle is already in hand, and passed
+  through by the load path). `Output::to_nbformat` emits a `DisplayData` from
+  that retained bundle for each, so images, tables, HTML/markdown and JSON
+  round-trip through save/reopen instead of being discarded. Plain/stream/error
+  already round-tripped. NOTE: output-level metadata (e.g. image size hints) is
+  written empty; only the data bundle is preserved. If the user's lost outputs
+  were PLAIN text and still vanished, there is a separate save/load issue — get
+  their repro to disambiguate.
+- **Tested:** no — needs user confirmation (run a cell that produces a DataFrame
+  table and/or a matplotlib plot, save, close, reopen → the output is still
+  there; then verify output-collapse persistence, which was blocked on this)
 
 ## 25. Adding a cell at the viewport bottom doesn't scroll it into view
 
