@@ -59,10 +59,11 @@ use zed_actions::editor::{MoveDown, MoveUp};
 use zed_actions::notebook::{
     AddCellAbove, AddCellBelow, AddCodeBlock, AddMarkdownBlock, ClearCellOutputs, ClearOutputs,
     ConvertToCode, ConvertToMarkdown, CopyCell, CutCell, DeleteCell, DuplicateCell,
-    EnterCommandMode, EnterEditMode, ExtendSelectionDown, ExtendSelectionUp, InterruptKernel,
-    MoveCellDown, MoveCellUp, NewNotebook, NotebookMoveDown, NotebookMoveUp, OpenNotebook,
-    PasteCell, PasteCellAbove, RedoCellOp, ReloadNotebook, RestartKernel, Run, RunAll, RunAndAdvance,
-    RunCellAndBelow, RunCellsAbove, SelectFirstCell, SelectLastCell, UndoCellOp,
+    EnterCommandMode, EnterEditMode, ExtendSelectionDown, ExtendSelectionToEnd,
+    ExtendSelectionToStart, ExtendSelectionUp, InterruptKernel, MoveCellDown, MoveCellUp,
+    NewNotebook, NotebookMoveDown, NotebookMoveUp, OpenNotebook, PasteCell, PasteCellAbove,
+    RedoCellOp, ReloadNotebook, RestartKernel, Run, RunAll, RunAndAdvance, RunCellAndBelow,
+    RunCellsAbove, SelectAllCells, SelectFirstCell, SelectLastCell, UndoCellOp,
 };
 
 /// A structural cell operation, stored so it can be undone/redone. Restored
@@ -2771,6 +2772,46 @@ impl NotebookEditor {
         cx.notify();
     }
 
+    /// Extend the shift-range selection all the way to the first or last cell
+    /// (shift-home / shift-end in command mode). The primary moves to that
+    /// boundary cell, like the equivalent text-editing motion.
+    fn extend_selection_to_boundary(
+        &mut self,
+        to_end: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let count = self.cell_count();
+        if count == 0 {
+            return;
+        }
+        let anchor = self.selection_anchor.unwrap_or(self.selected_cell_index);
+        let primary = if to_end { count - 1 } else { 0 };
+        self.select_range(anchor, primary);
+        self.cell_list.scroll_to_reveal_item_top_aligned(primary);
+        self.notebook_mode = NotebookMode::Command;
+        if !self.kernel_picker_handle.is_deployed() {
+            self.focus_handle.focus(window, cx);
+        }
+        cx.notify();
+    }
+
+    /// Select every cell as one contiguous range (ctrl/cmd-a in command mode):
+    /// anchor at the first cell, primary at the last. Does not scroll — the
+    /// viewport stays where it is, like select-all in a text editor.
+    fn select_all_cells(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let count = self.cell_count();
+        if count == 0 {
+            return;
+        }
+        self.select_range(0, count - 1);
+        self.notebook_mode = NotebookMode::Command;
+        if !self.kernel_picker_handle.is_deployed() {
+            self.focus_handle.focus(window, cx);
+        }
+        cx.notify();
+    }
+
     /// A shift- or ctrl/cmd-click on a cell (see `CellEvent::ModifiedClick`).
     fn handle_modified_click(
         &mut self,
@@ -3495,6 +3536,15 @@ impl Render for NotebookEditor {
             }))
             .on_action(cx.listener(|this, _: &ExtendSelectionUp, window, cx| {
                 this.extend_selection(-1, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ExtendSelectionToStart, window, cx| {
+                this.extend_selection_to_boundary(false, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ExtendSelectionToEnd, window, cx| {
+                this.extend_selection_to_boundary(true, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &SelectAllCells, window, cx| {
+                this.select_all_cells(window, cx)
             }))
             .on_action(cx.listener(|this, _: &MoveDown, window, cx| {
                 this.select_next(

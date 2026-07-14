@@ -982,6 +982,12 @@ pub mod notebook {
             ExtendSelectionDown,
             /// Extends the cell selection to the previous cell (shift-up).
             ExtendSelectionUp,
+            /// Extends the cell selection up to the first cell (shift-home).
+            ExtendSelectionToStart,
+            /// Extends the cell selection down to the last cell (shift-end).
+            ExtendSelectionToEnd,
+            /// Selects all cells.
+            SelectAllCells,
             /// Enters the current cell's editor (edit mode).
             EnterEditMode,
             /// Exits the cell editor and returns to cell command mode.

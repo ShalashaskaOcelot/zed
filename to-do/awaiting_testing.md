@@ -46,6 +46,16 @@ listed here.
       between cells. (That's what the popup caveat means: the `!menu` gate is
       supposed to hand up/down to the popup while it's open.)
 
+## Phase 26 — More multi-select gestures
+
+- [ ] In command mode: `ctrl-a` (`cmd-a` on mac) selects ALL cells as one
+      contiguous selection (no scroll jump).
+- [ ] In command mode: `shift-home` selects from the current cell up to the
+      FIRST cell; `shift-end` down to the LAST cell (view follows the primary).
+- [ ] In EDIT mode all three keep their text meanings inside the cell editor:
+      ctrl/cmd-a selects the cell's text, shift-home/end select to line
+      start/end.
+
 ## Phase 5 — Create Python environments from the kernel picker
 
 - [ ] No Python on PATH: clicking "Create Python Environment" shows a clear
