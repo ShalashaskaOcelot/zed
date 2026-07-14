@@ -1,8 +1,9 @@
 # Awaiting user testing
 
 Outstanding MANUAL TEST items from phases whose implementation is complete
-(the phase files themselves are archived). Nothing here needs implementation —
-these are tasks for the user to verify at runtime.
+(the phase files themselves have been recorded in `CHANGELOG.md` and removed).
+Nothing here needs implementation — these are tasks for the user to verify at
+runtime.
 
 Workflow: tick an item the moment the user confirms it. If a test FAILS, file
 it in `bugs.md` (or as a backlog/phase item per the kind rules), annotate the
@@ -13,9 +14,10 @@ elsewhere). Delete a section once all its boxes are ticked.
 
 Pointer list so there's ONE place to see everything needing a test. The full
 detail (symptom, analysis, fix) lives in `bugs.md`; these stay at
-`fix attempted - untested` there until confirmed. Tick here AND flip the bug to
-`fixed - confirmed` (then archive it) when the user confirms; if a fix failed,
-leave the bug open with the new finding and tick here.
+`fix attempted - untested` there until confirmed. When the user confirms: tick
+here, add a one-line entry to `CHANGELOG.md`, and delete the bug's `bugs.md`
+entry. If a fix failed, leave the bug open with the new finding and keep it
+listed here.
 
 - [ ] Bug #21 — collapse a cell + save → NO "changed on disk" toast; then let
       VS Code edit the file under unsaved Zed changes → the toast still appears

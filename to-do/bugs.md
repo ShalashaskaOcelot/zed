@@ -2,26 +2,10 @@
 
 Status values: `open` | `fix attempted - untested` | `fixed - confirmed`.
 Never attempt a further fix while a bug is `fix attempted - untested`.
-Move to `to-do/archive/` only when `fixed - confirmed`.
+When `fixed - confirmed`, add a one-line entry to `CHANGELOG.md` and DELETE the
+bug's entry here (there is no archive dir; the CHANGELOG + commit is the record).
 
 ---
-
-(Bug #1 "Restart kernel kills but relaunch fails" — fixed & confirmed
-2026-07-08, moved to `archive/bugs-fixed.md`.)
-
-(Bug #2 "Running a cell with a dead kernel does not start it" — fixed &
-confirmed 2026-07-10, moved to `archive/bugs-fixed.md`.)
-
-(Bug #3 "Interrupt does not stop a running cell" — fixed & confirmed 2026-07-10
-via the OS-level interrupt; a pure-Python loop interrupts immediately. Immediate
-interrupt of C-blocking calls like `time.sleep` on Windows remains a backlog
-item. Moved to `archive/bugs-fixed.md`.)
-
-(Bug #4 "More options button opens nothing" — fixed & confirmed 2026-07-08
-via phase 4's popover menu; moved to `archive/bugs-fixed.md`.)
-
-(Bug #5 "Output ... button does nothing" — fixed & confirmed 2026-07-08 via
-phase 4's output menu; moved to `archive/bugs-fixed.md`.)
 
 ## 6. Native kernel launch is flaky on Windows (os error 10054)
 
@@ -61,9 +45,6 @@ phase 4's output menu; moved to `archive/bugs-fixed.md`.)
   too.
 - **Tested:** no — needs user confirmation
 
-(Bug #8 "Clean kernel exit leaves stale RunningKernel state" — fixed &
-confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
-
 ## 9. Notebook never reports itself dirty
 
 - **Status:** open
@@ -80,12 +61,6 @@ confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
 - **Fix attempted:** none
 - **Tested:** n/a
 
-(Bug #10 "Kernel picker does not accept Enter" — fixed & confirmed 2026-07-08
-via the NotebookCellEditor keymap scoping; moved to `archive/bugs-fixed.md`.)
-
-(Bug #11 "Kernel-select prompt: cell state on dismiss vs. select" — fixed &
-confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
-
 ## 12. "Clear all outputs" sometimes needed several presses
 
 - **Status:** open (not reproduced)
@@ -94,10 +69,6 @@ confirmed 2026-07-08, moved to `archive/bugs-fixed.md`.)
 - **Analysis:** none yet. Low-priority note; investigate only if it recurs.
 - **Fix attempted:** none
 - **Tested:** n/a
-
-(Bug #13 "After adding a cell with `a`/`b`, Enter won't enter edit mode" —
-fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
-`archive/bugs-fixed.md`. The broader full-focus-loss edge remains as bug #15.)
 
 ## 15. Notebook keyboard shortcuts get stuck (focus/mode desync)
 
@@ -257,10 +228,6 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
 - **Tested:** dirty tracking CONFIRMED by user 2026-07-11 (bug fixed). One
   follow-up defect noted → see bug #19 (an Overwrite save didn't dismiss the
   conflict toast). Otherwise confirmed.
-
-(Bug #19 "Reloading doesn't clear the conflict toast" — fixed & confirmed
-2026-07-12 (reload paths AND the overwrite-save path); moved to
-`archive/bugs-fixed.md`.)
 
 ## 20. Kernel picker shows no kernels on a fresh app start
 

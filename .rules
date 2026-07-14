@@ -42,9 +42,13 @@ root. This system must be adhered to religiously.
      one-line test recipe). The full detail stays in `bugs.md`; this is just so
      untested fixes are visible in the one ledger.
   2. `## Phase <n> — <title>` sections: outstanding MANUAL TEST items from
-     phases whose implementation is complete (the phase files are archived).
-- `to-do/archive/` — completed phase files and confirmed-fixed bugs are moved
-  here.
+     phases whose implementation is complete (the phase files are gone —
+     recorded in `CHANGELOG.md`).
+- `to-do/CHANGELOG.md` — a concise one-line-per-item record of completed phases
+  and confirmed-fixed bugs. This REPLACES a file archive: completed phase files
+  and confirmed bugs are DELETED (not moved to an archive dir); the CHANGELOG
+  entry plus the commit history is the record. Keeps `to-do/` holding only live
+  work.
 
 ## Rules
 
@@ -61,29 +65,31 @@ root. This system must be adhered to religiously.
    - When the user confirms several items at once, tick every one they
      confirmed in that commit.
    The goal: a phase's checkbox state is always an accurate ledger, so a phase
-   is archivable exactly when (and because) every box is `[x]` (or the line was
-   explicitly re-phased/backlogged). Never archive with unchecked boxes, and
-   never leave finished work unchecked.
+   is completable exactly when (and because) every box is `[x]` (or the line was
+   explicitly re-phased/backlogged). Never complete/remove a phase with
+   unchecked boxes, and never leave finished work unchecked.
 
 1. **Never implement work that is not phased.** The only exception is bug
    fixes, which are tracked in `bugs.md` instead. If a good idea comes up
    mid-phase, add it to `backlog.md` or a future phase — do not implement it.
-2. **A phase file is archived only when every task in it is either completed
-   or explicitly re-phased/re-backlogged.** Any task not implemented in a
+2. **A phase file is completed (removed) only when every task in it is either
+   done or explicitly re-phased/re-backlogged.** Any task not implemented in a
    phase must be moved as a bullet to `backlog.md` or into a future
-   `phase_<n>.md` before the phase file is archived. A work item must never
-   sit in the archive in an unfinished state.
-3. **Archive completed work immediately** so it is never accidentally
-   re-implemented. When a phase completes, move its file to `to-do/archive/`
-   in the same commit that completes it.
+   `phase_<n>.md` before the phase file is removed. A work item must never be
+   recorded as done while unfinished.
+3. **Record and remove completed work immediately** so it is never accidentally
+   re-implemented. "Archiving" means: add a one-line entry to
+   `to-do/CHANGELOG.md` and DELETE the phase file (there is no archive
+   directory — the CHANGELOG entry plus the commit is the record). Do this in
+   the same commit that completes the phase.
 
    **Test-only remainders move to `awaiting_testing.md`.** When a phase's
    implementation is 100% complete and the ONLY unchecked lines are manual
    user tests, do not keep the phase file open just for them: move those test
    lines (with enough context to run each test, and the fixing commit where
    relevant) into `to-do/awaiting_testing.md` under a `## Phase <n> — <title>`
-   section, note the move in the phase file, and archive the phase file in the
-   same commit. In `awaiting_testing.md`: tick an item the moment the user
+   section, add the CHANGELOG entry, and delete the phase file in the same
+   commit. In `awaiting_testing.md`: tick an item the moment the user
    confirms it; if a test FAILS, file the failure in `bugs.md` (or per the
    kind rules), annotate the line with the bug number, and tick it (the
    follow-up is tracked elsewhere); delete a section once all its boxes are
@@ -136,8 +142,9 @@ root. This system must be adhered to religiously.
    fix is untested** — we don't know yet whether the previous fix worked. Only
    after the user confirms the fix does the status become `fixed - confirmed`
    (with a note on what fixed it); at that point remove its pointer line from
-   `awaiting_testing.md` and move the bug to the archive. An unconfirmed bug is
-   never archived. If a fix FAILS testing, leave the bug open (record the new
+   `awaiting_testing.md`, add a one-line entry to `CHANGELOG.md`, and DELETE the
+   bug's `bugs.md` entry (there is no archive dir). An unconfirmed bug is never
+   recorded as fixed. If a fix FAILS testing, leave the bug open (record the new
    finding) and keep/refresh its pointer line.
 5. New bugs discovered at any time are added as line items to `bugs.md`
    immediately, regardless of the current phase.
