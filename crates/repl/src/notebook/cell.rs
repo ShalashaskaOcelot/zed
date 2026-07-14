@@ -56,15 +56,22 @@ pub enum CellEvent {
     /// contiguous selection from the anchor to this cell; ctrl/cmd (`!shift`)
     /// toggles this cell in a discontiguous multi-selection.
     ModifiedClick { id: CellId, shift: bool },
+    /// The cell was plain-clicked (no selection modifier) somewhere outside its
+    /// editor — the gutter, the margins, or the output area. Selects just this
+    /// cell and drops into command mode. Clicks that land on the editor still
+    /// focus it (edit mode) because this does NOT stop propagation.
+    PlainClick { id: CellId },
     /// Savable cell metadata changed (e.g. input/output collapse state, which
     /// persists to the .ipynb): the notebook should count as dirty.
     MetadataChanged(CellId),
 }
 
-/// Capture-phase mouse-down filter shared by every cell root: a click with a
-/// selection modifier held becomes a `ModifiedClick` (and stops propagating,
-/// so the click doesn't also focus the cell's editor); plain clicks pass
-/// through untouched.
+/// Capture-phase mouse-down classifier shared by every cell root: a left click
+/// with a selection modifier held becomes a `ModifiedClick` (`Some(shift)`) and
+/// stops propagating, so it doesn't also focus the cell's editor. A plain left
+/// click returns `None`; the caller then emits `PlainClick` WITHOUT stopping
+/// propagation, so clicking the editor still focuses it (edit mode) while
+/// clicking the gutter/margins selects the cell (command mode).
 fn selection_modifiers(event: &gpui::MouseDownEvent) -> Option<bool> {
     if event.button != gpui::MouseButton::Left {
         return None;
@@ -646,6 +653,8 @@ impl Render for MarkdownCell {
                             shift,
                         });
                         cx.stop_propagation();
+                    } else if event.button == gpui::MouseButton::Left {
+                        cx.emit(CellEvent::PlainClick { id: this.id.clone() });
                     }
                 }))
                 .children(self.cell_position_spacer(true, window, cx))
@@ -691,6 +700,8 @@ impl Render for MarkdownCell {
                         shift,
                     });
                     cx.stop_propagation();
+                } else if event.button == gpui::MouseButton::Left {
+                    cx.emit(CellEvent::PlainClick { id: this.id.clone() });
                 }
             }))
             .children(self.cell_position_spacer(true, window, cx))
@@ -1581,6 +1592,8 @@ impl Render for CodeCell {
                         shift,
                     });
                     cx.stop_propagation();
+                } else if event.button == gpui::MouseButton::Left {
+                    cx.emit(CellEvent::PlainClick { id: this.id.clone() });
                 }
             }))
             // TODO: Move base cell render into trait impl so we don't have to repeat this
@@ -1825,6 +1838,8 @@ impl Render for RawCell {
                         shift,
                     });
                     cx.stop_propagation();
+                } else if event.button == gpui::MouseButton::Left {
+                    cx.emit(CellEvent::PlainClick { id: this.id.clone() });
                 }
             }))
             // TODO: Move base cell render into trait impl so we don't have to repeat this

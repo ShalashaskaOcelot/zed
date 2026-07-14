@@ -255,6 +255,9 @@ impl NotebookEditor {
                             CellEvent::ModifiedClick { id, shift } => {
                                 this.handle_modified_click(id, *shift, window, cx)
                             }
+                            CellEvent::PlainClick { id } => {
+                                this.handle_plain_click(id, window, cx)
+                            }
                             CellEvent::MetadataChanged(_) => {
                                 // Collapse state persists to the .ipynb, so it
                                 // counts as unsaved changes.
@@ -296,10 +299,14 @@ impl NotebookEditor {
                     cx.subscribe_in(
                         markdown_cell,
                         window,
-                        |this, _cell, event: &CellEvent, window, cx| {
-                            if let CellEvent::ModifiedClick { id, shift } = event {
-                                this.handle_modified_click(id, *shift, window, cx);
+                        |this, _cell, event: &CellEvent, window, cx| match event {
+                            CellEvent::ModifiedClick { id, shift } => {
+                                this.handle_modified_click(id, *shift, window, cx)
                             }
+                            CellEvent::PlainClick { id } => {
+                                this.handle_plain_click(id, window, cx)
+                            }
+                            _ => {}
                         },
                     )
                     .detach();
@@ -315,10 +322,14 @@ impl NotebookEditor {
                     cx.subscribe_in(
                         raw_cell,
                         window,
-                        |this, _cell, event: &CellEvent, window, cx| {
-                            if let CellEvent::ModifiedClick { id, shift } = event {
-                                this.handle_modified_click(id, *shift, window, cx);
+                        |this, _cell, event: &CellEvent, window, cx| match event {
+                            CellEvent::ModifiedClick { id, shift } => {
+                                this.handle_modified_click(id, *shift, window, cx)
                             }
+                            CellEvent::PlainClick { id } => {
+                                this.handle_plain_click(id, window, cx)
+                            }
+                            _ => {}
                         },
                     )
                     .detach();
@@ -2030,6 +2041,7 @@ impl NotebookEditor {
                 CellEvent::ModifiedClick { id, shift } => {
                     this.handle_modified_click(id, *shift, window, cx)
                 }
+                CellEvent::PlainClick { id } => this.handle_plain_click(id, window, cx),
                 CellEvent::MetadataChanged(_) => {
                     this.execution_state_changed = true;
                 }
@@ -2067,10 +2079,12 @@ impl NotebookEditor {
         cx.subscribe_in(
             markdown_cell,
             window,
-            |this, _cell, event: &CellEvent, window, cx| {
-                if let CellEvent::ModifiedClick { id, shift } = event {
-                    this.handle_modified_click(id, *shift, window, cx);
+            |this, _cell, event: &CellEvent, window, cx| match event {
+                CellEvent::ModifiedClick { id, shift } => {
+                    this.handle_modified_click(id, *shift, window, cx)
                 }
+                CellEvent::PlainClick { id } => this.handle_plain_click(id, window, cx),
+                _ => {}
             },
         )
         .detach();
@@ -2741,6 +2755,20 @@ impl NotebookEditor {
             self.collapse_selection();
             self.notebook_mode = NotebookMode::Edit;
             cx.notify();
+        }
+    }
+
+    /// A plain (unmodified) click on a cell outside its editor — the gutter,
+    /// margins, or output area (see `CellEvent::PlainClick`). Selects just this
+    /// cell and enters command mode. A click that lands on the editor still
+    /// focuses it and enters edit mode via the editor's own focus event, which
+    /// fires after this (the classifier does not stop propagation for plain
+    /// clicks), so this only "wins" for clicks that miss the editor.
+    fn handle_plain_click(&mut self, cell_id: &CellId, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(index) = self.cell_order.iter().position(|id| id == cell_id) {
+            self.selected_cell_index = index;
+            self.collapse_selection();
+            self.enter_command_mode(window, cx);
         }
     }
 

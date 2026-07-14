@@ -342,3 +342,27 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
   `show_kernel_error` clear the anchor.
 - **Tested:** no — needs user confirmation (run several instant cells; each
   should show a small ms duration next to the ✓)
+
+## 23. Clicking a cell's gutter/margin doesn't select the cell
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-07-12, phase 22 feedback) Clicking the gutter/margin
+  area of a cell (where the execute button sits, but not on the button itself)
+  does NOT select that cell. To select a single cell with the mouse the user
+  had to click the cell text (entering edit mode) and then press Esc. A plain
+  click on the cell's border/gutter area should select it.
+- **Analysis:** the shared capture-phase mouse-down handler on each cell root
+  (`selection_modifiers`) only acted on clicks with a selection modifier held
+  (shift → range, ctrl/cmd → toggle), emitting `ModifiedClick`. A plain click
+  fell through with no handler, so clicking anywhere that wasn't the editor did
+  nothing. Only the editor (via its focus → `FocusedIn` → `select_cell_by_id`)
+  selected a cell, and that also forced edit mode.
+- **Fix attempted (2026-07-14):** a plain left click on a cell root now emits a
+  new `CellEvent::PlainClick`, handled by `handle_plain_click`, which selects
+  just that cell (collapsing any multi-selection) and enters command mode. It
+  does NOT stop propagation, so a click that lands on the editor still focuses
+  it and enters edit mode (the editor's focus event fires after and wins);
+  clicks on the gutter/margins/output select the cell in command mode.
+- **Tested:** no — needs user confirmation (click a cell's gutter/margin →
+  selects it in command mode without entering edit; click the editor text →
+  still enters edit mode; shift/ctrl-click ranges still work)
