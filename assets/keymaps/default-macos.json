@@ -1644,6 +1644,7 @@
       "cmd-c": "notebook::CopyCell",
       "cmd-x": "notebook::CutCell",
       "cmd-v": "notebook::PasteCell",
+      "cmd-shift-v": "notebook::PasteCellAbove",
       "i i": "notebook::InterruptKernel",
       "cmd-z": "notebook::UndoCellOp",
       "cmd-shift-z": "notebook::RedoCellOp",

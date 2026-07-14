@@ -950,6 +950,8 @@ pub mod notebook {
             CutCell,
             /// Pastes a cell from the clipboard below the current cell.
             PasteCell,
+            /// Pastes a cell from the clipboard above the current cell.
+            PasteCellAbove,
             /// Duplicates the current cell below itself.
             DuplicateCell,
             /// Undoes the last structural cell operation (add/delete/move/convert).

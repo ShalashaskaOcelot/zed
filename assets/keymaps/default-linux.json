@@ -1506,6 +1506,7 @@
       "ctrl-c": "notebook::CopyCell",
       "ctrl-x": "notebook::CutCell",
       "ctrl-v": "notebook::PasteCell",
+      "ctrl-shift-v": "notebook::PasteCellAbove",
       "i i": "notebook::InterruptKernel",
       "ctrl-z": "notebook::UndoCellOp",
       "ctrl-shift-z": "notebook::RedoCellOp",

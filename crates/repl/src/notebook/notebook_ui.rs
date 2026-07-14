@@ -61,7 +61,7 @@ use zed_actions::notebook::{
     ConvertToCode, ConvertToMarkdown, CopyCell, CutCell, DeleteCell, DuplicateCell,
     EnterCommandMode, EnterEditMode, ExtendSelectionDown, ExtendSelectionUp, InterruptKernel,
     MoveCellDown, MoveCellUp, NewNotebook, NotebookMoveDown, NotebookMoveUp, OpenNotebook,
-    PasteCell, RedoCellOp, ReloadNotebook, RestartKernel, Run, RunAll, RunAndAdvance,
+    PasteCell, PasteCellAbove, RedoCellOp, ReloadNotebook, RestartKernel, Run, RunAll, RunAndAdvance,
     RunCellAndBelow, RunCellsAbove, SelectFirstCell, SelectLastCell, UndoCellOp,
 };
 
@@ -2279,11 +2279,20 @@ impl NotebookEditor {
     }
 
     fn paste_cell(&mut self, _: &PasteCell, window: &mut Window, cx: &mut Context<Self>) {
+        self.paste_cells_at(self.index_below_selection(), window, cx);
+    }
+
+    fn paste_cell_above(&mut self, _: &PasteCellAbove, window: &mut Window, cx: &mut Context<Self>) {
+        // Insert before the primary cell (index 0 when the notebook is empty).
+        self.paste_cells_at(self.selected_cell_index, window, cx);
+    }
+
+    /// Insert the clipboard cell(s) starting at `base`, as one undo operation.
+    fn paste_cells_at(&mut self, base: usize, window: &mut Window, cx: &mut Context<Self>) {
         let cells = Self::clipboard_cells(cx);
         if cells.is_empty() {
             return;
         }
-        let base = self.index_below_selection();
         let mut edits = Vec::with_capacity(cells.len());
         for (offset, cell) in cells.into_iter().enumerate() {
             edits.push(self.insert_nbformat_cell(base + offset, cell, window, cx));
@@ -3108,6 +3117,7 @@ impl NotebookEditor {
                                         .action("Copy Cell", Box::new(CopyCell))
                                         .action("Cut Cell", Box::new(CutCell))
                                         .action("Paste Cell", Box::new(PasteCell))
+                                        .action("Paste Cell Above", Box::new(PasteCellAbove))
                                         .action("Duplicate Cell", Box::new(DuplicateCell))
                                         .separator()
                                         .action("Undo Cell Change", Box::new(UndoCellOp))
@@ -3384,6 +3394,9 @@ impl Render for NotebookEditor {
             .on_action(cx.listener(|this, action, window, cx| this.copy_cell(action, window, cx)))
             .on_action(cx.listener(|this, action, window, cx| this.cut_cell(action, window, cx)))
             .on_action(cx.listener(|this, action, window, cx| this.paste_cell(action, window, cx)))
+            .on_action(
+                cx.listener(|this, action, window, cx| this.paste_cell_above(action, window, cx)),
+            )
             .on_action(
                 cx.listener(|this, action, window, cx| this.duplicate_cell(action, window, cx)),
             )
