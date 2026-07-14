@@ -9,6 +9,27 @@ it in `bugs.md` (or as a backlog/phase item per the kind rules), annotate the
 line with the bug number, and tick it here (the follow-up is tracked
 elsewhere). Delete a section once all its boxes are ticked.
 
+## Bug fixes awaiting confirmation
+
+Pointer list so there's ONE place to see everything needing a test. The full
+detail (symptom, analysis, fix) lives in `bugs.md`; these stay at
+`fix attempted - untested` there until confirmed. Tick here AND flip the bug to
+`fixed - confirmed` (then archive it) when the user confirms; if a fix failed,
+leave the bug open with the new finding and tick here.
+
+- [ ] Bug #21 — collapse a cell + save → NO "changed on disk" toast; then let
+      VS Code edit the file under unsaved Zed changes → the toast still appears
+      for a real external change.
+- [ ] Bug #22 — run several near-instant cells → each shows a small ms duration
+      next to the ✓ (not a bare ✓).
+- [ ] Bug #23 — click a cell's gutter/margin → selects it in command mode
+      without entering edit; clicking the editor text still enters edit mode.
+- [ ] Bug #24 — run a cell that produces a DataFrame table and/or a matplotlib
+      plot, save, close, reopen → the rich output is still there. Then re-test
+      output-collapse persistence (Phase 23), which was blocked on this.
+- [ ] Bug #25 — scroll to the bottom, add a cell below the last cell → it
+      scrolls into view above the kernel status bar (not hidden behind it).
+
 ## Phase 5 — Create Python environments from the kernel picker
 
 - [ ] No Python on PATH: clicking "Create Python Environment" shows a clear
@@ -38,23 +59,6 @@ elsewhere). Delete a section once all its boxes are ticked.
       is Running and self-terminates on finish/cancel, so an idle notebook
       should not be repainting on a timer. Verify nothing keeps refreshing
       after all cells finish.
-
-## Phase 22 — Multi-select cells
-
-- [x] shift+down/up in command mode grows/shrinks a contiguous selection;
-      plain up/down collapses it. CONFIRMED 2026-07-12.
-- [x] shift+click selects the range to the clicked cell. CONFIRMED 2026-07-12.
-- [ ] ctrl/cmd+click toggles individual cells into a discontiguous selection;
-      ctrl/cmd+up/down do nothing.
-- [x] Delete/cut with a multi-selection removes all selected (one undo restores
-      them all). CONFIRMED 2026-07-12. NOTE: restored cells lose their OUTPUT →
-      backlog item (retain output through cut/paste and delete/undo).
-- [x] copy+paste reproduces all selected cells. CONFIRMED 2026-07-12.
-- [ ] Run with a multi-selection executes the selected cells in order.
-- [ ] Move up/down shifts a contiguous selected block (and does nothing for a
-      discontiguous selection); convert converts all selected.
-- [x] Add cell / paste act on the primary cell. CONFIRMED 2026-07-12
-      (duplicate / Enter still to verify).
 
 ## Phase 23 — Collapse / expand cell input & output
 
