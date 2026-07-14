@@ -1594,6 +1594,16 @@
     },
   },
   {
+    // Smart arrows: up/down move within the cell, crossing into the previous/
+    // next cell at the first/last line. Gated on !menu so the completion /
+    // code-action menu keeps up/down when it is open.
+    "context": "NotebookEditor > NotebookCellEditor > Editor && !menu",
+    "bindings": {
+      "up": "notebook::NotebookMoveUp",
+      "down": "notebook::NotebookMoveDown",
+    },
+  },
+  {
     "context": "GitGraph",
     "bindings": {
       "tab": "git_graph::FocusNextTabStop",

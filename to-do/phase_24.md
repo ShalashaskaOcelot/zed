@@ -16,12 +16,13 @@ Primary files: `crates/repl/src/notebook/notebook_ui.rs`,
       fresh empty code cell (delete + insert as one undo Group), so delete
       always "does something". Applies to single delete, multi delete of all
       cells, and cut (cut routes through `delete_cell`).
-- [ ] Smart arrows in EDIT mode: bind up/down in the cell-editor context to
-      `NotebookMoveUp`/`NotebookMoveDown` (handlers already exist) so arrowing
-      past the first/last line of a cell moves into the previous/next cell,
-      Jupyter/VS Code style. Must NOT break completion-menu navigation — the
-      editor's completion menu context must win; verify context precedence at
-      runtime (deferred from phase 3 for exactly this risk).
+- [x] Smart arrows in EDIT mode: bound `up`/`down` in a new
+      `NotebookEditor > NotebookCellEditor > Editor && !menu` keymap context to
+      `NotebookMoveUp`/`NotebookMoveDown` in all three keymaps. Those handlers
+      are already edge-aware — they move within the cell and only cross into the
+      previous/next cell at the first/last line. The `&& !menu` gate means the
+      completion / code-action menu keeps up/down while it is open (the editor
+      adds the `menu` context when a popup is visible).
 
 ## Risks / gaps
 
