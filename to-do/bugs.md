@@ -286,7 +286,7 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ## 26. A cell that errors shows a completed ✓ instead of a failure marker
 
-- **Status:** open
+- **Status:** fix attempted - untested
 - **Symptom:** (user 2026-07-14) Ran a cell that failed with an ImportError
   ("cannot open shared object file"); the traceback rendered, but the cell got
   the completed ✓ tick rather than a failure ✕.
@@ -296,13 +296,17 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   error's `ExecuteReply(status: Error)` still calls `finish_execution` → ✓
   (`handle_message` even has a comment "Real errors keep the finished ✓").
   The user expects VS Code semantics: an errored cell gets a failure marker.
-- **Fix plan:** add a `Failed` variant to `CellExecutionStatus`.
-  `ExecuteReply(Error)` → new `fail_execution()` (records the duration like
-  finish, sets Failed; must NOT override Cancelled — an interrupted cell's
-  reply also comes back Error after the KeyboardInterrupt iopub message).
-  Render Failed as a red ✕ + duration. Add Failed to `begin_running`'s
+- **Fix attempted (2026-07-14):** added a `Failed` variant to
+  `CellExecutionStatus`. `ExecuteReply(Error)` → new `fail_execution()`
+  (shares `complete_execution` with finish: records the duration, terminal;
+  does NOT override Cancelled — an interrupted cell's reply also reports Error
+  after the KeyboardInterrupt iopub message, and must stay a muted ✕).
+  Failed renders as a red ✕ + duration; Failed added to `begin_running`'s
   monotonic guard so a late `execute_input` can't revive a failed fast cell.
-- **Tested:** n/a
+  Stop-on-error batch handling unchanged (it already keyed off the reply).
+- **Tested:** no — needs user confirmation (run a cell that raises → red ✕ +
+  time, traceback below; interrupt a running cell → still the muted ✕
+  "Cancelled"; successful cells still ✓)
 
 ## 27. One-off "changed on disk" toast on save (post-#21 fix)
 

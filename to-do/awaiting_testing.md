@@ -19,8 +19,12 @@ here, add a one-line entry to `CHANGELOG.md`, and delete the bug's `bugs.md`
 entry. If a fix failed, leave the bug open with the new finding and keep it
 listed here.
 
-(Nothing right now — bugs #25/#26/#28 have fixes in progress and will get
-pointer lines when those land.)
+- [ ] Bug #26 — run a cell that raises (e.g. a bad import) → red ✕ + time
+      (traceback below); interrupt a running cell → still the muted ✕
+      "Cancelled"; successful cells still show ✓.
+
+(Bugs #25/#28 have fixes in progress and will get pointer lines when they
+land.)
 
 ## Phase 24 — Cell operations polish
 

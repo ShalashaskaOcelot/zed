@@ -735,9 +735,10 @@ impl Render for MarkdownCell {
 /// Lifecycle of a code cell's execution. `Pending` (queued, waiting for the
 /// kernel to reach it) is distinct from `Running` (the kernel is actively
 /// executing it) so queued cells don't show a running spinner or accrue the
-/// wait time behind a long-running cell, and `Cancelled` (interrupt/restart/
-/// abort before completion) is distinct from `Finished` so a cell that never
-/// ran doesn't get a completed tick.
+/// wait time behind a long-running cell. Three terminal states: `Finished`
+/// (ran to completion, ✓), `Failed` (ran and raised, red ✕ — VS Code style),
+/// and `Cancelled` (interrupt/restart/abort before completion, muted ✕) so a
+/// cell that never ran doesn't get a completed tick.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum CellExecutionStatus {
     #[default]
@@ -745,6 +746,7 @@ pub enum CellExecutionStatus {
     Pending,
     Running,
     Finished,
+    Failed,
     Cancelled,
 }
 
@@ -1027,7 +1029,9 @@ impl CodeCell {
         self.clear_outputs();
         if matches!(
             self.execution_status,
-            CellExecutionStatus::Finished | CellExecutionStatus::Cancelled
+            CellExecutionStatus::Finished
+                | CellExecutionStatus::Failed
+                | CellExecutionStatus::Cancelled
         ) {
             return;
         }
@@ -1059,9 +1063,21 @@ impl CodeCell {
     }
 
     pub fn finish_execution(&mut self) {
+        self.complete_execution(CellExecutionStatus::Finished);
+    }
+
+    /// The cell ran and raised (its `ExecuteReply` came back with an Error
+    /// status): terminal like `finish_execution`, but marked as a failure
+    /// (red ✕) instead of a completed ✓.
+    pub fn fail_execution(&mut self) {
+        self.complete_execution(CellExecutionStatus::Failed);
+    }
+
+    fn complete_execution(&mut self, final_status: CellExecutionStatus) {
         self._run_timer = None;
         // An interrupted cell was already marked Cancelled (KeyboardInterrupt
-        // on iopub); its ExecuteReply must not flip it back to a ✓.
+        // on iopub); its ExecuteReply — which reports Error for an interrupt —
+        // must not flip it to a ✓ or a red ✕.
         if self.execution_status == CellExecutionStatus::Cancelled {
             return;
         }
@@ -1072,7 +1088,7 @@ impl CodeCell {
             self.execution_duration = Some(start_time.elapsed());
         }
         self.submitted_at = None;
-        self.execution_status = CellExecutionStatus::Finished;
+        self.execution_status = final_status;
     }
 
     /// The cell never completed (interrupt/restart/kernel loss/aborted batch):
@@ -1139,8 +1155,9 @@ impl CodeCell {
     }
 
     /// The small status line for the cell's last/current run: spinner while
-    /// running, a queued indicator while pending, ✓ + time when finished, and
-    /// a muted ✕ when cancelled. `None` for an idle cell.
+    /// running, a queued indicator while pending, ✓ + time when finished, a
+    /// red ✕ + time when the cell raised, and a muted ✕ when cancelled.
+    /// `None` for an idle cell.
     fn execution_status_element(&self, cx: &App) -> Option<AnyElement> {
         let label = |text: String, cx: &App| {
             div()
@@ -1185,6 +1202,18 @@ impl CodeCell {
                     Icon::new(IconName::Check)
                         .size(IconSize::XSmall)
                         .color(Color::Success),
+                )
+                .when_some(
+                    self.execution_duration.map(Self::format_duration),
+                    |this, duration_text| this.child(label(duration_text, cx)),
+                ),
+            CellExecutionStatus::Failed => h_flex()
+                .gap_1()
+                .items_center()
+                .child(
+                    Icon::new(IconName::XCircle)
+                        .size(IconSize::XSmall)
+                        .color(Color::Error),
                 )
                 .when_some(
                     self.execution_duration.map(Self::format_duration),
@@ -1324,19 +1353,23 @@ impl CodeCell {
                     .map(|v| v as i32);
             }
             JupyterMessageContent::ExecuteReply(reply) => {
-                // A kernel aborts the requests queued behind an error or
-                // interrupt without executing them — those cells were never
-                // run, so they must not get a completed tick.
-                if matches!(reply.status, ReplyStatus::Aborted) {
-                    self.cancel_execution();
-                } else {
-                    self.finish_execution();
+                match reply.status {
+                    // A kernel aborts the requests queued behind an error or
+                    // interrupt without executing them — those cells were
+                    // never run, so they must not get a completed tick.
+                    ReplyStatus::Aborted => self.cancel_execution(),
+                    // The cell ran and raised → red ✕ (interrupted cells are
+                    // already Cancelled and stay that way — see
+                    // `complete_execution`).
+                    ReplyStatus::Error => self.fail_execution(),
+                    _ => self.finish_execution(),
                 }
             }
             JupyterMessageContent::ErrorOutput(error) => {
                 // An interrupt shows as a KeyboardInterrupt error: the cell was
-                // stopped, not completed — mark it Cancelled (✕), keeping the
-                // traceback output visible. Real errors keep the finished ✓.
+                // stopped, not completed — mark it Cancelled (muted ✕), keeping
+                // the traceback visible. Real errors get the red ✕ via their
+                // ExecuteReply's Error status (`fail_execution`).
                 if error.ename == "KeyboardInterrupt" {
                     self.cancel_execution();
                 }
