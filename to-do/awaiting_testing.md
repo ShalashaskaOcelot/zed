@@ -28,6 +28,18 @@ listed here.
 - [ ] Bug #25 — scroll to the bottom, add a cell below the last cell → it
       scrolls into view above the kernel status bar (not hidden behind it).
 
+## Phase 24 — Cell operations polish
+
+- [ ] Paste Cell Above: copy/cut a cell, then `ctrl-shift-v` / `cmd-shift-v`
+      (or the "Paste Cell Above" menu entry) inserts it ABOVE the current cell;
+      multi-cell paste lands the whole block above.
+- [ ] Delete the only cell (or cut/delete a selection covering every cell) →
+      the notebook is left with one fresh empty code cell; undo restores the
+      original cell(s) and removes the fresh one.
+- [ ] Smart arrows: in edit mode, up/down move line-by-line within a cell and
+      cross into the previous/next cell at the first/last line. With a
+      completion popup open, up/down navigate the popup (not cells).
+
 ## Phase 5 — Create Python environments from the kernel picker
 
 - [ ] No Python on PATH: clicking "Create Python Environment" shows a clear

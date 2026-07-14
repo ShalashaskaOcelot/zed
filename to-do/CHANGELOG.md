@@ -36,6 +36,8 @@ entry rather than archiving it.
 - Phase 22 — Multi-select cells (shift/ctrl gestures; actions over the
   selection). `bd6790e`
 - Phase 23 — Collapse / expand cell input & output (persisted to the .ipynb). `970219c`
+- Phase 24 — Cell operations polish: paste-above, replace-emptied-notebook on
+  delete, smart edit-mode arrows. `5b8efcb` `add918d` `013fa4c`
 
 ## Fixed bugs (confirmed)
 

@@ -14,20 +14,6 @@ high → low within each group.
   place rather than only via settings.json. (Depends on how Zed's settings UI
   registers sections.)
 
-- Further DataFrame/table polish (user 2026-07-11, "could be done better"):
-  follow-up refinements to the phase-16 table rendering (spacing, column
-  sizing/eliding, header styling, very wide frames, dark/light contrast).
-
-- Selectable output text (user 2026-07-11): allow selecting a PORTION of a
-  cell's output to copy, instead of only the whole output via the "..." menu's
-  Copy Output. Outputs render as TerminalOutput / markdown / table elements
-  that don't support text selection today.
-
-- "Open output in new editor" (user 2026-07-11, larger item): for long /
-  scrolling outputs, an affordance (like VS Code's "Open in text editor") that
-  opens the full output in a regular editor buffer/tab for searching,
-  selecting, and scrolling comfortably.
-
 - "New Jupyter Notebook" should open a truly UNSAVED notebook (phase 12
   follow-up, user 2026-07-11). Currently the command writes `Untitled-N.ipynb`
   into the workspace immediately and opens that. It should behave like Ctrl-N:
