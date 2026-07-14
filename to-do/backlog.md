@@ -8,6 +8,25 @@ high → low within each group.
 
 ## Medium priority
 
+- Notebook chrome rework: drop the bottom kernel bar (user 2026-07-14). The
+  bottom bar's kernel selector duplicates the sidebar's; remove the bar, but
+  keep every function reachable:
+  - Move Restart Kernel and Interrupt Kernel buttons into the right sidebar
+    (they currently only live in the bottom bar).
+  - The running-kernel name + status must stay visible somewhere convenient.
+    The sidebar is too cramped; user leans toward the TOP-RIGHT corner — kernel
+    name/status (maybe the selector trigger too), with a small top margin so
+    cells start slightly lower and the corner has its own dead space (a light
+    take on VS Code's notebook top bar WITHOUT moving the sidebar's actions up).
+  - Layout suggestions to explore when scheduling: (a) top-right floating
+    cluster: status dot + kernel name as the selector trigger, ~28px top strip,
+    cells start below it; (b) put kernel name/status in the editor tab-bar area
+    (pane toolbar) right-aligned, zero notebook space cost, though further from
+    the cells; (c) keep a MINIMAL bottom-right floating status chip (no bar).
+    User prefers something like (a); decide final placement at implementation
+    with a quick mockup pass.
+  - Side benefit: removes the bar implicated in the bug #25 overlap confusion.
+
 - Dedicated REPL / Notebook section in the GUI settings UI (user 2026-07-11):
   as notebook config grows (landing mode, and future options), surface a
   grouped settings page/section so they're discoverable and editable in one

@@ -19,26 +19,23 @@ here, add a one-line entry to `CHANGELOG.md`, and delete the bug's `bugs.md`
 entry. If a fix failed, leave the bug open with the new finding and keep it
 listed here.
 
-- [ ] Bug #22 — (2nd fix: clear_outputs no longer wipes the duration) run
-      several near-instant cells → each shows a small ms duration next to the ✓,
-      none bare, none inconsistently blank vs 0ms.
-- [ ] Bug #23 — (2nd fix: gutter-only select) click a code cell's gutter/accent
-      strip → selects in command mode; click the cell body/text → ENTERS EDIT
-      mode (regression check); shift/ctrl-click ranges still work.
-- [ ] Bug #25 — scroll to the bottom, add a cell below the last cell → it
-      scrolls into view above the kernel status bar (not hidden behind it).
+(Nothing right now — bugs #25/#26/#28 have fixes in progress and will get
+pointer lines when those land.)
 
 ## Phase 24 — Cell operations polish
 
-- [ ] Paste Cell Above: copy/cut a cell, then `ctrl-shift-v` / `cmd-shift-v`
-      (or the "Paste Cell Above" menu entry) inserts it ABOVE the current cell;
-      multi-cell paste lands the whole block above.
-- [ ] Delete the only cell (or cut/delete a selection covering every cell) →
-      the notebook is left with one fresh empty code cell; undo restores the
-      original cell(s) and removes the fresh one.
-- [ ] Smart arrows: in edit mode, up/down move line-by-line within a cell and
-      cross into the previous/next cell at the first/last line. With a
-      completion popup open, up/down navigate the popup (not cells).
+- [x] Paste Cell Above: the COMMAND works (confirmed via the palette,
+      2026-07-14). The `ctrl-shift-v` / `cmd-shift-v` keybind conflicted with an
+      existing panel binding and was REMOVED at the user's request — command +
+      menu entry remain, no replacement keybind for now.
+- [x] Delete the only cell → replaced with a fresh empty cell; undo restores
+      the original. CONFIRMED 2026-07-14.
+- [x] Smart arrows: edit-mode up/down cross cell boundaries at the first/last
+      line. CONFIRMED 2026-07-14.
+- [ ] Completion-popup check (not yet tested): with a completions dropdown open
+      in a cell, up/down should navigate the dropdown's entries — not jump
+      between cells. (That's what the popup caveat means: the `!menu` gate is
+      supposed to hand up/down to the popup while it's open.)
 
 ## Phase 5 — Create Python environments from the kernel picker
 

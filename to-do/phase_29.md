@@ -21,6 +21,11 @@ Primary files: `crates/repl/src/outputs.rs` (output rendering/selection),
       (like VS Code's "Open in text editor") on the output "…" menu that opens
       the full output text in a regular read-only editor buffer/tab for
       searching, selecting, and comfortable scrolling.
+- [ ] Auto-width DataFrame tables (user 2026-07-14, screenshot): when a
+      column's content is wide enough to wrap/truncate (e.g. long paths), the
+      table should stretch to the FULL output-box width and give the long
+      columns the extra room; narrow tables (short headers, small numbers)
+      keep their natural compact width — no pointless stretching.
 - [ ] Further DataFrame/table polish (phase-16 follow-up): spacing, column
       sizing/eliding, header styling, very wide frames, and dark/light contrast.
 

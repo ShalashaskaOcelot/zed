@@ -56,3 +56,7 @@ entry rather than archiving it.
 - #21 — Zed's own metadata save raised a spurious "changed on disk" toast. `82d98a7`
 - #24 — Rich outputs (tables/images/markdown/json) were dropped on save, so
   outputs didn't survive close/reopen. `7c3c1bd`
+- #22 — Very fast cells showed a bare ✓ (or 0ms) with no execution time.
+  `02f395c` `ec70129`
+- #23 — Clicking a cell's gutter/margin didn't select the cell. `7f9e17a`
+  `b066179`

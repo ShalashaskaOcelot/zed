@@ -255,111 +255,103 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   load in instantly" — intermittent, consistent with the async-discovery race.)
 - **Tested:** no — needs user confirmation on a fresh app start
 
-## 22. Very fast cells show a ✓ but no execution time
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-12, screenshot) Cells that finish almost instantly
-  (e.g. two cells run via Execute All) show the completed ✓ but no duration
-  next to it. User's theory: they complete in <1ms.
-- **Analysis:** The precise `execution_start_time` is set only in
-  `begin_running`, which fires on the iopub `execute_input`. For a very fast
-  cell the shell `ExecuteReply` (which calls `finish_execution`) can arrive
-  BEFORE that `execute_input` — the two travel on separate channels — so
-  `begin_running` is skipped (correctly, to avoid resurrecting a finished cell),
-  leaving `execution_start_time` unset. `finish_execution` then finds no start
-  time and records no duration, so the cell shows a ✓ with no time.
-- **Fix attempted (2026-07-14):** added a `submitted_at` timing anchor recorded
-  when the execute request is dispatched to a running kernel
-  (`CodeCell::record_submitted`, called from the `Disposition::Sent` path).
-  `finish_execution` now uses `execution_start_time.or(submitted_at)`, so a fast
-  cell reports the send→reply duration (near-exact for a sub-millisecond cell)
-  instead of nothing. `begin_running` still overwrites with the precise start
-  when its `execute_input` arrives first; `mark_pending` / `cancel_execution` /
-  `show_kernel_error` clear the anchor.
-- **Update (user 2026-07-14):** first fix FAILED testing — some cells still show
-  a bare ✓, others show `0ms`, sometimes both in the same run.
-- **Root cause (found 2026-07-14):** `begin_running` calls `clear_outputs()` at
-  its top, and `clear_outputs()` was resetting `execution_duration = None`. For
-  a fast cell whose shell `ExecuteReply` beats its iopub `ExecuteInput`,
-  `finish_execution` runs FIRST (records the duration, status → Finished), then
-  the late `ExecuteInput` → `begin_running` → `clear_outputs()` WIPES that
-  duration before early-returning on the Finished status. So: input-before-reply
-  cells show a real time (1–6ms); reply-before-input cells whose late input
-  wiped the duration show NO time; reply-before-input cells with no late-input
-  wipe show `0ms`. The `submitted_at` anchor was working — it was being erased
-  after the fact.
-- **Fix attempted (2026-07-14, follow-up):** `clear_outputs()` no longer resets
-  `execution_duration`; the duration is reset explicitly by `mark_pending` /
-  `begin_running` / `cancel_execution` when a run genuinely (re)starts. A late
-  `execute_input` on an already-finished cell now clears only its outputs and
-  keeps the computed time. Fast cells should show a consistent (small ms) time.
-- **Tested:** no — needs user confirmation (run several instant cells; each
-  should show a small ms duration next to the ✓, none bare)
-
-## 23. Clicking a cell's gutter/margin doesn't select the cell
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-12, phase 22 feedback) Clicking the gutter/margin
-  area of a cell (where the execute button sits, but not on the button itself)
-  does NOT select that cell. To select a single cell with the mouse the user
-  had to click the cell text (entering edit mode) and then press Esc. A plain
-  click on the cell's border/gutter area should select it.
-- **Analysis:** the shared capture-phase mouse-down handler on each cell root
-  (`selection_modifiers`) only acted on clicks with a selection modifier held
-  (shift → range, ctrl/cmd → toggle), emitting `ModifiedClick`. A plain click
-  fell through with no handler, so clicking anywhere that wasn't the editor did
-  nothing. Only the editor (via its focus → `FocusedIn` → `select_cell_by_id`)
-  selected a cell, and that also forced edit mode.
-- **Fix attempted (2026-07-14):** a plain left click on a cell root emitted a
-  new `CellEvent::PlainClick` → `handle_plain_click` (select + command mode).
-- **Update (user 2026-07-14):** partial — the gutter/margin now selects, BUT the
-  fix REGRESSED editor clicks: clicking the cell body/text also selected in
-  command mode and NEVER entered edit mode (even double-click); you could select
-  text but had to click-then-Enter to edit.
-- **Root cause of the regression:** the `PlainClick` was emitted from the
-  whole-cell CAPTURE-phase handler, which fires for editor clicks too.
-  `handle_plain_click` → `enter_command_mode` focuses the notebook root,
-  stealing focus from the editor in the same mouse-down, so the editor never
-  entered edit mode.
-- **Fix attempted (2026-07-14, follow-up):** stop emitting `PlainClick` from the
-  whole-cell capture handler; emit it only from an `on_mouse_down` on the
-  CodeCell gutter (input `gutter` + `gutter_output`), which never overlaps the
-  editor. Now a gutter click selects (command mode) and a body/editor click
-  focuses the editor (edit mode) as before. (Markdown/raw cells no longer
-  gutter-select — a minor gap; their bodies edit normally.)
-- **Tested:** no — needs user confirmation (click a code cell's gutter/accent
-  strip → selects in command mode; click the cell body/text → enters edit mode;
-  shift/ctrl-click ranges still work)
-
 ## 25. Adding a cell at the viewport bottom doesn't scroll it into view
 
-- **Status:** fix attempted - untested
+- **Status:** open (first fix failed; root cause now confirmed in code)
 - **Symptom:** (user 2026-07-12, phase 22 feedback) Adding a cell below the
   bottom-most cell while scrolled to the very bottom of the notebook inserts
   the new cell off-screen — the viewport does not scroll down to reveal it.
   The bottom status bar may also be obscuring the viewport's lower edge.
-- **Analysis:** `insert_cell` DOES scroll (`cell_list.scroll_to_reveal_item`),
-  so the new cell isn't simply un-revealed. Two leading candidates, both need
-  runtime confirmation:
-  1. **Layout overlap (leading).** In `NotebookEditor::render` the main content
-     row is `h_flex().flex_1().w_full().h_full()` and the kernel status bar is
-     its next sibling in the outer `v_flex`. `.flex_1()` (grow to fill the
-     remaining height) together with `.h_full()` (take 100% of the parent) is
-     contradictory: h_full makes the row as tall as the WHOLE notebook, leaving
-     no room for the status bar, which then overlaps the row's bottom edge —
-     exactly "the bottom bar obscuring the viewport." Fix: drop the `.h_full()`
-     and let `.flex_1()` size the row, so the list viewport ends above the bar.
-  2. **Scroll-before-measure.** `scroll_to_reveal_item(index)` runs in the same
-     synchronous `insert_cell` call as the `splice`, before the new item has
-     been laid out/measured, so the reveal target can be short. Would need
-     deferring the scroll to the next frame.
-  Verify #1 first (single-line, standard flex idiom); if the last cell still
-  hides, address #2.
-- **Fix attempted (2026-07-14):** candidate #1 — removed `.h_full()` from the
-  main content row in `NotebookEditor::render` and added `.min_h_0()`, so the
-  row is sized by `.flex_1()` to the space left after the kernel status bar
-  (rather than the full notebook height) and its scroll container can shrink to
-  fit. The last cell should now sit above the status bar. If it still hides,
-  candidate #2 (defer the reveal scroll to after layout) is next.
-- **Tested:** no — needs user confirmation (scroll to the bottom, add a cell
-  below the last cell → the new cell scrolls into view above the status bar)
+- **First fix FAILED (user 2026-07-14):** removing the `.h_full()` from the
+  content row (candidate "layout overlap") did not help — new cells still land
+  behind the bottom bar.
+- **Root cause (confirmed in gpui code, 2026-07-14):** candidate #2 was right.
+  `ListState::splice` inserts the new item as `ListItem::Unmeasured` with no
+  size hint, so it contributes ZERO height to the list's sum-tree.
+  `scroll_to_reveal_item(ix)` — called synchronously right after the splice —
+  computes `bottom` from those heights, so the goal scroll puts the new item's
+  TOP exactly at the viewport's bottom edge: zero pixels of it visible, i.e.
+  "behind the bottom bar". The item only gets measured during the NEXT layout
+  pass (it is within the list's 1000px overdraw), by which time the reveal has
+  already run short. Additionally, `Window::on_next_frame` callbacks run at the
+  START of the next frame tick — BEFORE that frame's layout — so a single-frame
+  deferral still sees height 0; it takes two hops (frame N's draw measures the
+  item; a callback at frame N+1's start reveals with the real height).
+- **Fix plan (second attempt):** give `insert_cell` access to `window`/`cx`
+  and, after the synchronous best-effort reveal, schedule a two-frame deferred
+  re-reveal (`window.on_next_frame` twice) that runs after the new item has
+  been measured, then notify the view so the corrected scroll paints. Covers
+  every insertion path (add above/below, paste, duplicate, undo/redo).
+- **Tested:** n/a — second fix not yet implemented
+
+## 26. A cell that errors shows a completed ✓ instead of a failure marker
+
+- **Status:** open
+- **Symptom:** (user 2026-07-14) Ran a cell that failed with an ImportError
+  ("cannot open shared object file"); the traceback rendered, but the cell got
+  the completed ✓ tick rather than a failure ✕.
+- **Analysis:** deliberate-but-wrong current behaviour, not a regression: the
+  phase-17 state machine only distinguishes Finished from Cancelled. The
+  KeyboardInterrupt→Cancelled fix (051c3c6) covered INTERRUPTED cells; a real
+  error's `ExecuteReply(status: Error)` still calls `finish_execution` → ✓
+  (`handle_message` even has a comment "Real errors keep the finished ✓").
+  The user expects VS Code semantics: an errored cell gets a failure marker.
+- **Fix plan:** add a `Failed` variant to `CellExecutionStatus`.
+  `ExecuteReply(Error)` → new `fail_execution()` (records the duration like
+  finish, sets Failed; must NOT override Cancelled — an interrupted cell's
+  reply also comes back Error after the KeyboardInterrupt iopub message).
+  Render Failed as a red ✕ + duration. Add Failed to `begin_running`'s
+  monotonic guard so a late `execute_input` can't revive a failed fast cell.
+- **Tested:** n/a
+
+## 27. One-off "changed on disk" toast on save (post-#21 fix)
+
+- **Status:** open (not reproduced)
+- **Symptom:** (user 2026-07-14) With the notebook open ONLY in Zed, one save
+  raised the "notebook changed on disk — reload or overwrite" toast. Closing
+  and reopening Zed cleared it and it did not recur. No other info available.
+- **Analysis:** none yet. Bug #21's content-compare guard is confirmed working
+  for the metadata-save repro, so this is a different (or racier) path — e.g.
+  outputs arriving between serialize and the watcher event making the
+  in-memory notebook genuinely differ from the just-written disk state, which
+  would fail the value-equality guard and hit the is_dirty branch. WATCH ITEM:
+  if it recurs, capture what was running/dirty at the time of save.
+- **Fix attempted:** none
+- **Tested:** n/a
+
+## 28. Cells flash/stick "Cancelled" around kernel selection
+
+- **Status:** open
+- **Symptom:** (user 2026-07-14) Two related wrongs around the kernel picker:
+  1. Escaping the picker (no selection) leaves the triggering/queued cells
+     showing "Cancelled" — they should return to their idle state (arguably
+     they were never really queued to a kernel at all).
+  2. Even when a kernel IS selected: between pressing Enter and the kernel
+     starting, all batch cells briefly show "Cancelled", then jump back to
+     Pending/Running as the queue engages. (Open Zed → Run All → pick kernel →
+     everything flashes Cancelled → kernel starts → statuses correct.)
+- **Analysis (confirmed in code):**
+  - The flash (2): `change_kernel` calls `stop_executing_cells(cx)`
+    UNCONDITIONALLY, which cancels every Pending/Running cell — including the
+    whole batch that is waiting on this very kernel choice. The batch's
+    `run_queue` is deliberately preserved (the `cells_awaiting_kernel_choice`
+    guard covers `cancel_run_queue`) but the cells' STATUSES are wiped to
+    Cancelled, and each only re-Pends when the queue reaches it after the
+    kernel starts — exactly the observed flash.
+  - The Escape case (1): the picker's dismiss callback (`clear_awaiting_cells`)
+    marks awaiting cells and the run queue Cancelled via `cancel_execution` /
+    `cancel_run_queue`. For cells that were never submitted to any kernel,
+    Idle (no marker) is the right end state, not Cancelled.
+  - (On selection the dismiss callback is a no-op — `change_kernel` runs first
+    and drains `cells_awaiting_kernel_choice`, so the `if !empty` guard is
+    false. The flash comes solely from `stop_executing_cells`.)
+- **Fix plan:** (a) in `change_kernel`, scope `stop_executing_cells` under the
+  same `cells_awaiting_kernel_choice.is_empty()` guard as `cancel_run_queue` —
+  a selection that satisfies a waiting run must not cancel that run's cells; a
+  deliberate mid-run kernel SWITCH still cancels. (b) in `clear_awaiting_cells`,
+  reset never-submitted cells (awaiting + queued) to Idle instead of Cancelled.
+  Kernel restart/stop paths are untouched (they still cancel the queue, per the
+  user's freeze concern). The user's alternative design — a queue-level status
+  that only engages at kernel start — is noted but not needed if the statuses
+  are kept correct.
+- **Tested:** n/a
