@@ -916,17 +916,51 @@ impl NotebookEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Our OWN save landing back via the file watcher is not an external
-        // change. Check against what we last wrote BEFORE the dirty check:
-        // outputs from a still-running cell may have arrived since the save,
-        // which would otherwise count as dirty and raise a spurious conflict.
         let disk_text = buffer.read(cx).text();
+
+        // Fast path: byte-identical to what we last wrote — our own save
+        // landing back via the file watcher.
         if let Some(last_saved) = &self.last_saved_disk_text
             && disk_text.trim() == last_saved.trim()
         {
             return;
         }
 
+        // Parse the new on-disk content. Leave our in-memory state untouched if
+        // it doesn't parse rather than raising a conflict over unreadable JSON.
+        let disk_notebook = match Self::parse_notebook_text(&disk_text) {
+            Ok(notebook) => notebook,
+            Err(error) => {
+                log::warn!("notebook: failed to parse externally-changed .ipynb: {error}");
+                return;
+            }
+        };
+
+        // Authoritative own-save / no-op guard: compare CONTENT, not text.
+        // A save writes `to_string_pretty(to_notebook())`, but the buffer the
+        // file watcher reloads can differ byte-for-byte from what we wrote
+        // (final-newline handling, CRLF vs LF, JSON map key ordering) while
+        // being semantically identical. Comparing the parsed structures as
+        // JSON values ignores all of that — key ordering included — so our own
+        // writes (e.g. a metadata-only collapse save) never raise a spurious
+        // "changed on disk" conflict. Also take down any stale conflict toast
+        // now that we're re-aligned with disk.
+        let same_as_memory = match (
+            serde_json::to_value(&disk_notebook),
+            serde_json::to_value(self.to_notebook(cx)),
+        ) {
+            (Ok(disk), Ok(memory)) => disk == memory,
+            _ => false,
+        };
+        if same_as_memory {
+            self.disk_changed_externally = false;
+            self.last_saved_disk_text = Some(disk_text);
+            self.dismiss_conflict_toast(window, cx);
+            return;
+        }
+
+        // A genuine external change. If we have unsaved edits, keep them and
+        // warn rather than clobbering them with the on-disk version.
         if self.is_dirty(cx) {
             self.disk_changed_externally = true;
             let notification_id = NotificationId::unique::<NotebookConflictToast>();
@@ -957,23 +991,9 @@ impl NotebookEditor {
             return;
         }
 
-        // Secondary guard: skip if the disk content already matches our
-        // current state.
-        if let Ok(current) = serde_json::to_string_pretty(&self.to_notebook(cx))
-            && current.trim() == disk_text.trim()
-        {
-            return;
-        }
-
-        match Self::parse_notebook_text(&disk_text) {
-            Ok(notebook) => {
-                self.reload_cells_from_notebook(&notebook, window, cx);
-                self.last_saved_disk_text = Some(disk_text);
-            }
-            Err(error) => {
-                log::warn!("notebook: failed to parse externally-changed .ipynb: {error}")
-            }
-        }
+        // No local edits — adopt the on-disk version.
+        self.reload_cells_from_notebook(&disk_notebook, window, cx);
+        self.last_saved_disk_text = Some(disk_text);
     }
 
     fn launch_kernel_with_spec(

@@ -287,3 +287,34 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
   instead of it staying empty. (User note 2026-07-12: "Sometimes kernels do
   load in instantly" — intermittent, consistent with the async-discovery race.)
 - **Tested:** no — needs user confirmation on a fresh app start
+
+## 21. Own metadata save raises a spurious "changed on disk" toast
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-07-12) Collapsing a cell's code and then saving
+  reproduces a rogue "This notebook changed on disk…" conflict toast, even
+  though the only change was Zed's own metadata save. The save does NOT prompt
+  to overwrite (correct — `disk_changed_externally` is false, no real external
+  change), and saving does not dismiss the toast either. User's diagnosis: the
+  file-change system detects Zed's own save as an external change and triggers
+  the toast, while the save path correctly recognizes it as our own write.
+- **Analysis:** `handle_external_change` guarded against our own save by
+  comparing the reloaded buffer text against `last_saved_disk_text` with a
+  plain `trim()` string equality. That guard is fragile: the buffer the file
+  watcher reloads after our `fs.atomic_write` can differ byte-for-byte from
+  what we wrote — final-newline handling, CRLF vs LF normalization, or JSON
+  map key ordering (`metadata`/`jupyter.additional` are maps) — while being
+  semantically identical. When the byte compare failed and the notebook was
+  (or briefly appeared) dirty, the conflict toast fired for our own write.
+- **Fix attempted (2026-07-14):** `handle_external_change` now compares CONTENT
+  rather than text. It parses the on-disk notebook and compares it to the
+  in-memory `to_notebook()` as `serde_json::Value`s (order-independent, so map
+  key ordering and formatting differences are ignored). On a content match it
+  treats the change as our own save: clears `disk_changed_externally`, updates
+  `last_saved_disk_text`, and dismisses any stale conflict toast. The
+  byte-identical `last_saved_disk_text` check is kept as a fast path; the
+  conflict toast now only appears for a genuine content divergence while the
+  notebook has unsaved edits.
+- **Tested:** no — needs user confirmation (collapse a cell, save, confirm no
+  toast; then have VS Code edit the file under unsaved Zed changes and confirm
+  the toast still appears for a real external change)
