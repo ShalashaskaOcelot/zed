@@ -1995,7 +1995,14 @@ impl NotebookEditor {
     }
 
     /// Inserts a cell at `index` (clamped), updates the list, and selects it.
-    fn insert_cell(&mut self, index: usize, cell_id: CellId, cell: Cell) {
+    fn insert_cell(
+        &mut self,
+        index: usize,
+        cell_id: CellId,
+        cell: Cell,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let index = index.min(self.cell_order.len());
         self.cell_order.insert(index, cell_id.clone());
         self.cell_map.insert(cell_id, cell);
@@ -2003,7 +2010,24 @@ impl NotebookEditor {
         // Indices shifted — a stale multi-selection would select wrong cells.
         self.collapse_selection();
         self.cell_list.splice(index..index, 1);
+        // Best-effort synchronous reveal. This alone is NOT enough: the
+        // just-spliced item is Unmeasured (zero height in the list's sum
+        // tree), so this reveal computes a scroll that leaves the new cell's
+        // top at the viewport's bottom edge — out of sight (bug #25).
         self.cell_list.scroll_to_reveal_item(index);
+        // Re-reveal once the item has a real height. Next-frame callbacks run
+        // at the START of a frame tick, BEFORE that frame's layout, so hop two
+        // frames: the first frame's layout measures the item (it is within the
+        // list's overdraw), and the second hop reveals with the true height —
+        // then notifies so the corrected scroll actually paints.
+        let list = self.cell_list.clone();
+        let view = cx.entity_id();
+        window.on_next_frame(move |window, _| {
+            window.on_next_frame(move |_, cx| {
+                list.scroll_to_reveal_item(index);
+                cx.notify(view);
+            });
+        });
     }
 
     /// Index just after the selected cell (or 0 when the notebook is empty).
@@ -2173,7 +2197,7 @@ impl NotebookEditor {
     fn add_markdown_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (cell_id, markdown_cell) = self.build_markdown_cell(String::new(), window, cx);
         let index = self.index_below_selection();
-        self.insert_cell(index, cell_id.clone(), Cell::Markdown(markdown_cell));
+        self.insert_cell(index, cell_id.clone(), Cell::Markdown(markdown_cell), window, cx);
         self.record_new_cell(index, &cell_id, cx);
         // Select the new cell in command mode (VS Code-style: press Enter to
         // edit). Staying in command mode keeps single-key shortcuts working.
@@ -2187,7 +2211,7 @@ impl NotebookEditor {
 
     fn add_code_cell_at(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let (cell_id, code_cell) = self.build_code_cell(String::new(), window, cx);
-        self.insert_cell(index, cell_id.clone(), Cell::Code(code_cell));
+        self.insert_cell(index, cell_id.clone(), Cell::Code(code_cell), window, cx);
         self.record_new_cell(index, &cell_id, cx);
         self.enter_command_mode(window, cx);
     }
@@ -2247,7 +2271,7 @@ impl NotebookEditor {
         // group — so undo removes the fresh cell and restores the originals.
         if deleting_all {
             let (cell_id, code_cell) = self.build_code_cell(String::new(), window, cx);
-            self.insert_cell(0, cell_id.clone(), Cell::Code(code_cell));
+            self.insert_cell(0, cell_id.clone(), Cell::Code(code_cell), window, cx);
             if let Some(cell) = self.cell_map.get(&cell_id) {
                 edits.push(CellEdit::Inserted {
                     index: 0,
@@ -2424,7 +2448,7 @@ impl NotebookEditor {
             }
             Cell::Raw(_) => {}
         }
-        self.insert_cell(index, cell_id, cell_entity);
+        self.insert_cell(index, cell_id, cell_entity, window, cx);
     }
 
     /// Remove the cell at `index`, cleaning up execution/queue state.

@@ -27,8 +27,9 @@ listed here.
       Pending through kernel startup (no Cancelled flash), then run. Restart
       Kernel mid-batch still cancels the queue (no frozen queue).
 
-(Bug #25's second fix is in progress and will get a pointer line when it
-lands.)
+- [ ] Bug #25 — (2nd fix: the reveal now re-runs after the new cell is
+      measured) scroll to the very bottom, add a cell below the last cell → the
+      new cell scrolls fully into view.
 
 ## Phase 24 — Cell operations polish
 

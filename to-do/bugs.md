@@ -257,7 +257,7 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ## 25. Adding a cell at the viewport bottom doesn't scroll it into view
 
-- **Status:** open (first fix failed; root cause now confirmed in code)
+- **Status:** fix attempted - untested (second attempt)
 - **Symptom:** (user 2026-07-12, phase 22 feedback) Adding a cell below the
   bottom-most cell while scrolled to the very bottom of the notebook inserts
   the new cell off-screen — the viewport does not scroll down to reveal it.
@@ -277,12 +277,14 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   START of the next frame tick — BEFORE that frame's layout — so a single-frame
   deferral still sees height 0; it takes two hops (frame N's draw measures the
   item; a callback at frame N+1's start reveals with the real height).
-- **Fix plan (second attempt):** give `insert_cell` access to `window`/`cx`
-  and, after the synchronous best-effort reveal, schedule a two-frame deferred
+- **Fix attempted (2026-07-14, second):** `insert_cell` now takes `window`/`cx`
+  and, after the synchronous best-effort reveal, schedules a two-frame deferred
   re-reveal (`window.on_next_frame` twice) that runs after the new item has
-  been measured, then notify the view so the corrected scroll paints. Covers
-  every insertion path (add above/below, paste, duplicate, undo/redo).
-- **Tested:** n/a — second fix not yet implemented
+  been measured, then notifies the view so the corrected scroll paints. Covers
+  every insertion path (add above/below, paste, duplicate, undo/redo, and the
+  delete-last-cell replacement).
+- **Tested:** no — needs user confirmation (scroll to the bottom, add a cell
+  below the last cell → the new cell scrolls fully into view)
 
 ## 26. A cell that errors shows a completed ✓ instead of a failure marker
 
