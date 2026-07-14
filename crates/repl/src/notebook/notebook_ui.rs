@@ -3527,10 +3527,14 @@ impl Render for NotebookEditor {
                 this.clear_selected_cell_outputs(action, window, cx)
             }))
             .child(
+                // `.flex_1()` (not `.h_full()`) sizes this row to the height
+                // left after the status bar; `.h_full()` here would take the
+                // whole notebook height and let the status bar overlap the
+                // row's bottom, hiding the last cell (see bug #25).
                 h_flex()
                     .flex_1()
                     .w_full()
-                    .h_full()
+                    .min_h_0()
                     .gap_2()
                     .child(div().flex_1().h_full().child(self.cell_list(window, cx)))
                     .child(self.render_notebook_controls(window, cx)),

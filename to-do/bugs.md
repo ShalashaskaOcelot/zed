@@ -409,15 +409,33 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
 
 ## 25. Adding a cell at the viewport bottom doesn't scroll it into view
 
-- **Status:** open
+- **Status:** fix attempted - untested
 - **Symptom:** (user 2026-07-12, phase 22 feedback) Adding a cell below the
   bottom-most cell while scrolled to the very bottom of the notebook inserts
   the new cell off-screen — the viewport does not scroll down to reveal it.
   The bottom status bar may also be obscuring the viewport's lower edge.
-- **Analysis:** not yet investigated. The add-cell path selects the new cell
-  but likely doesn't scroll the `ListState` to it; and/or the notebook's
-  scrollable region extends under the bottom bar so the last cell sits behind
-  it. Check `jump_to_cell` / the `ListState` scroll on insert, and the bottom
-  padding of the cell list vs the status bar height.
-- **Fix attempted:** none
-- **Tested:** n/a
+- **Analysis:** `insert_cell` DOES scroll (`cell_list.scroll_to_reveal_item`),
+  so the new cell isn't simply un-revealed. Two leading candidates, both need
+  runtime confirmation:
+  1. **Layout overlap (leading).** In `NotebookEditor::render` the main content
+     row is `h_flex().flex_1().w_full().h_full()` and the kernel status bar is
+     its next sibling in the outer `v_flex`. `.flex_1()` (grow to fill the
+     remaining height) together with `.h_full()` (take 100% of the parent) is
+     contradictory: h_full makes the row as tall as the WHOLE notebook, leaving
+     no room for the status bar, which then overlaps the row's bottom edge —
+     exactly "the bottom bar obscuring the viewport." Fix: drop the `.h_full()`
+     and let `.flex_1()` size the row, so the list viewport ends above the bar.
+  2. **Scroll-before-measure.** `scroll_to_reveal_item(index)` runs in the same
+     synchronous `insert_cell` call as the `splice`, before the new item has
+     been laid out/measured, so the reveal target can be short. Would need
+     deferring the scroll to the next frame.
+  Verify #1 first (single-line, standard flex idiom); if the last cell still
+  hides, address #2.
+- **Fix attempted (2026-07-14):** candidate #1 — removed `.h_full()` from the
+  main content row in `NotebookEditor::render` and added `.min_h_0()`, so the
+  row is sized by `.flex_1()` to the space left after the kernel status bar
+  (rather than the full notebook height) and its scroll container can shrink to
+  fit. The last cell should now sit above the status bar. If it still hides,
+  candidate #2 (defer the reveal scroll to after layout) is next.
+- **Tested:** no — needs user confirmation (scroll to the bottom, add a cell
+  below the last cell → the new cell scrolls into view above the status bar)
