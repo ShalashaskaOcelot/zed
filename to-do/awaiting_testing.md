@@ -46,6 +46,22 @@ listed here.
       between cells. (That's what the popup caveat means: the `!menu` gate is
       supposed to hand up/down to the popup while it's open.)
 
+## Phase 25 — Kernel selection quality-of-life
+
+- [ ] Select a kernel, save the notebook, FULLY quit Zed, reopen the notebook →
+      the kernel shows as selected in the status bar (and checked in the
+      picker) without re-picking, and the first run lazy-starts it. (The match
+      is by the kernelspec name saved in the .ipynb metadata, so it also works
+      for notebooks last run in VS Code.)
+- [ ] With a kernel already selected in the session, opening another notebook
+      in the same worktree shows that selection (explicit choice wins over
+      notebook metadata).
+- [ ] A notebook whose saved kernelspec no longer exists (deleted env) simply
+      shows "Select Kernel" and prompts on run — no error.
+- [ ] Auto-run after pick (re-verify while here): run cells with no kernel →
+      picker opens → pick → the queued cells run in order once the kernel is
+      ready.
+
 ## Phase 26 — More multi-select gestures
 
 - [ ] In command mode: `ctrl-a` (`cmd-a` on mac) selects ALL cells as one

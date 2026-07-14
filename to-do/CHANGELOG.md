@@ -38,6 +38,9 @@ entry rather than archiving it.
 - Phase 23 — Collapse / expand cell input & output (persisted to the .ipynb). `970219c`
 - Phase 24 — Cell operations polish: paste-above, replace-emptied-notebook on
   delete, smart edit-mode arrows. `5b8efcb` `add918d` `013fa4c`
+- Phase 25 — Kernel selection QoL: a reopened notebook pre-selects the kernel
+  saved in its metadata (VS Code-compatible, lazy-start on first run); auto-run
+  of cells queued behind the kernel picker verified working.
 - Phase 26 — More multi-select gestures: ctrl/cmd-a select-all,
   shift-home/shift-end to first/last cell (command mode only).
 

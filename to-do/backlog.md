@@ -33,12 +33,6 @@ high → low within each group.
 - Kernel autostart on notebook open, setting-gated (opt-in), now that
   lazy-start is the default and auto-start-on-run exists.
 
-- Surface kernel stderr in the UI on launch failure (the WSL path captures it;
-  native now captures it on premature exit — extend to post-connect failures).
-
-- Replace the fixed 500ms native-launch readiness sleep with a proper
-  kernel_info/heartbeat handshake (follow-up to bug #6 if 10054 persists).
-
 - Immediate interrupt of C-level blocking calls (e.g. `time.sleep`) on Windows
   (follow-up to bug #3). The event-based interrupt sets Python's interrupt flag
   but doesn't wake a blocking C call, so `time.sleep` only interrupts when it

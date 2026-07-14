@@ -401,6 +401,17 @@ impl NotebookEditor {
         })
         .detach();
 
+        // Pre-select the notebook's saved kernelspec once discovery delivers a
+        // match, so a reopened notebook shows its kernel as selected (and
+        // lazy-starts it on first run) without re-picking (phase 25). Discovery
+        // is async, so try now AND whenever the store updates; an explicit
+        // in-session selection always wins — this only ever fills a void.
+        cx.observe(&ReplStore::global(cx), |this, _store, cx| {
+            this.adopt_metadata_kernel_selection(cx);
+        })
+        .detach();
+        editor.adopt_metadata_kernel_selection(cx);
+
         // Keep `notebook_mode` in sync with focus: when the notebook itself
         // (not a cell editor) holds focus, we are in command mode. This avoids
         // a stuck state where the mode flag and the actually-focused element
@@ -543,6 +554,56 @@ impl NotebookEditor {
             .kernel_specifications_for_worktree(self.worktree_id)
             .find(|spec| spec.name().as_ref() == name)
             .cloned()
+    }
+
+    /// If nothing has been selected this session, adopt the kernel matching
+    /// the notebook's saved `kernelspec` metadata as the selection (phase 25):
+    /// the status bar shows it and the first run lazy-starts it, VS Code
+    /// style — no re-picking after a full restart. Discovery is async, so
+    /// this is called on open AND from a store observer; it no-ops until a
+    /// matching spec is discovered. A stale metadata name simply never
+    /// matches, leaving the picker flow untouched, and an explicit in-session
+    /// selection always wins.
+    fn adopt_metadata_kernel_selection(&mut self, cx: &mut Context<Self>) {
+        if self.kernel_specification.is_some() {
+            return;
+        }
+        let store = ReplStore::global(cx);
+        if let Some(selected) = store.read(cx).selected_kernel(self.worktree_id) {
+            // Someone already picked for this worktree this session — show
+            // that, exactly what a run would use.
+            self.kernel_specification = Some(selected.clone());
+            cx.notify();
+            return;
+        }
+        let Some(name) = self
+            .notebook_item
+            .read(cx)
+            .notebook
+            .metadata
+            .kernelspec
+            .as_ref()
+            .map(|kernelspec| kernelspec.name.clone())
+        else {
+            return;
+        };
+        let matched = store
+            .read(cx)
+            .kernel_specifications_for_worktree(self.worktree_id)
+            .find(|spec| spec.name().as_ref() == name)
+            .cloned();
+        if let Some(spec) = matched {
+            log::info!("notebook: pre-selected kernel '{name}' from notebook metadata");
+            self.kernel_specification = Some(spec.clone());
+            // Written through to the store so the kernel picker shows it as
+            // the current selection too. The observer can't loop: on the next
+            // store notify, `kernel_specification` is Some and we bail above.
+            store.update(cx, |store, cx| {
+                store.set_active_kernelspec(self.worktree_id, spec, cx);
+                cx.notify();
+            });
+            cx.notify();
+        }
     }
 
     /// Launch the remembered kernel, or prompt for one if none is remembered.
