@@ -970,8 +970,14 @@ impl CodeCell {
     }
 
     pub fn clear_outputs(&mut self) {
+        // Only the outputs — NOT the recorded duration. `begin_running` clears
+        // outputs at the start of every run (including a late iopub
+        // `execute_input` that arrives AFTER a fast cell's shell `execute_reply`
+        // already finished it); wiping the duration here would erase the time
+        // `finish_execution` just computed, leaving a ✓ with no time. The
+        // duration is reset explicitly by `mark_pending` / `begin_running` /
+        // `cancel_execution` when a run genuinely (re)starts.
         self.outputs.clear();
-        self.execution_duration = None;
     }
 
     /// Concatenated plain text of the cell's text-bearing outputs (stdout/plain

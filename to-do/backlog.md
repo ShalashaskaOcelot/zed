@@ -15,9 +15,11 @@ high → low within each group.
   - `shift-home` — select the contiguous range from the current cell up to the
     FIRST cell; `shift-end` — from the current cell down to the LAST cell.
   These reuse the existing `select_range` / `selected_indices` machinery; add
-  the actions + command-mode keybinds in all three keymaps (mind that ctrl-a
-  must stay text "select all" inside a focused cell editor — only bind it in
-  the command-mode notebook context).
+  the actions + keybinds in all three keymaps. ALL THREE must be bound ONLY in
+  the command-mode notebook context — in edit mode ctrl-a is text "select all"
+  and shift-home/shift-end are text-select-to-line-start/end within the cell
+  editor, which must be preserved. (Mouse border-clicks already drop to command
+  mode, so mouse range-select is unaffected.)
 
 - Retain cell OUTPUT through cut/paste and delete→undo / cut→undo (user
   2026-07-12, phase 22 feedback). Cutting or deleting a cell and pasting or

@@ -307,8 +307,25 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   instead of nothing. `begin_running` still overwrites with the precise start
   when its `execute_input` arrives first; `mark_pending` / `cancel_execution` /
   `show_kernel_error` clear the anchor.
+- **Update (user 2026-07-14):** first fix FAILED testing — some cells still show
+  a bare ✓, others show `0ms`, sometimes both in the same run.
+- **Root cause (found 2026-07-14):** `begin_running` calls `clear_outputs()` at
+  its top, and `clear_outputs()` was resetting `execution_duration = None`. For
+  a fast cell whose shell `ExecuteReply` beats its iopub `ExecuteInput`,
+  `finish_execution` runs FIRST (records the duration, status → Finished), then
+  the late `ExecuteInput` → `begin_running` → `clear_outputs()` WIPES that
+  duration before early-returning on the Finished status. So: input-before-reply
+  cells show a real time (1–6ms); reply-before-input cells whose late input
+  wiped the duration show NO time; reply-before-input cells with no late-input
+  wipe show `0ms`. The `submitted_at` anchor was working — it was being erased
+  after the fact.
+- **Fix attempted (2026-07-14, follow-up):** `clear_outputs()` no longer resets
+  `execution_duration`; the duration is reset explicitly by `mark_pending` /
+  `begin_running` / `cancel_execution` when a run genuinely (re)starts. A late
+  `execute_input` on an already-finished cell now clears only its outputs and
+  keeps the computed time. Fast cells should show a consistent (small ms) time.
 - **Tested:** no — needs user confirmation (run several instant cells; each
-  should show a small ms duration next to the ✓)
+  should show a small ms duration next to the ✓, none bare)
 
 ## 23. Clicking a cell's gutter/margin doesn't select the cell
 
