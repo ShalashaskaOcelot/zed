@@ -34,10 +34,15 @@ root. This system must be adhered to religiously.
 - `to-do/bugs.md` — a list of bugs. Each bug records: description, status
   (`open` / `fix attempted - untested` / `fixed - confirmed`), what fix was
   attempted (if any), and whether that fix has been tested by the user.
-- `to-do/awaiting_testing.md` — the single ledger of outstanding MANUAL TEST
-  items from phases whose implementation is complete, grouped into
-  `## Phase <n>` sections. Nothing in it needs implementation — only user
-  verification.
+- `to-do/awaiting_testing.md` — the SINGLE place the user checks for everything
+  that needs their action. Two kinds of entries, nothing in it needs
+  implementation — only user verification:
+  1. A `## Bug fixes awaiting confirmation` section at the top: a POINTER list
+     of every bug at `fix attempted - untested` in `bugs.md` (by number + a
+     one-line test recipe). The full detail stays in `bugs.md`; this is just so
+     untested fixes are visible in the one ledger.
+  2. `## Phase <n> — <title>` sections: outstanding MANUAL TEST items from
+     phases whose implementation is complete (the phase files are archived).
 - `to-do/archive/` — completed phase files and confirmed-fixed bugs are moved
   here.
 
@@ -124,12 +129,16 @@ root. This system must be adhered to religiously.
    existing behaviour` / `mixed`) so the right resolution is obvious at
    confirmation time. For a `mixed` phase, resolve each item by its own kind.
 4. **Bugs:** when a fix is attempted, update the bug's status to
-   `fix attempted - untested` with a note describing the fix. **Never attempt
-   a further fix for a bug whose last fix is untested** — we don't know yet
-   whether the previous fix worked. Only after the user confirms the fix does
-   the status become `fixed - confirmed` (with a note on what fixed it), and
-   only then is the bug moved to the archive. An unconfirmed bug is never
-   archived.
+   `fix attempted - untested` with a note describing the fix, AND add a pointer
+   line for it to the `## Bug fixes awaiting confirmation` section of
+   `awaiting_testing.md` (number + one-line test recipe) so it shows up in the
+   single testing ledger. **Never attempt a further fix for a bug whose last
+   fix is untested** — we don't know yet whether the previous fix worked. Only
+   after the user confirms the fix does the status become `fixed - confirmed`
+   (with a note on what fixed it); at that point remove its pointer line from
+   `awaiting_testing.md` and move the bug to the archive. An unconfirmed bug is
+   never archived. If a fix FAILS testing, leave the bug open (record the new
+   finding) and keep/refresh its pointer line.
 5. New bugs discovered at any time are added as line items to `bugs.md`
    immediately, regardless of the current phase.
 
