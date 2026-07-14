@@ -30,6 +30,24 @@ Small follow-ups:
 
 ## Medium priority
 
+- Retain cell OUTPUT through cut/paste and delete→undo / cut→undo (user
+  2026-07-12, phase 22 feedback). Cutting or deleting a cell and pasting or
+  undoing restores the cell and its SOURCE but not its rendered OUTPUT — the
+  output area comes back empty. The clipboard/undo cell snapshots currently
+  carry source + metadata but not the outputs. Snapshot the cell's outputs
+  (nbformat) into the clipboard payload and the undo `CellEdit` so a restored
+  cell shows its previous output. (Interacts with bug #24: rich outputs would
+  need the same source-media retention to round-trip; plain/stream/error
+  outputs can be snapshotted today.)
+
+- "Last executed time" per-cell indicator, VS Code style (user 2026-07-12,
+  phase 21 feedback). Show WHEN a cell was last executed (e.g. a timestamp /
+  "2m ago" near the ✓ + duration), setting-gated. User is unsure whether the
+  timestamp should mark run-START or run-COMPLETION — decide at scheduling
+  (completion is the common choice; VS Code shows completion time). Persisting
+  it across reopen would need it stored in cell metadata
+  (`metadata.execution.iopub.*` or a custom field).
+
 - (Moved to **phase 20**) Per-cell stop/interrupt should be scoped to the cell,
   not global (user 2026-07-11): the gutter stop button dispatches the global
   `InterruptKernel`; stopping a queued cell should remove just that cell and

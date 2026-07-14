@@ -1,8 +1,9 @@
 # Phase 21 — Live elapsed-time counter while a cell runs
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, tests
-> pass. Kind: **change to existing behaviour** — keep OPEN until the user
-> confirms the counter ticks.
+> ✅ STATUS: COMPLETE & CONFIRMED (2026-07-12). The live ticking counter works.
+> Kind: **change to existing behaviour** — the change took effect and is
+> confirmed, so this is archived. The one remaining "no stray ticking" ongoing
+> observation moved to `awaiting_testing.md` (Phase 21 section).
 
 Requested by the user 2026-07-11.
 

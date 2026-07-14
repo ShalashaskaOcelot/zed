@@ -1,8 +1,11 @@
 # Phase 22 — Multi-select cells
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, tests
-> pass. Kind: **new feature** — on confirmation the gestures and multi-cell
-> actions work, archive; tweaks become new items.
+> ✅ STATUS: COMPLETE & CONFIRMED (2026-07-12). Kind: **new feature** — the
+> multi-select gestures and actions are confirmed working, so this is archived.
+> Remaining manual-test lines moved to `awaiting_testing.md` (Phase 22 section).
+> Defects/refinements found during testing became SEPARATE items: gutter-click
+> selection (bug #23, fixed), output not retained through cut/paste/undo
+> (backlog), add-below-viewport scroll (bug #25).
 > User decisions (2026-07-12): single-target actions act on the PRIMARY cell;
 > Move works on CONTIGUOUS selections only (no-op for discontiguous).
 

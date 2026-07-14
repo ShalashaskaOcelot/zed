@@ -366,3 +366,47 @@ fixed & confirmed 2026-07-10 (`a`/`b` now stay in command mode); moved to
 - **Tested:** no — needs user confirmation (click a cell's gutter/margin →
   selects it in command mode without entering edit; click the editor text →
   still enters edit mode; shift/ctrl-click ranges still work)
+
+## 24. Rich cell outputs are dropped on save (don't survive close/reopen)
+
+- **Status:** open
+- **Symptom:** (user 2026-07-12, phase 23 feedback) "Outputs in general do not
+  survive close and reopen." This blocked testing output-collapse persistence.
+- **Analysis:** confirmed by code. Outputs ARE loaded on open
+  (`convert_outputs` in `cell.rs`) and plain-text outputs round-trip fine:
+  `print()` → Stream and a plain expression result → `Output::Plain` both
+  serialize in `Output::to_nbformat` (`outputs.rs`). BUT the RICH output
+  variants — `Output::Image` (matplotlib PNG/JPEG), `Output::Table` (a pandas
+  DataFrame's `text/html` repr), `Output::Markdown`, `Output::Json`, and
+  `Output::Message` — all return `None` from `to_nbformat`, so they are
+  silently discarded on save and are gone on reopen. Data work (DataFrames,
+  plots) produces exactly these, so "outputs in general" disappear.
+  Root cause: the rich `Output` variants store RENDERED view entities
+  (`TableView`/`ImageView`/`MarkdownView`/`JsonView`), not the source mime
+  bundle, so `to_nbformat` has nothing to serialize back.
+- **Fix plan (not yet started, likely its own phase — moderate change):** retain
+  the source `jupyter_protocol::media::Media` on the rich `Output` variants
+  (captured in `Output::new`, where the mime bundle is already in hand — and
+  the load path passes it through), and have `to_nbformat` emit the
+  corresponding `DisplayData` from it. Touches the `Output` enum plus its
+  construction and pattern-match sites. NOTE: plain/stream/error outputs
+  already round-trip, so if the user's lost outputs were plain text there is a
+  SECOND bug (e.g. not saving before close, or a save/load gap) — needs the
+  user's repro (what kind of output, and whether they saved) to disambiguate.
+- **Fix attempted:** none yet
+- **Tested:** n/a
+
+## 25. Adding a cell at the viewport bottom doesn't scroll it into view
+
+- **Status:** open
+- **Symptom:** (user 2026-07-12, phase 22 feedback) Adding a cell below the
+  bottom-most cell while scrolled to the very bottom of the notebook inserts
+  the new cell off-screen — the viewport does not scroll down to reveal it.
+  The bottom status bar may also be obscuring the viewport's lower edge.
+- **Analysis:** not yet investigated. The add-cell path selects the new cell
+  but likely doesn't scroll the `ListState` to it; and/or the notebook's
+  scrollable region extends under the bottom bar so the last cell sits behind
+  it. Check `jump_to_cell` / the `ListState` scroll on insert, and the bottom
+  padding of the cell list vs the status bar height.
+- **Fix attempted:** none
+- **Tested:** n/a

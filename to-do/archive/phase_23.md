@@ -1,8 +1,11 @@
 # Phase 23 — Collapse / expand cell input & output
 
-> ⚠️ STATUS: IMPLEMENTED, AWAITING USER TESTING. Compiles, clippy-clean, tests
-> pass. Kind: **new feature** — on confirmation, archive; tweaks become new
-> items. User decision (2026-07-12): collapse state PERSISTS to the .ipynb.
+> ✅ STATUS: COMPLETE & CONFIRMED (2026-07-12). Kind: **new feature** — the
+> chevron input-collapse and output-collapse both work and input-collapse state
+> survives reopen, so this is archived. Remaining manual-test lines moved to
+> `awaiting_testing.md` (Phase 23 section); "output collapse survives reopen" is
+> BLOCKED by bug #24 (outputs are dropped on save) and retests once #24 is
+> fixed. User decision (2026-07-12): collapse state PERSISTS to the .ipynb.
 
 From the backlog (useful for cells with large outputs).
 
