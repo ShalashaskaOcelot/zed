@@ -12,10 +12,10 @@ Primary files: `crates/repl/src/notebook/notebook_ui.rs`,
       cell(s) above the primary cell (multi-aware like phase 22's paste, via the
       shared `paste_cells_at`). Keybind `ctrl-shift-v` / `cmd-shift-v` in
       command mode, plus a "Paste Cell Above" More-options menu entry.
-- [ ] Deleting the LAST remaining cell: instead of refusing, replace it with a
+- [x] Deleting the LAST remaining cell: instead of refusing, replace it with a
       fresh empty code cell (delete + insert as one undo Group), so delete
       always "does something". Applies to single delete, multi delete of all
-      cells, and cut.
+      cells, and cut (cut routes through `delete_cell`).
 - [ ] Smart arrows in EDIT mode: bind up/down in the cell-editor context to
       `NotebookMoveUp`/`NotebookMoveDown` (handlers already exist) so arrowing
       past the first/last line of a cell moves into the previous/next cell,

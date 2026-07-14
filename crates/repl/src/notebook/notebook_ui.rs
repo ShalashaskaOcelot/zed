@@ -2197,16 +2197,17 @@ impl NotebookEditor {
 
     fn delete_cell(&mut self, _: &DeleteCell, window: &mut Window, cx: &mut Context<Self>) {
         let targets = self.effective_selection();
-        if targets.len() >= self.cell_order.len() {
-            // Keep at least one cell so the notebook is never empty (which would
-            // leave nowhere to type and no cell to select).
-            log::info!("notebook: refusing to delete every remaining cell");
+        if targets.is_empty() {
             return;
         }
+        // Deleting the whole notebook must still "do something": we delete the
+        // cells and drop in one fresh empty code cell (below), never leaving an
+        // empty notebook with nowhere to type.
+        let deleting_all = targets.len() >= self.cell_order.len();
 
         // Delete bottom-up so earlier indices stay valid; group the edits so
         // undo restores the whole selection in one step.
-        let mut edits = Vec::with_capacity(targets.len());
+        let mut edits = Vec::with_capacity(targets.len() + 1);
         for &index in targets.iter().rev() {
             let Some(cell_id) = self.cell_order.get(index).cloned() else {
                 continue;
@@ -2224,6 +2225,20 @@ impl NotebookEditor {
                 });
             }
         }
+
+        // Replace an emptied notebook with a fresh code cell, in the SAME undo
+        // group — so undo removes the fresh cell and restores the originals.
+        if deleting_all {
+            let (cell_id, code_cell) = self.build_code_cell(String::new(), window, cx);
+            self.insert_cell(0, cell_id.clone(), Cell::Code(code_cell));
+            if let Some(cell) = self.cell_map.get(&cell_id) {
+                edits.push(CellEdit::Inserted {
+                    index: 0,
+                    cell: cell.to_nbformat_cell(cx),
+                });
+            }
+        }
+
         match edits.len() {
             0 => {}
             1 => self.record_edit(edits.remove(0)),
