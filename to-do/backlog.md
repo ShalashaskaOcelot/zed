@@ -22,9 +22,11 @@ Scheduled into phases (kept here only as a pointer):
 - Live elapsed-time counter while running → **phase 21**.
 - Multi-select cells → **phase 22**.
 - Collapse/expand cell input & output → **phase 23**.
+- Paste-above + delete-last-cell + edit-mode smart arrows → **phase 24**.
+- Persist kernel choice across restarts + auto-run after pick → **phase 25**.
 
 Small follow-ups:
-- Paste cell ABOVE (`shift-v`) — phase 7 wired only paste-below.
+- (Moved to **phase 24**) Paste cell ABOVE — phase 7 wired only paste-below.
 
 ## Medium priority
 
@@ -85,31 +87,23 @@ Small follow-ups:
   (2026-07-08): run-above / run-cell-and-below (and likely delete / add) buttons
   shown individually in the focused cell's top-right, NOT tucked in "More
   options".
-- Deleting the LAST remaining cell: currently refused. Decide/implement the
-  preferred behaviour — either clear its contents in place, or delete it and
-  insert a fresh empty cell — so delete always "does something". (Spun off
-  from phase 4; user asked.)
+- (Moved to **phase 24**) Deleting the LAST remaining cell: replace it with a
+  fresh empty cell so delete always "does something".
 - (DONE via bug #13) `a`/`b` add-cell (and the + toolbar buttons) now stay in
   COMMAND mode (focus the new cell, press Enter to edit) instead of jumping into
   edit mode. Awaiting the same user confirmation as bug #13.
-- Auto-run the triggering cell after a kernel is picked from the run-prompt.
-  Dropped when fixing bugs.md #11 (the cell no longer queues on a no-kernel
-  run to avoid the stuck-"Running" state); re-add the auto-run once the
-  picker-dismiss lifecycle can be tracked cleanly.
+- (Moved to **phase 25**) Auto-run the triggering cell after a kernel is
+  picked from the run-prompt (verify — likely already works via
+  cells_awaiting_kernel_choice).
 - (Moved to **phase 15**) Reset the per-cell execution counter when the kernel
   is restarted, so a fresh run-through is visually distinct from a re-run
   session. (User 2026-07-08.)
-- Persist the per-notebook kernel choice across full Zed restarts (currently
-  only within a session; user: "not a big deal"). Likely via the saved .ipynb
-  metadata match or a persisted `ReplStore`. (Spun off from phase 6.)
+- (Moved to **phase 25**) Persist the per-notebook kernel choice across full
+  Zed restarts.
 - (Moved to **phase 23**) Collapse/expand cell input and output (a
   `CellControlType` scaffold exists). Useful for cells with large outputs.
-- Bind the "smart arrows" (`NotebookMoveUp`/`NotebookMoveDown`) to up/down in
-  edit mode so arrow travel crosses cell boundaries at the first/last line
-  (Jupyter/VS Code style). Deferred from phase 3: handlers exist but are
-  unbound; binding up/down in the `NotebookEditor > Editor` context risks
-  overriding completion-menu up/down navigation — needs runtime testing to get
-  context precedence right.
+- (Moved to **phase 24**) Bind the "smart arrows" to up/down in edit mode so
+  arrow travel crosses cell boundaries (Jupyter/VS Code style).
 - Kernel autostart on notebook open, setting-gated (opt-in), now that
   lazy-start is the default (phase 6) and auto-start-on-run (bug #2) exists.
 - Surface kernel stderr in the UI on launch failure (the WSL path captures it;
