@@ -22,9 +22,13 @@ listed here.
 - [ ] Bug #26 — run a cell that raises (e.g. a bad import) → red ✕ + time
       (traceback below); interrupt a running cell → still the muted ✕
       "Cancelled"; successful cells still show ✓.
+- [ ] Bug #28 — Run All with no kernel → Escape the picker → cells show NO
+      status marker (not Cancelled). Run All → pick a kernel → cells stay
+      Pending through kernel startup (no Cancelled flash), then run. Restart
+      Kernel mid-batch still cancels the queue (no frozen queue).
 
-(Bugs #25/#28 have fixes in progress and will get pointer lines when they
-land.)
+(Bug #25's second fix is in progress and will get a pointer line when it
+lands.)
 
 ## Phase 24 — Cell operations polish
 

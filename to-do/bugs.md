@@ -325,7 +325,7 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ## 28. Cells flash/stick "Cancelled" around kernel selection
 
-- **Status:** open
+- **Status:** fix attempted - untested
 - **Symptom:** (user 2026-07-14) Two related wrongs around the kernel picker:
   1. Escaping the picker (no selection) leaves the triggering/queued cells
      showing "Cancelled" — they should return to their idle state (arguably
@@ -349,13 +349,20 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   - (On selection the dismiss callback is a no-op — `change_kernel` runs first
     and drains `cells_awaiting_kernel_choice`, so the `if !empty` guard is
     false. The flash comes solely from `stop_executing_cells`.)
-- **Fix plan:** (a) in `change_kernel`, scope `stop_executing_cells` under the
-  same `cells_awaiting_kernel_choice.is_empty()` guard as `cancel_run_queue` —
-  a selection that satisfies a waiting run must not cancel that run's cells; a
-  deliberate mid-run kernel SWITCH still cancels. (b) in `clear_awaiting_cells`,
-  reset never-submitted cells (awaiting + queued) to Idle instead of Cancelled.
-  Kernel restart/stop paths are untouched (they still cancel the queue, per the
-  user's freeze concern). The user's alternative design — a queue-level status
-  that only engages at kernel start — is noted but not needed if the statuses
-  are kept correct.
-- **Tested:** n/a
+- **Fix attempted (2026-07-14):** (a) `change_kernel` now scopes
+  `stop_executing_cells` under the same `cells_awaiting_kernel_choice.is_empty()`
+  guard as `cancel_run_queue` — a selection that satisfies a waiting run keeps
+  every batch cell Pending straight through kernel startup (no Cancelled
+  flash); a deliberate mid-run kernel SWITCH still cancels in-flight work.
+  (b) dismissing the picker without selecting now returns the awaiting cells
+  AND the queued batch to IDLE (new `CodeCell::reset_execution_status` +
+  `abandon_run_queue`) instead of marking them Cancelled — nothing was ever
+  submitted, so no marker. Kernel restart/interrupt/error paths still use
+  `cancel_run_queue` (Cancelled) — no frozen queues (`abandon_run_queue` also
+  clears `active_run_cell`/`resume_run_queue_on_idle`). The user's alternative
+  (a queue-level status that engages at kernel start) wasn't needed once the
+  statuses stay correct.
+- **Tested:** no — needs user confirmation (Run All with no kernel → Escape the
+  picker → cells show NO status marker, not Cancelled; Run All → pick a kernel →
+  cells stay Pending through startup with no Cancelled flash, then run; Restart
+  Kernel mid-batch still cancels the queue)

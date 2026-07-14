@@ -1150,13 +1150,15 @@ impl NotebookEditor {
 
         self.execution_requests.clear();
         // If this is a deliberate kernel switch (nothing was waiting on a
-        // kernel choice), abort any in-progress batch. If instead the user is
-        // picking a kernel to satisfy a batch that was waiting for one, keep
-        // the queue so it runs on the new kernel.
+        // kernel choice), abort any in-progress batch and cancel in-flight
+        // cells. If instead the user is picking a kernel to satisfy a run that
+        // was waiting for one, keep the queue AND the cells' Pending status —
+        // cancelling them here made every batch cell flash "Cancelled" between
+        // picking a kernel and the kernel starting (bug #28).
         if self.cells_awaiting_kernel_choice.is_empty() {
             self.cancel_run_queue(cx);
+            self.stop_executing_cells(cx);
         }
-        self.stop_executing_cells(cx);
 
         // Persist the choice for this worktree so reopening the notebook (or
         // opening a sibling notebook) uses it instead of the global default.
@@ -1405,28 +1407,43 @@ impl NotebookEditor {
     }
 
     /// Clear cells that were waiting for a kernel choice (picker dismissed
-    /// without selecting). They return to their idle state, and any batch that
-    /// was waiting on the kernel choice is aborted.
+    /// without selecting). They and any batch queued behind them never reached
+    /// a kernel, so they return to IDLE — not Cancelled (bug #28): nothing was
+    /// cancelled mid-flight, the run simply never started.
     fn clear_awaiting_cells(&mut self, cx: &mut Context<Self>) {
         if !self.cells_awaiting_kernel_choice.is_empty() {
             log::debug!(
                 "notebook: kernel picker dismissed; dropping {} awaiting cell(s)",
                 self.cells_awaiting_kernel_choice.len(),
             );
-            // Cells held for a kernel choice were marked Pending; dismissing the
-            // picker means they won't run, so clear that status too (otherwise
-            // the triggering cell stays stuck showing "Pending").
             for cell_id in std::mem::take(&mut self.cells_awaiting_kernel_choice) {
                 if let Some(Cell::Code(cell)) = self.cell_map.get(&cell_id) {
                     cell.update(cx, |cell, cx| {
-                        cell.cancel_execution();
+                        cell.reset_execution_status();
                         cx.notify();
                     });
                 }
             }
-            self.cancel_run_queue(cx);
+            self.abandon_run_queue(cx);
             cx.notify();
         }
+    }
+
+    /// Drop a run queue whose cells never reached a kernel (the kernel picker
+    /// was dismissed without a selection): their statuses return to Idle.
+    /// Interrupt/error/restart/kernel-loss paths use `cancel_run_queue`
+    /// instead, which marks the queued cells Cancelled.
+    fn abandon_run_queue(&mut self, cx: &mut Context<Self>) {
+        for cell_id in std::mem::take(&mut self.run_queue) {
+            if let Some(Cell::Code(cell)) = self.cell_map.get(&cell_id) {
+                cell.update(cx, |cell, cx| {
+                    cell.reset_execution_status();
+                    cx.notify();
+                });
+            }
+        }
+        self.active_run_cell = None;
+        self.resume_run_queue_on_idle = false;
     }
 
     fn get_selected_cell(&self) -> Option<&Cell> {

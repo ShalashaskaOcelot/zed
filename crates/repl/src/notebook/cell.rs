@@ -1091,6 +1091,20 @@ impl CodeCell {
         self.execution_status = final_status;
     }
 
+    /// A queued run was abandoned before ever reaching a kernel (the kernel
+    /// picker was dismissed): back to Idle, as if the run had not been
+    /// requested. Unlike `cancel_execution` there is no Cancelled marker —
+    /// nothing was actually cancelled mid-flight (bug #28).
+    pub fn reset_execution_status(&mut self) {
+        if self.execution_status == CellExecutionStatus::Pending {
+            self.execution_status = CellExecutionStatus::Idle;
+            self.execution_start_time = None;
+            self.submitted_at = None;
+            self.execution_duration = None;
+            self._run_timer = None;
+        }
+    }
+
     /// The cell never completed (interrupt/restart/kernel loss/aborted batch):
     /// no completed tick and no bogus time.
     pub fn cancel_execution(&mut self) {
