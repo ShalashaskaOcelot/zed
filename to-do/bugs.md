@@ -255,37 +255,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   load in instantly" — intermittent, consistent with the async-discovery race.)
 - **Tested:** no — needs user confirmation on a fresh app start
 
-## 21. Own metadata save raises a spurious "changed on disk" toast
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-12) Collapsing a cell's code and then saving
-  reproduces a rogue "This notebook changed on disk…" conflict toast, even
-  though the only change was Zed's own metadata save. The save does NOT prompt
-  to overwrite (correct — `disk_changed_externally` is false, no real external
-  change), and saving does not dismiss the toast either. User's diagnosis: the
-  file-change system detects Zed's own save as an external change and triggers
-  the toast, while the save path correctly recognizes it as our own write.
-- **Analysis:** `handle_external_change` guarded against our own save by
-  comparing the reloaded buffer text against `last_saved_disk_text` with a
-  plain `trim()` string equality. That guard is fragile: the buffer the file
-  watcher reloads after our `fs.atomic_write` can differ byte-for-byte from
-  what we wrote — final-newline handling, CRLF vs LF normalization, or JSON
-  map key ordering (`metadata`/`jupyter.additional` are maps) — while being
-  semantically identical. When the byte compare failed and the notebook was
-  (or briefly appeared) dirty, the conflict toast fired for our own write.
-- **Fix attempted (2026-07-14):** `handle_external_change` now compares CONTENT
-  rather than text. It parses the on-disk notebook and compares it to the
-  in-memory `to_notebook()` as `serde_json::Value`s (order-independent, so map
-  key ordering and formatting differences are ignored). On a content match it
-  treats the change as our own save: clears `disk_changed_externally`, updates
-  `last_saved_disk_text`, and dismisses any stale conflict toast. The
-  byte-identical `last_saved_disk_text` check is kept as a fast path; the
-  conflict toast now only appears for a genuine content divergence while the
-  notebook has unsaved edits.
-- **Tested:** no — needs user confirmation (collapse a cell, save, confirm no
-  toast; then have VS Code edit the file under unsaved Zed changes and confirm
-  the toast still appears for a real external change)
-
 ## 22. Very fast cells show a ✓ but no execution time
 
 - **Status:** fix attempted - untested
@@ -361,46 +330,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 - **Tested:** no — needs user confirmation (click a code cell's gutter/accent
   strip → selects in command mode; click the cell body/text → enters edit mode;
   shift/ctrl-click ranges still work)
-
-## 24. Rich cell outputs are dropped on save (don't survive close/reopen)
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-12, phase 23 feedback) "Outputs in general do not
-  survive close and reopen." This blocked testing output-collapse persistence.
-- **Analysis:** confirmed by code. Outputs ARE loaded on open
-  (`convert_outputs` in `cell.rs`) and plain-text outputs round-trip fine:
-  `print()` → Stream and a plain expression result → `Output::Plain` both
-  serialize in `Output::to_nbformat` (`outputs.rs`). BUT the RICH output
-  variants — `Output::Image` (matplotlib PNG/JPEG), `Output::Table` (a pandas
-  DataFrame's `text/html` repr), `Output::Markdown`, `Output::Json`, and
-  `Output::Message` — all return `None` from `to_nbformat`, so they are
-  silently discarded on save and are gone on reopen. Data work (DataFrames,
-  plots) produces exactly these, so "outputs in general" disappear.
-  Root cause: the rich `Output` variants store RENDERED view entities
-  (`TableView`/`ImageView`/`MarkdownView`/`JsonView`), not the source mime
-  bundle, so `to_nbformat` has nothing to serialize back.
-- **Fix plan (not yet started, likely its own phase — moderate change):** retain
-  the source `jupyter_protocol::media::Media` on the rich `Output` variants
-  (captured in `Output::new`, where the mime bundle is already in hand — and
-  the load path passes it through), and have `to_nbformat` emit the
-  corresponding `DisplayData` from it. Touches the `Output` enum plus its
-  construction and pattern-match sites. NOTE: plain/stream/error outputs
-  already round-trip, so if the user's lost outputs were plain text there is a
-  SECOND bug (e.g. not saving before close, or a save/load gap) — needs the
-  user's repro (what kind of output, and whether they saved) to disambiguate.
-- **Fix attempted (2026-07-14):** the rich `Output` variants (`Image`, `Table`,
-  `Markdown`, `Json`) now retain the source `MimeBundle` they were built from
-  (captured in `Output::new`, where the bundle is already in hand, and passed
-  through by the load path). `Output::to_nbformat` emits a `DisplayData` from
-  that retained bundle for each, so images, tables, HTML/markdown and JSON
-  round-trip through save/reopen instead of being discarded. Plain/stream/error
-  already round-tripped. NOTE: output-level metadata (e.g. image size hints) is
-  written empty; only the data bundle is preserved. If the user's lost outputs
-  were PLAIN text and still vanished, there is a separate save/load issue — get
-  their repro to disambiguate.
-- **Tested:** no — needs user confirmation (run a cell that produces a DataFrame
-  table and/or a matplotlib plot, save, close, reopen → the output is still
-  there; then verify output-collapse persistence, which was blocked on this)
 
 ## 25. Adding a cell at the viewport bottom doesn't scroll it into view
 
