@@ -148,6 +148,27 @@ root. This system must be adhered to religiously.
    finding) and keep/refresh its pointer line.
 5. New bugs discovered at any time are added as line items to `bugs.md`
    immediately, regardless of the current phase.
+6. **Keep 5 phases in rotation.** Maintain at least 5 phase files in `to-do/` at
+   all times, so there is always a runway of planned work.
+   - **What counts:** only a phase with UNIMPLEMENTED tasks counts toward the 5.
+     A phase is "complete" only when EVERY task is implemented (rule 2); a phase
+     with even one task left (10/11 done still counts) stays and counts as one
+     of the 5. A phase whose implementation is finished and is only awaiting
+     user testing does NOT count — it has already been removed from `to-do/`
+     (its test items live in `awaiting_testing.md`).
+   - **Replenish on completion:** when completing a phase would drop the count
+     BELOW 5, promote backlog items into a new `phase_<n>.md` in the SAME commit
+     that completes the phase, restoring 5.
+     - If there aren't enough backlog items to form a coherent new phase, do NOT
+       invent work — tell the user a new phase can't be created and let them
+       decide.
+   - **Above 5:** if more than 5 phases exist, completing one does NOT trigger a
+     replacement until the count is back down to 5. (E.g. at 6 phases: complete
+     one → 5, add nothing; only a completion that would take it below 5
+     replenishes.)
+   - **"At least" 5:** if the user explicitly asks for a new phase with specific
+     tasks (rather than adding items to the backlog), add it as a 6th/7th/etc —
+     the 5 is a floor, not a cap.
 
 # Rust coding guidelines
 

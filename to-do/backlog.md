@@ -8,39 +8,6 @@ high → low within each group.
 
 ## Medium priority
 
-- More multi-select gestures in command mode (user 2026-07-14, phase 22
-  follow-up). Extend the phase-22 selection model with:
-  - `ctrl/cmd-a` — select ALL cells (one contiguous selection, anchor at the
-    first cell, primary at the last).
-  - `shift-home` — select the contiguous range from the current cell up to the
-    FIRST cell; `shift-end` — from the current cell down to the LAST cell.
-  These reuse the existing `select_range` / `selected_indices` machinery; add
-  the actions + keybinds in all three keymaps. ALL THREE must be bound ONLY in
-  the command-mode notebook context — in edit mode ctrl-a is text "select all"
-  and shift-home/shift-end are text-select-to-line-start/end within the cell
-  editor, which must be preserved. (Mouse border-clicks already drop to command
-  mode, so mouse range-select is unaffected.)
-
-- Retain cell OUTPUT through cut/paste and delete→undo / cut→undo (user
-  2026-07-12, phase 22 feedback). Cutting or deleting a cell and pasting or
-  undoing restores the cell and its SOURCE but not its rendered OUTPUT — the
-  output area comes back empty. The clipboard/undo cell snapshots carry source
-  + metadata but not the outputs. Snapshot the cell's outputs (nbformat) into
-  the clipboard payload and the undo `CellEdit` so a restored cell shows its
-  previous output. (Bug #24 added source-media retention on rich outputs, so
-  the full output set — plain/stream/error and rich — can now be snapshotted.)
-
-- "Last executed time" per-cell indicator, VS Code style (user 2026-07-12,
-  phase 21 feedback). Show WHEN a cell was last executed near the ✓ + duration,
-  setting-gated. User decisions (2026-07-14):
-  - Show a PROPER TIMESTAMP (e.g. `14:32:05` / a full date-time), NOT a relative
-    "2m ago".
-  - Mark run-COMPLETION time (consistent with VS Code).
-  - Store it the SAME way VS Code / Jupyter do — in cell `metadata.execution`
-    (`shell.execute_reply` / `iopub.status.idle` etc., ISO 8601) — so timing
-    round-trips seamlessly both ways (a notebook run in VS Code shows its times
-    in Zed and vice versa). Populate these on execution and read them on load.
-
 - Dedicated REPL / Notebook section in the GUI settings UI (user 2026-07-11):
   as notebook config grows (landing mode, and future options), surface a
   grouped settings page/section so they're discoverable and editable in one
