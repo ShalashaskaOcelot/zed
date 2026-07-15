@@ -35,6 +35,18 @@ listed here.
       kernel unchanged (check the picker checkmark shows the current
       notebook's kernel too).
 
+## Phase 29 — Output interaction polish
+
+- [ ] Each notebook output now shows small controls on hover/right edge:
+      Copy Output and "Open in Buffer" (a read-only editor tab — this is also
+      how to SELECT part of a long output for now).
+- [ ] The `docs_df` DataFrame from the screenshot: path-style long columns no
+      longer wrap/truncate mid-cell; the table fills the output box width,
+      giving the long columns the extra room; horizontal scroll only when the
+      natural width truly exceeds the box.
+- [ ] A small table (short headers, small numbers) does NOT stretch — it
+      keeps its compact natural width.
+
 ## Phase 31 — Kernel launch robustness
 
 - [ ] Kernels start reliably from a fresh app start (no os error 10054); fast

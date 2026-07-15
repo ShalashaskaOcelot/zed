@@ -93,6 +93,11 @@ const TABLE_Y_PADDING_MULTIPLE: f32 = 0.5;
 /// of elements. The clipboard content (Copy Output) still contains all rows.
 const MAX_RENDERED_ROWS: usize = 300;
 
+/// A column whose natural (content) width exceeds this is a "long" column:
+/// its table switches to fill-width mode, where columns grow proportionally
+/// to their natural width so long content gets the extra room (phase 29).
+const LONG_COLUMN_WIDTH: gpui::Pixels = gpui::px(160.);
+
 /// Try to interpret markdown (produced by `html_to_markdown` from an HTML
 /// output) as a single table, so DataFrame-style HTML outputs (e.g. pandas'
 /// default `text/html` repr) can be rendered with the native `TableView` grid
@@ -310,6 +315,13 @@ impl TableView {
 
         let line_height = window.line_height();
 
+        // Fill-width mode (phase 29): when the table has a genuinely long
+        // column (wide text such as paths), the row spans the full output
+        // width and columns grow PROPORTIONALLY to their natural width, so
+        // the long columns get the extra room. Compact tables (no long
+        // column) keep their natural width — no pointless stretching.
+        let fill_width = self.widths.iter().any(|width| *width > LONG_COLUMN_WIDTH);
+
         let row_cells = schema
             .fields
             .iter()
@@ -336,7 +348,13 @@ impl TableView {
 
                 let cell = container
                     .min_w(*width + px(22.))
-                    .w(*width + px(22.))
+                    .map(|cell| {
+                        if fill_width {
+                            cell.flex_grow(f32::from(*width))
+                        } else {
+                            cell.w(*width + px(22.))
+                        }
+                    })
                     .px_2()
                     .py((TABLE_Y_PADDING_MULTIPLE / 2.0) * line_height);
 
@@ -358,7 +376,11 @@ impl TableView {
             total_width += *width + px(22.);
         }
 
-        let row_element = h_flex().w(total_width).children(row_cells);
+        let row_element = if fill_width {
+            h_flex().w_full().min_w(total_width).children(row_cells)
+        } else {
+            h_flex().w(total_width).children(row_cells)
+        };
 
         if is_header {
             row_element
@@ -411,6 +433,11 @@ impl Render for TableView {
             .id("table")
             .overflow_x_scroll()
             .w_full()
+            // Cell text must render in the same font the column widths were
+            // MEASURED in (`TableView::new` uses the buffer font) — an
+            // ambient UI font makes cells narrower than their content, which
+            // wrapped/truncated long values like paths (phase 29).
+            .font_buffer(cx)
             .child(
                 v_flex()
                     .rounded_md()

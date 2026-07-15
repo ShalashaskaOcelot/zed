@@ -62,6 +62,12 @@ entry rather than archiving it.
   replaced by a heartbeat handshake (echo = ready, 30s cap, early-exit watch
   with stderr); kernels that die after connecting report their last stderr
   lines instead of a bare exit status.
+- Phase 29 — Output interaction: notebook outputs get the inline REPL's
+  copy / open-in-buffer controls (open-in-buffer = selectable text for long
+  outputs); DataFrame tables render in the measured font (fixes wrapped/
+  truncated cells) and fill the output width proportionally when a long
+  column exists (compact tables stay compact). In-place text selection
+  re-phased as phase 37.
 
 ## Fixed bugs (confirmed)
 

@@ -14,6 +14,7 @@ use runtimelib::{JupyterMessage, JupyterMessageContent, ReplyStatus};
 use settings::Settings as _;
 use ui::{CommonAnimationExt, ContextMenu, IconButtonShape, PopoverMenu, Tooltip, prelude::*};
 use util::ResultExt;
+use workspace::Workspace;
 use zed_actions::notebook::{
     AddCellBelow, DeleteCell, RunCellAndBelow, RunCellsAbove,
 };
@@ -1977,7 +1978,23 @@ impl Render for CodeCell {
                                                         },
                                                     )
                                                     .children(self.outputs.iter().map(|output| {
-                                                        div().children(output.content(window, cx))
+                                                        // Full output rendering — content plus the
+                                                        // copy / open-in-buffer controls the inline
+                                                        // REPL shows (phase 29). Open-in-buffer is
+                                                        // also the selectable-text affordance for
+                                                        // long outputs.
+                                                        match Workspace::for_window(window, cx) {
+                                                            Some(workspace) => div()
+                                                                .child(output.render(
+                                                                    workspace.downgrade(),
+                                                                    window,
+                                                                    cx,
+                                                                ))
+                                                                .into_any_element(),
+                                                            None => div()
+                                                                .children(output.content(window, cx))
+                                                                .into_any_element(),
+                                                        }
                                                     })),
                                             )
                                         }

@@ -206,7 +206,7 @@ impl Output {
         v: Entity<V>,
         workspace: WeakEntity<Workspace>,
         window: &mut Window,
-        cx: &mut Context<ExecutionView>,
+        cx: &mut App,
     ) -> Option<AnyElement> {
         if !v.has_clipboard_content(window, cx) && !v.has_buffer_content(window, cx) {
             return None;
@@ -292,7 +292,7 @@ impl Output {
         &self,
         workspace: WeakEntity<Workspace>,
         window: &mut Window,
-        cx: &mut Context<ExecutionView>,
+        cx: &mut App,
     ) -> impl IntoElement + use<> {
         let max_width =
             plain::max_width_for_columns(ReplSettings::get_global(cx).max_columns, window, cx);
