@@ -3307,6 +3307,40 @@ impl NotebookEditor {
                                 }))
                             }),
                     )
+                    // Kernel lifecycle controls, moved here from the removed
+                    // bottom bar (phase 30).
+                    .child(
+                        Self::button_group(window, cx)
+                            .child(
+                                Self::render_notebook_control(
+                                    "restart-kernel",
+                                    IconName::RotateCw,
+                                    window,
+                                    cx,
+                                )
+                                .tooltip(|window, cx| {
+                                    Tooltip::for_action("Restart Kernel", &RestartKernel, cx)
+                                })
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.restart_kernel(&RestartKernel, window, cx);
+                                })),
+                            )
+                            .child(
+                                Self::render_notebook_control(
+                                    "interrupt-kernel",
+                                    IconName::Stop,
+                                    window,
+                                    cx,
+                                )
+                                .disabled(!self.kernel.status().is_connected())
+                                .tooltip(|window, cx| {
+                                    Tooltip::for_action("Interrupt Kernel", &InterruptKernel, cx)
+                                })
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.interrupt_kernel(&InterruptKernel, window, cx);
+                                })),
+                            ),
+                    )
                     .child(Self::button_group(window, cx).child({
                         let kernel_status = self.kernel.status();
                         let (icon, icon_color) = match &kernel_status {
@@ -3339,7 +3373,11 @@ impl NotebookEditor {
             )
     }
 
-    fn render_kernel_status_bar(
+    /// Slim strip ABOVE the cells (phase 30): the kernel cluster — status
+    /// icon + name, acting as the kernel-picker trigger — right-aligned, a
+    /// light take on VS Code's notebook top bar. Replaces the old bottom
+    /// status bar; Restart/Interrupt moved into the right sidebar.
+    fn render_kernel_strip(
         &self,
         _window: &mut Window,
         cx: &mut Context<Self>,
@@ -3361,41 +3399,22 @@ impl NotebookEditor {
             KernelStatus::Restarting => (IconName::ArrowCircle, Color::Warning),
         };
 
-        let is_spinning = matches!(
-            kernel_status,
-            KernelStatus::Busy
-                | KernelStatus::Starting
-                | KernelStatus::ShuttingDown
-                | KernelStatus::Restarting
-        );
-
-        let status_icon_element = if is_spinning {
-            Icon::new(status_icon)
-                .size(IconSize::Small)
-                .color(status_color)
-                .with_rotate_animation(2)
-                .into_any_element()
-        } else {
-            Icon::new(status_icon)
-                .size(IconSize::Small)
-                .color(status_color)
-                .into_any_element()
-        };
-
         let worktree_id = self.worktree_id;
         let kernel_picker_handle = self.kernel_picker_handle.clone();
         let view = cx.entity().downgrade();
         let view_for_dismiss = view.clone();
         let view_for_create = view.clone();
 
+        // No background band: the strip reads as dead space at the top of the
+        // notebook with just the kernel cluster in the corner (user 2026-07-14).
         h_flex()
             .w_full()
+            .flex_none()
             .px_3()
             .py_1()
             .gap_2()
             .items_center()
-            .justify_between()
-            .bg(cx.theme().colors().status_bar_background)
+            .justify_end()
             .child(
                 KernelSelector::new(
                     Box::new(move |spec: KernelSpecification, window, cx| {
@@ -3437,31 +3456,6 @@ impl NotebookEditor {
                     }
                 }))
                 .with_handle(kernel_picker_handle),
-            )
-            .child(
-                h_flex()
-                    .gap_1()
-                    .child(
-                        IconButton::new("restart-kernel", IconName::RotateCw)
-                            .icon_size(IconSize::Small)
-                            .tooltip(|window, cx| {
-                                Tooltip::for_action("Restart Kernel", &RestartKernel, cx)
-                            })
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.restart_kernel(&RestartKernel, window, cx);
-                            })),
-                    )
-                    .child(
-                        IconButton::new("interrupt-kernel", IconName::Stop)
-                            .icon_size(IconSize::Small)
-                            .disabled(!kernel_status.is_connected())
-                            .tooltip(|window, cx| {
-                                Tooltip::for_action("Interrupt Kernel", &InterruptKernel, cx)
-                            })
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.interrupt_kernel(&InterruptKernel, window, cx);
-                            })),
-                    ),
             )
     }
 
@@ -3727,11 +3721,14 @@ impl Render for NotebookEditor {
             .on_action(cx.listener(|this, action, window, cx| {
                 this.clear_selected_cell_outputs(action, window, cx)
             }))
+            // Kernel strip on top, cells below it (phase 30) — the old bottom
+            // status bar is gone; restart/interrupt live in the sidebar.
+            .child(self.render_kernel_strip(window, cx))
             .child(
                 // `.flex_1()` (not `.h_full()`) sizes this row to the height
-                // left after the status bar; `.h_full()` here would take the
-                // whole notebook height and let the status bar overlap the
-                // row's bottom, hiding the last cell (see bug #25).
+                // left after the kernel strip; `.h_full()` here would take the
+                // whole notebook height and let siblings overlap the row's
+                // bottom, hiding the last cell (see bug #25).
                 h_flex()
                     .flex_1()
                     .w_full()
@@ -3740,7 +3737,6 @@ impl Render for NotebookEditor {
                     .child(div().flex_1().h_full().child(self.cell_list(window, cx)))
                     .child(self.render_notebook_controls(window, cx)),
             )
-            .child(self.render_kernel_status_bar(window, cx))
     }
 }
 

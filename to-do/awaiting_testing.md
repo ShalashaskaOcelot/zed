@@ -35,6 +35,21 @@ listed here.
       kernel unchanged (check the picker checkmark shows the current
       notebook's kernel too).
 
+## Phase 30 — Notebook chrome rework (drop the bottom kernel bar)
+
+Kind: change to existing behaviour — if the new layout misses the mark, say
+so and it gets fixed in place (not archived-and-refiled).
+
+- [ ] The bottom kernel bar is GONE; cells start slightly lower, below a slim
+      strip whose top-right corner holds the kernel status icon + name.
+- [ ] Clicking the top-right kernel cluster opens the kernel picker (and the
+      run-with-no-kernel prompt flow still opens it too).
+- [ ] Restart Kernel and Interrupt Kernel now live in the right sidebar
+      (bottom cluster, above the kernel indicator); interrupt is disabled when
+      no kernel is connected.
+- [ ] Nothing that lived on the bottom bar is unreachable; re-check bug #25's
+      add-cell-at-bottom now that the bar is gone.
+
 ## Phase 28 — Per-cell "last executed" timestamp
 
 - [ ] Run a cell → a timestamp (e.g. `· 14:32:05`) appears after the ✓ and

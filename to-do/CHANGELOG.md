@@ -51,6 +51,9 @@ entry rather than archiving it.
   the ✓/✕ + duration (setting `notebook_show_last_executed`, default on),
   persisted VS Code-compatibly in cell metadata.execution; loaded notebooks
   restore ✓ + duration + time from saved timestamps.
+- Phase 30 — Notebook chrome rework: bottom kernel bar removed; kernel
+  cluster (status + name = picker trigger) now a slim top-right strip above
+  the cells; Restart/Interrupt moved into the right sidebar.
 
 ## Fixed bugs (confirmed)
 

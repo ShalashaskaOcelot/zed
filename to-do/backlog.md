@@ -8,20 +8,6 @@ high → low within each group.
 
 ## Medium priority
 
-- Dedicated REPL / Notebook section in the GUI settings UI (user 2026-07-11):
-  as notebook config grows (landing mode, and future options), surface a
-  grouped settings page/section so they're discoverable and editable in one
-  place rather than only via settings.json. (Depends on how Zed's settings UI
-  registers sections.)
-
-- Let "Create Python Environment" choose the location (user 2026-07-08 —
-  for user-based rather than repo-based venvs in a central place). Default to
-  the local workspace `.venv` so Enter/OK just creates it there, but allow
-  picking a different directory. (Phase 5 follow-up.)
-
-- Kernel autostart on notebook open, setting-gated (opt-in), now that
-  lazy-start is the default and auto-start-on-run exists.
-
 - Immediate interrupt of C-level blocking calls (e.g. `time.sleep`) on Windows
   (follow-up to bug #3). The event-based interrupt sets Python's interrupt flag
   but doesn't wake a blocking C call, so `time.sleep` only interrupts when it
