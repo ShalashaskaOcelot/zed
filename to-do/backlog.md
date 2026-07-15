@@ -10,10 +10,7 @@ high → low within each group.
 
 ## Low priority
 
-- Notebook-level "Run all above / run all below" dedicated toolbar buttons
-  (the "More options" menu already exposes both actions).
 - Conda environment creation (venv creation exists; conda adds a second
   toolchain + `conda create` flow).
-- Split cell / join cells (user: low priority, rarely used).
 - Cell grouping (user: low priority, rarely used).
 

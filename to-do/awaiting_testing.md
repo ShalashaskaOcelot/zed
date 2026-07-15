@@ -35,6 +35,13 @@ listed here.
       kernel unchanged (check the picker checkmark shows the current
       notebook's kernel too).
 
+## Phase 36 — Notebook code health & stubs
+
+- [ ] "notebook: open notebook" from the command palette now opens the
+      workspace file-open dialog (was a no-op that printed to stdout).
+- [ ] General smoke test: no notebook feature regressed after the dead-code
+      sweep (nothing user-visible should have changed besides the above).
+
 ## Phase 29 — Output interaction polish
 
 - [ ] Each notebook output now shows small controls on hover/right edge:

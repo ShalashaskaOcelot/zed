@@ -1,32 +1,26 @@
-#![allow(unused, dead_code)]
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::time::Duration;
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Context as _, Result};
-use client::proto::ViewId;
 use collections::HashMap;
-use editor::{DisplayPoint, Editor};
 use feature_flags::{FeatureFlagAppExt as _, NotebookFeatureFlag};
 use futures::FutureExt;
 use futures::future::Shared;
 use gpui::{
     AnyElement, App, ClipboardItem, Entity, EventEmitter, FocusHandle, Focusable, KeyContext,
-    ListScrollEvent, ListState, Point, PromptLevel, Task, TaskExt, actions, list, prelude::*,
+    ListState, Point, PromptLevel, Task, TaskExt, list, prelude::*,
 };
-use jupyter_protocol::JupyterKernelspec;
 use language::{Buffer, Language, LanguageRegistry};
 use log;
 use project::{Project, ProjectEntryId, ProjectPath};
 use settings::{NotebookRunLandingMode, Settings as _};
-use ui::{CommonAnimationExt, Tooltip, prelude::*};
-use workspace::item::{ItemEvent, SaveOptions, TabContentParams};
+use ui::{Tooltip, prelude::*};
+use workspace::item::{SaveOptions, TabContentParams};
 use workspace::notifications::NotificationId;
 use workspace::searchable::SearchableItemHandle;
-use workspace::{
-    Item, ItemHandle, OpenOptions, OpenVisible, Pane, ProjectItem, ToolbarItemLocation, Workspace,
-};
+use workspace::{Item, Open, OpenOptions, OpenVisible, Pane, ProjectItem, Workspace};
 
 use super::{
     Cell, CellEvent, CellExecutionStatus, CellPosition, CellToolbarAction, MarkdownCellEvent,
@@ -34,14 +28,13 @@ use super::{
 };
 
 use nbformat::v4::CellId;
-use nbformat::v4::Metadata as NotebookMetadata;
 use serde_json;
 use uuid::Uuid;
 
 use crate::components::{KernelPickerDelegate, KernelSelector};
 use crate::kernels::{
-    Kernel, KernelSession, KernelSpecification, KernelStatus, LocalKernelSpecification,
-    NativeRunningKernel, PythonEnvKernelSpecification, RemoteRunningKernel, SshRunningKernel,
+    Kernel, KernelSession, KernelSpecification, KernelStatus, NativeRunningKernel,
+    PythonEnvKernelSpecification, RemoteRunningKernel, SshRunningKernel,
     WslRunningKernel,
 };
 use crate::notebook::MovementDirection;
@@ -106,10 +99,7 @@ enum SelectionMode {
     SelectAndMove,
 }
 
-pub(crate) const MAX_TEXT_BLOCK_WIDTH: f32 = 9999.0;
-pub(crate) const SMALL_SPACING_SIZE: f32 = 8.0;
 pub(crate) const MEDIUM_SPACING_SIZE: f32 = 12.0;
-pub(crate) const LARGE_SPACING_SIZE: f32 = 16.0;
 pub(crate) const GUTTER_WIDTH: f32 = 30.0;
 /// Hover group shared by every cell's root element, so gutters and toolbars
 /// can show/hide on cell hover regardless of cell type.
@@ -154,7 +144,6 @@ pub struct NotebookEditor {
     focus_handle: FocusHandle,
     notebook_item: Entity<NotebookItem>,
     notebook_language: Shared<Task<Option<Arc<Language>>>>,
-    remote_id: Option<ViewId>,
     cell_list: ListState,
     notebook_mode: NotebookMode,
     selected_cell_index: usize,
@@ -218,7 +207,6 @@ impl NotebookEditor {
         let focus_handle = cx.focus_handle();
 
         let languages = project.read(cx).languages().clone();
-        let language_name = notebook_item.read(cx).language_name();
         let worktree_id = notebook_item.read(cx).project_path.worktree_id;
 
         let notebook_language = notebook_item.read(cx).notebook_language();
@@ -340,10 +328,8 @@ impl NotebookEditor {
             cell_map.insert(cell_id.clone(), cell_entity);
         }
 
-        let notebook_handle = cx.entity().downgrade();
         let cell_count = cell_order.len();
 
-        let this = cx.entity();
         let cell_list = ListState::new(cell_count, gpui::ListAlignment::Top, px(1000.));
 
         let mut editor = Self {
@@ -353,7 +339,6 @@ impl NotebookEditor {
             focus_handle,
             notebook_item: notebook_item.clone(),
             notebook_language,
-            remote_id: None,
             cell_list,
             notebook_mode: NotebookMode::Command,
             selected_cell_index: 0,
@@ -1532,7 +1517,7 @@ impl NotebookEditor {
             .and_then(|cell_id| self.cell_map.get(cell_id))
     }
 
-    fn has_outputs(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    fn has_outputs(&self, _window: &mut Window, cx: &mut Context<Self>) -> bool {
         self.cell_map.values().any(|cell| {
             if let Cell::Code(code_cell) = cell {
                 code_cell.read(cx).has_outputs()
@@ -1542,7 +1527,7 @@ impl NotebookEditor {
         })
     }
 
-    fn clear_outputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn clear_outputs(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.execution_state_changed = true;
         for cell in self.cell_map.values() {
             if let Cell::Code(code_cell) = cell {
@@ -1956,36 +1941,8 @@ impl NotebookEditor {
         cx.notify();
     }
 
-    // Discussion can be done on this default implementation
-    /// Moves focus to the next cell editor (used when already in edit mode).
-    fn move_to_next_cell(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.cell_order.is_empty() && self.selected_cell_index < self.cell_order.len() - 1 {
-            self.selected_cell_index += 1;
-            // focus the new cell's editor
-            if let Some(cell_id) = self.cell_order.get(self.selected_cell_index) {
-                if let Some(cell) = self.cell_map.get(cell_id) {
-                    match cell {
-                        Cell::Code(code_cell) => {
-                            let editor = code_cell.read(cx).editor();
-                            window.focus(&editor.focus_handle(cx), cx);
-                        }
-                        Cell::Markdown(markdown_cell) => {
-                            // Don't auto-enter edit mode for next markdown cell
-                            // Just select it
-                        }
-                        Cell::Raw(_) => {}
-                    }
-                }
-            }
-            cx.notify();
-        } else {
-            // in the end, could optionally create a new cell
-            // For now, just stay on the current cell
-        }
-    }
-
-    fn open_notebook(&mut self, _: &OpenNotebook, _window: &mut Window, _cx: &mut Context<Self>) {
-        println!("Open notebook triggered");
+    fn open_notebook(&mut self, _: &OpenNotebook, window: &mut Window, cx: &mut Context<Self>) {
+        window.dispatch_action(Box::new(Open::DEFAULT), cx);
     }
 
     /// Whether the multi-selection is one contiguous block. Block moves only
@@ -2268,17 +2225,6 @@ impl NotebookEditor {
         });
         self.wire_markdown_cell(new_cell_id.clone(), &markdown_cell, window, cx);
         (new_cell_id, markdown_cell)
-    }
-
-    fn focus_cell_editor_in_edit_mode(
-        &mut self,
-        editor: Entity<Editor>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        window.focus(&editor.focus_handle(cx), cx);
-        self.notebook_mode = NotebookMode::Edit;
-        cx.notify();
     }
 
     fn add_markdown_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -3133,7 +3079,7 @@ impl NotebookEditor {
         }
     }
 
-    fn button_group(window: &mut Window, cx: &mut Context<Self>) -> Div {
+    fn button_group(_window: &mut Window, cx: &mut Context<Self>) -> Div {
         v_flex()
             .gap(DynamicSpacing::Base04.rems(cx))
             .items_center()
@@ -3183,7 +3129,7 @@ impl NotebookEditor {
                                     window,
                                     cx,
                                 )
-                                .tooltip(move |window, cx| {
+                                .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Execute all cells", &RunAll, cx)
                                 })
                                 .on_click(|_, window, cx| {
@@ -3198,7 +3144,7 @@ impl NotebookEditor {
                                     cx,
                                 )
                                 .disabled(!has_outputs)
-                                .tooltip(move |window, cx| {
+                                .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Clear all outputs", &ClearOutputs, cx)
                                 })
                                 .on_click(|_, window, cx| {
@@ -3215,7 +3161,7 @@ impl NotebookEditor {
                                     window,
                                     cx,
                                 )
-                                .tooltip(move |window, cx| {
+                                .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Move cell up", &MoveCellUp, cx)
                                 })
                                 .on_click(|_, window, cx| {
@@ -3229,7 +3175,7 @@ impl NotebookEditor {
                                     window,
                                     cx,
                                 )
-                                .tooltip(move |window, cx| {
+                                .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Move cell down", &MoveCellDown, cx)
                                 })
                                 .on_click(|_, window, cx| {
@@ -3246,7 +3192,7 @@ impl NotebookEditor {
                                     window,
                                     cx,
                                 )
-                                .tooltip(move |window, cx| {
+                                .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Add markdown block", &AddMarkdownBlock, cx)
                                 })
                                 .on_click(|_, window, cx| {
@@ -3260,7 +3206,7 @@ impl NotebookEditor {
                                     window,
                                     cx,
                                 )
-                                .tooltip(move |window, cx| {
+                                .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Add code block", &AddCodeBlock, cx)
                                 })
                                 .on_click(|_, window, cx| {
@@ -3325,7 +3271,7 @@ impl NotebookEditor {
                                     window,
                                     cx,
                                 )
-                                .tooltip(|window, cx| {
+                                .tooltip(|_window, cx| {
                                     Tooltip::for_action("Restart Kernel", &RestartKernel, cx)
                                 })
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -3340,7 +3286,7 @@ impl NotebookEditor {
                                     cx,
                                 )
                                 .disabled(!self.kernel.status().is_connected())
-                                .tooltip(|window, cx| {
+                                .tooltip(|_window, cx| {
                                     Tooltip::for_action("Interrupt Kernel", &InterruptKernel, cx)
                                 })
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -3490,7 +3436,7 @@ impl NotebookEditor {
         &self,
         index: usize,
         cell: &Cell,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let cell_position = self.cell_position(index);
@@ -3775,7 +3721,6 @@ impl project::ProjectItem for NotebookItem {
     ) -> Option<Task<anyhow::Result<Entity<Self>>>> {
         let path = path.clone();
         let project = project.clone();
-        let fs = project.read(cx).fs().clone();
         let languages = project.read(cx).languages().clone();
 
         if path.path.extension().unwrap_or_default() == "ipynb" {
@@ -3858,51 +3803,6 @@ impl EventEmitter<()> for NotebookItem {}
 
 impl EventEmitter<()> for NotebookEditor {}
 
-// pub struct NotebookControls {
-//     pane_focused: bool,
-//     active_item: Option<Box<dyn ItemHandle>>,
-//     // subscription: Option<Subscription>,
-// }
-
-// impl NotebookControls {
-//     pub fn new() -> Self {
-//         Self {
-//             pane_focused: false,
-//             active_item: Default::default(),
-//             // subscription: Default::default(),
-//         }
-//     }
-// }
-
-// impl EventEmitter<ToolbarItemEvent> for NotebookControls {}
-
-// impl Render for NotebookControls {
-//     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-//         div().child("notebook controls")
-//     }
-// }
-
-// impl ToolbarItemView for NotebookControls {
-//     fn set_active_pane_item(
-//         &mut self,
-//         active_pane_item: Option<&dyn workspace::ItemHandle>,
-//         window: &mut Window, cx: &mut Context<Self>,
-//     ) -> workspace::ToolbarItemLocation {
-//         cx.notify();
-//         self.active_item = None;
-
-//         let Some(item) = active_pane_item else {
-//             return ToolbarItemLocation::Hidden;
-//         };
-
-//         ToolbarItemLocation::PrimaryLeft
-//     }
-
-//     fn pane_focus_update(&mut self, pane_focused: bool, _window: &mut Window, _cx: &mut Context<Self>) {
-//         self.pane_focused = pane_focused;
-//     }
-// }
-
 impl Item for NotebookEditor {
     type Event = ();
 
@@ -3947,7 +3847,7 @@ impl Item for NotebookEditor {
             .into()
     }
 
-    fn tab_content(&self, params: TabContentParams, window: &Window, cx: &App) -> AnyElement {
+    fn tab_content(&self, params: TabContentParams, _window: &Window, cx: &App) -> AnyElement {
         Label::new(self.tab_content_text(params.detail.unwrap_or(0), cx))
             .single_line()
             .color(params.text_color())
@@ -3963,9 +3863,10 @@ impl Item for NotebookEditor {
         false
     }
 
-    // TODO
-    fn pixel_position_of_cursor(&self, _: &App) -> Option<Point<Pixels>> {
-        None
+    fn pixel_position_of_cursor(&self, cx: &App) -> Option<Point<Pixels>> {
+        let cell_id = self.cell_order.get(self.selected_cell_index)?;
+        let editor = self.cell_map.get(cell_id)?.editor(cx)?;
+        editor.read(cx).pixel_position_of_cursor(cx)
     }
 
     // TODO
@@ -4231,7 +4132,9 @@ impl KernelSession for NotebookEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kernels::LocalKernelSpecification;
     use gpui::TestAppContext;
+    use jupyter_protocol::JupyterKernelspec;
     use project::{FakeFs, Project, ProjectItem as _};
     use serde_json::json;
     use settings::SettingsStore;

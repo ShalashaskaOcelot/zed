@@ -68,6 +68,12 @@ entry rather than archiving it.
   truncated cells) and fill the output width proportionally when a long
   column exists (compact tables stay compact). In-place text selection
   re-phased as phase 37.
+- Phase 36 — Notebook code health: removed the file-wide allow(unused,
+  dead_code) from notebook_ui.rs and every piece of dead code it hid
+  (constants, remote_id field, two dead methods, stale imports, the
+  commented-out NotebookControls block); OpenNotebook now opens the
+  workspace file picker instead of println!; Item::pixel_position_of_cursor
+  implemented (delegates to the selected cell's editor).
 
 ## Fixed bugs (confirmed)
 
