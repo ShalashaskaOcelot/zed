@@ -4379,6 +4379,122 @@ mod tests {
         });
     }
 
+    const NOTEBOOK_WITH_MIXED_CELLS: &str = r##"{
+        "metadata": {
+            "kernelspec": {
+                "display_name": "Python 3",
+                "language": "python",
+                "name": "python3"
+            },
+            "language_info": {
+                "name": "python"
+            }
+        },
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "cells": [
+            {
+                "cell_type": "markdown",
+                "id": "cell-md",
+                "metadata": {},
+                "source": ["# Heading\n", "Some text"]
+            },
+            {
+                "cell_type": "code",
+                "id": "cell-one",
+                "metadata": {},
+                "execution_count": 3,
+                "outputs": [
+                    {
+                        "output_type": "stream",
+                        "name": "stdout",
+                        "text": ["hello\n"]
+                    },
+                    {
+                        "output_type": "execute_result",
+                        "execution_count": 3,
+                        "metadata": {},
+                        "data": { "text/plain": ["42"] }
+                    }
+                ],
+                "source": ["print('hello')\n", "42"]
+            },
+            {
+                "cell_type": "code",
+                "id": "cell-two",
+                "metadata": { "jupyter": { "source_hidden": true } },
+                "execution_count": null,
+                "outputs": [],
+                "source": ["x = 1"]
+            }
+        ]
+    }"##;
+
+    /// Merely opening a notebook must not mark it dirty: nothing has changed
+    /// until the user edits, runs, or toggles something (bug #32 repro).
+    #[gpui::test]
+    async fn test_opening_a_notebook_is_not_dirty(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            editor::init(cx);
+        });
+
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            path!("/notebooks"),
+            json!({ "test.ipynb": NOTEBOOK_WITH_MIXED_CELLS }),
+        )
+        .await;
+
+        let project = Project::test(fs.clone(), [path!("/notebooks").as_ref()], cx).await;
+        cx.update(|cx| ReplStore::init(fs.clone(), cx));
+
+        let worktree_id = project.read_with(cx, |project, cx| {
+            project.worktrees(cx).next().unwrap().read(cx).id()
+        });
+
+        let notebook_item = cx
+            .update(|cx| {
+                NotebookItem::try_open(
+                    &project,
+                    &ProjectPath {
+                        worktree_id,
+                        path: rel_path("test.ipynb").into(),
+                    },
+                    cx,
+                )
+                .expect("ipynb files should be openable as notebooks")
+            })
+            .await
+            .expect("notebook should parse");
+
+        let cx = cx.add_empty_window();
+        let editor = cx.update(|window, cx| {
+            cx.new(|cx| NotebookEditor::new(project.clone(), notebook_item, window, cx))
+        });
+
+        // Let async open work (language loading, kernelspec discovery
+        // observers) settle before checking.
+        cx.run_until_parked();
+
+        editor.read_with(cx, |editor, cx| {
+            assert!(
+                !editor.execution_state_changed,
+                "opening must not count as an execution-state change"
+            );
+            assert!(
+                !editor.has_structural_changes(),
+                "opening must not count as a structural change"
+            );
+            assert!(
+                !editor.has_content_changes(cx),
+                "opening must not make any cell buffer dirty"
+            );
+        });
+    }
+
     /// An empty/whitespace `.ipynb` must open as a one-cell notebook (not a
     /// blank pane), and the generated template must round-trip back through the
     /// parser as valid nbformat.

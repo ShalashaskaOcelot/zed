@@ -830,7 +830,9 @@ impl CodeCell {
 
             editor.disable_mouse_wheel_zoom();
             editor.disable_scrollbars_and_minimap(window, cx);
-            editor.set_text(source.clone(), window, cx);
+            // The buffer was CREATED with `source` above — setting the text
+            // again would record a real edit, making every cell buffer (and
+            // therefore the whole notebook) dirty the moment it opens (bug #32).
             editor.set_show_gutter(false, cx);
             editor.set_use_modal_editing(true);
             editor

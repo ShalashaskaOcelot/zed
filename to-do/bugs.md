@@ -341,3 +341,27 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   status + duration. The internal `clear_outputs` used by `begin_running`
   keeps status/timing (a starting run must not lose its spinner).
 - **Tested:** n/a
+
+## 32. Notebook is dirty immediately upon opening
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-07-14) Notebooks show as dirty the moment they are
+  opened, before starting a kernel or running/editing anything. This also made
+  the "restart must not dirty" check unfalsifiable (dirty either way).
+- **Root cause (reproduced in a new regression test):** `CodeCell::new` created
+  the cell's buffer WITH the source text (`Buffer::local(source)`) and then
+  ALSO called `editor.set_text(source)` — a real edit that bumps the buffer
+  version past its saved version, so every code-cell buffer (and therefore
+  `has_content_changes`, and therefore the whole notebook) was born dirty.
+  Longstanding, not introduced by phase 25 — but phase 25's restart test is
+  what surfaced it.
+- **Fix attempted (2026-07-14):** removed the redundant `set_text`; the buffer
+  already contains the source. Added `test_opening_a_notebook_is_not_dirty`
+  (mixed markdown/code cells, outputs, collapse metadata) asserting a freshly
+  opened notebook reports no execution-state, structural, or content changes —
+  it failed before the fix and passes after.
+- **Tested:** no — needs user confirmation (open a notebook → no dirty dot, no
+  save prompt on close; then re-test: Restart Kernel on a never-started
+  notebook must NOT dirty; restart of a RUNNING kernel still dirties by design,
+  because it resets the cells' `[N]` execution numbers — the small bracketed
+  numbers in the gutter that count kernel executions — which is savable state)
