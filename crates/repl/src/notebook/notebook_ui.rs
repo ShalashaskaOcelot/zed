@@ -1875,6 +1875,13 @@ impl NotebookEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Esc while ALREADY in command mode collapses a multi-cell selection
+        // back to just the primary cell (phase 32) — VS Code style. Esc from
+        // edit mode only switches modes; a fresh multi-selection made in
+        // command mode stays until a second Esc.
+        if self.notebook_mode == NotebookMode::Command && self.has_multi_selection() {
+            self.collapse_selection();
+        }
         self.enter_command_mode(window, cx);
     }
 

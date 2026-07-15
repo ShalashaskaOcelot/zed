@@ -54,6 +54,10 @@ entry rather than archiving it.
 - Phase 30 — Notebook chrome rework: bottom kernel bar removed; kernel
   cluster (status + name = picker trigger) now a slim top-right strip above
   the cells; Restart/Interrupt moved into the right sidebar.
+- Phase 32 — Notebook UX niceties: Esc in command mode collapses a
+  multi-selection to the primary cell; output-menu actions return focus to
+  the notebook (command mode); markdown preview render-on-blur verified
+  already wired.
 
 ## Fixed bugs (confirmed)
 

@@ -1587,12 +1587,24 @@ impl CodeCell {
                                         let collapsed = cell.read(cx).outputs_collapsed;
                                         let cell = cell.clone();
                                         Some(ContextMenu::build(window, cx, move |menu, _, _| {
+                                            // Each entry re-selects the cell via
+                                            // PlainClick when done, returning
+                                            // keyboard focus to the notebook so
+                                            // command-mode shortcuts keep working
+                                            // after menu interactions (phase 32 /
+                                            // bug #15 follow-up).
                                             menu.entry("Copy Output", None, {
                                                 let text = text.clone();
+                                                let cell = cell.clone();
                                                 move |_, cx| {
                                                     cx.write_to_clipboard(
                                                         ClipboardItem::new_string(text.clone()),
                                                     );
+                                                    cell.update(cx, |cell, cx| {
+                                                        cx.emit(CellEvent::PlainClick {
+                                                            id: cell.id.clone(),
+                                                        });
+                                                    });
                                                 }
                                             })
                                             .separator()
@@ -1608,6 +1620,9 @@ impl CodeCell {
                                                     move |_, cx| {
                                                         cell.update(cx, |cell, cx| {
                                                             cell.toggle_outputs_collapsed(cx);
+                                                            cx.emit(CellEvent::PlainClick {
+                                                                id: cell.id.clone(),
+                                                            });
                                                         });
                                                     }
                                                 },
@@ -1618,6 +1633,9 @@ impl CodeCell {
                                                 move |_, cx| {
                                                     cell.update(cx, |cell, cx| {
                                                         cell.clear_execution_record();
+                                                        cx.emit(CellEvent::PlainClick {
+                                                            id: cell.id.clone(),
+                                                        });
                                                         cx.notify();
                                                     });
                                                 },

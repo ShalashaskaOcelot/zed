@@ -35,6 +35,17 @@ listed here.
       kernel unchanged (check the picker checkmark shows the current
       notebook's kernel too).
 
+## Phase 32 — Notebook UX niceties
+
+- [ ] Multi-select some cells (shift-down or ctrl-a), press Esc → selection
+      collapses to just the primary cell; a second Esc does nothing more.
+      Esc from EDIT mode still only returns to command mode (selection kept).
+- [ ] Use the output "…" menu (Copy/Collapse/Clear Output) → afterwards the
+      cell is selected in command mode and single-key shortcuts (a/b/dd/…)
+      work immediately, without clicking a cell first.
+- [ ] Edit a markdown cell, press Esc (or click away) → the rendered preview
+      comes back (this was already wired via editor blur — confirm it holds).
+
 ## Phase 30 — Notebook chrome rework (drop the bottom kernel bar)
 
 Kind: change to existing behaviour — if the new layout misses the mark, say

@@ -8,14 +8,6 @@ high → low within each group.
 
 ## Medium priority
 
-- Immediate interrupt of C-level blocking calls (e.g. `time.sleep`) on Windows
-  (follow-up to bug #3). The event-based interrupt sets Python's interrupt flag
-  but doesn't wake a blocking C call, so `time.sleep` only interrupts when it
-  returns. jupyter's "signal" interrupt mode launches the kernel in a new
-  process group and uses `GenerateConsoleCtrlEvent(CTRL_BREAK/ CTRL_C)` for
-  prompt interruption — bigger launch change; normal Python loops already
-  interrupt promptly.
-
 ## Low priority
 
 - Notebook-level "Run all above / run all below" dedicated toolbar buttons
