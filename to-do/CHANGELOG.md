@@ -65,3 +65,9 @@ entry rather than archiving it.
   `02f395c` `ec70129`
 - #23 — Clicking a cell's gutter/margin didn't select the cell. `7f9e17a`
   `b066179`
+- #25 — A cell added at the viewport bottom landed out of view behind the
+  bottom bar. `ccc2164` `d63b87e`
+- #26 — A cell that errored showed a completed ✓ instead of a red ✕. `02de430`
+  `b3b7887`
+- #28 — Cells flashed/stuck "Cancelled" around kernel selection (picker Escape
+  and post-pick startup). `db1173b`

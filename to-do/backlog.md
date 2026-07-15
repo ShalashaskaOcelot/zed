@@ -8,6 +8,11 @@ high → low within each group.
 
 ## Medium priority
 
+- Esc in command mode with a multi-cell selection should collapse it back to a
+  single-cell selection on the primary/focused cell (user 2026-07-14, phase 26
+  follow-up). Today Esc in command mode is only a mode/focus recovery no-op;
+  give it this VS Code-style collapse when `selected_indices.len() > 1`.
+
 - Dedicated REPL / Notebook section in the GUI settings UI (user 2026-07-11):
   as notebook config grows (landing mode, and future options), surface a
   grouped settings page/section so they're discoverable and editable in one

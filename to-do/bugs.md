@@ -255,66 +255,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   load in instantly" — intermittent, consistent with the async-discovery race.)
 - **Tested:** no — needs user confirmation on a fresh app start
 
-## 25. Adding a cell at the viewport bottom doesn't scroll it into view
-
-- **Status:** fix attempted - untested (second attempt)
-- **Symptom:** (user 2026-07-12, phase 22 feedback) Adding a cell below the
-  bottom-most cell while scrolled to the very bottom of the notebook inserts
-  the new cell off-screen — the viewport does not scroll down to reveal it.
-  The bottom status bar may also be obscuring the viewport's lower edge.
-- **First fix FAILED (user 2026-07-14):** removing the `.h_full()` from the
-  content row (candidate "layout overlap") did not help — new cells still land
-  behind the bottom bar.
-- **Root cause (confirmed in gpui code, 2026-07-14):** candidate #2 was right.
-  `ListState::splice` inserts the new item as `ListItem::Unmeasured` with no
-  size hint, so it contributes ZERO height to the list's sum-tree.
-  `scroll_to_reveal_item(ix)` — called synchronously right after the splice —
-  computes `bottom` from those heights, so the goal scroll puts the new item's
-  TOP exactly at the viewport's bottom edge: zero pixels of it visible, i.e.
-  "behind the bottom bar". The item only gets measured during the NEXT layout
-  pass (it is within the list's 1000px overdraw), by which time the reveal has
-  already run short. Additionally, `Window::on_next_frame` callbacks run at the
-  START of the next frame tick — BEFORE that frame's layout — so a single-frame
-  deferral still sees height 0; it takes two hops (frame N's draw measures the
-  item; a callback at frame N+1's start reveals with the real height).
-- **Fix attempted (2026-07-14, second):** `insert_cell` now takes `window`/`cx`
-  and, after the synchronous best-effort reveal, schedules a two-frame deferred
-  re-reveal (`window.on_next_frame` twice) that runs after the new item has
-  been measured, then notifies the view so the corrected scroll paints. Covers
-  every insertion path (add above/below, paste, duplicate, undo/redo, and the
-  delete-last-cell replacement).
-- **Tested:** no — needs user confirmation (scroll to the bottom, add a cell
-  below the last cell → the new cell scrolls fully into view)
-
-## 26. A cell that errors shows a completed ✓ instead of a failure marker
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-14) Ran a cell that failed with an ImportError
-  ("cannot open shared object file"); the traceback rendered, but the cell got
-  the completed ✓ tick rather than a failure ✕.
-- **Analysis:** deliberate-but-wrong current behaviour, not a regression: the
-  phase-17 state machine only distinguishes Finished from Cancelled. The
-  KeyboardInterrupt→Cancelled fix (051c3c6) covered INTERRUPTED cells; a real
-  error's `ExecuteReply(status: Error)` still calls `finish_execution` → ✓
-  (`handle_message` even has a comment "Real errors keep the finished ✓").
-  The user expects VS Code semantics: an errored cell gets a failure marker.
-- **Fix attempted (2026-07-14):** added a `Failed` variant to
-  `CellExecutionStatus`. `ExecuteReply(Error)` → new `fail_execution()`
-  (shares `complete_execution` with finish: records the duration, terminal;
-  does NOT override Cancelled — an interrupted cell's reply also reports Error
-  after the KeyboardInterrupt iopub message, and must stay a muted ✕).
-  Failed renders as a red ✕ + duration; Failed added to `begin_running`'s
-  monotonic guard so a late `execute_input` can't revive a failed fast cell.
-  Stop-on-error batch handling unchanged (it already keyed off the reply).
-  AMENDED same day after adversarial review: the reply arm now recognizes an
-  interrupt from the reply's own `error.ename == "KeyboardInterrupt"` — shell
-  and iopub can reorder, and when the Error reply beat the iopub
-  KeyboardInterrupt message the cell would have shown a red ✕ instead of the
-  muted Cancelled ✕.
-- **Tested:** no — needs user confirmation (run a cell that raises → red ✕ +
-  time, traceback below; interrupt a running cell → still the muted ✕
-  "Cancelled"; successful cells still ✓)
-
 ## 27. One-off "changed on disk" toast on save (post-#21 fix)
 
 - **Status:** open (not reproduced)
@@ -329,50 +269,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   if it recurs, capture what was running/dirty at the time of save.
 - **Fix attempted:** none
 - **Tested:** n/a
-
-## 28. Cells flash/stick "Cancelled" around kernel selection
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-14) Two related wrongs around the kernel picker:
-  1. Escaping the picker (no selection) leaves the triggering/queued cells
-     showing "Cancelled" — they should return to their idle state (arguably
-     they were never really queued to a kernel at all).
-  2. Even when a kernel IS selected: between pressing Enter and the kernel
-     starting, all batch cells briefly show "Cancelled", then jump back to
-     Pending/Running as the queue engages. (Open Zed → Run All → pick kernel →
-     everything flashes Cancelled → kernel starts → statuses correct.)
-- **Analysis (confirmed in code):**
-  - The flash (2): `change_kernel` calls `stop_executing_cells(cx)`
-    UNCONDITIONALLY, which cancels every Pending/Running cell — including the
-    whole batch that is waiting on this very kernel choice. The batch's
-    `run_queue` is deliberately preserved (the `cells_awaiting_kernel_choice`
-    guard covers `cancel_run_queue`) but the cells' STATUSES are wiped to
-    Cancelled, and each only re-Pends when the queue reaches it after the
-    kernel starts — exactly the observed flash.
-  - The Escape case (1): the picker's dismiss callback (`clear_awaiting_cells`)
-    marks awaiting cells and the run queue Cancelled via `cancel_execution` /
-    `cancel_run_queue`. For cells that were never submitted to any kernel,
-    Idle (no marker) is the right end state, not Cancelled.
-  - (On selection the dismiss callback is a no-op — `change_kernel` runs first
-    and drains `cells_awaiting_kernel_choice`, so the `if !empty` guard is
-    false. The flash comes solely from `stop_executing_cells`.)
-- **Fix attempted (2026-07-14):** (a) `change_kernel` now scopes
-  `stop_executing_cells` under the same `cells_awaiting_kernel_choice.is_empty()`
-  guard as `cancel_run_queue` — a selection that satisfies a waiting run keeps
-  every batch cell Pending straight through kernel startup (no Cancelled
-  flash); a deliberate mid-run kernel SWITCH still cancels in-flight work.
-  (b) dismissing the picker without selecting now returns the awaiting cells
-  AND the queued batch to IDLE (new `CodeCell::reset_execution_status` +
-  `abandon_run_queue`) instead of marking them Cancelled — nothing was ever
-  submitted, so no marker. Kernel restart/interrupt/error paths still use
-  `cancel_run_queue` (Cancelled) — no frozen queues (`abandon_run_queue` also
-  clears `active_run_cell`/`resume_run_queue_on_idle`). The user's alternative
-  (a queue-level status that engages at kernel start) wasn't needed once the
-  statuses stay correct.
-- **Tested:** no — needs user confirmation (Run All with no kernel → Escape the
-  picker → cells show NO status marker, not Cancelled; Run All → pick a kernel →
-  cells stay Pending through startup with no Cancelled flash, then run; Restart
-  Kernel mid-batch still cancels the queue)
 
 ## 29. Notebook kernel matching never works for WSL-authored notebooks
 
@@ -392,4 +288,56 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   name like the other variants — but audit the display sites first (labels use
   `name()` too), or match on both name fields.
 - **Fix attempted:** none
+- **Tested:** n/a
+
+## 30. Explicit kernel pick in one notebook changes other notebooks' kernels
+
+- **Status:** open (phase 25 test item FAILED 2026-07-14)
+- **Symptom:** (user 2026-07-14) "Selecting a different kernel in one notebook
+  still changes the kernel for other notebooks also." Expected: per-notebook.
+- **Analysis:** the adversarial-review fix made METADATA adoption per-notebook,
+  but an EXPLICIT pick still goes through `change_kernel` →
+  `ReplStore::set_active_kernelspec`, which is keyed BY WORKTREE — and
+  `remembered_kernel_spec` consults that store selection BEFORE the notebook's
+  own metadata. So a pick in notebook A wins over B's saved kernel.
+- **Fix plan:** make explicit picks per-notebook too: key the store's
+  in-session memory by NOTEBOOK PATH instead of worktree for notebooks
+  (`change_kernel` writes the per-notebook entry; `remembered_kernel_spec`
+  reads own-spec → per-notebook store → own metadata). Cross-session
+  persistence already flows through the notebook's own metadata (written at
+  launch). Show the notebook's own selection in the picker via a
+  selected-override on `KernelSelector`. The inline `.py` REPL's worktree
+  selection mechanism is left untouched.
+- **Tested:** n/a
+
+## 31. A stale (deleted) kernel is retried forever instead of re-prompting
+
+- **Status:** open (phase 25 test item FAILED 2026-07-14)
+- **Symptom:** (user 2026-07-14) Delete the kernel env while the notebook is
+  closed but Zed stays running; reopen the notebook and run → "Kernel error:
+  cell could not be executed" (launch failure), and every subsequent run
+  retries the same dead kernel. (Deleting the env with Zed CLOSED works —
+  fresh discovery doesn't list it and the picker correctly appears.)
+- **Analysis:** the deleted env's spec survives in the store's cached
+  discovery list for the session, so metadata matching adopts it. After the
+  launch fails (`Kernel::ErroredLaunch`), `execute_cell`'s disposition for
+  ErroredLaunch-with-remembered-kernel is `Queued { launch: true }` — an
+  endless retry loop with the same broken spec, and the picker (which would
+  offer alternatives and refresh discovery) is never shown.
+- **Fix plan:** after a failed launch, the next run PROMPTS: split
+  `Kernel::ErroredLaunch` out of the `Shutdown` disposition arm and always
+  return `Prompt` for it. Opening the picker also re-runs kernel discovery.
+- **Tested:** n/a
+
+## 33. Clearing outputs leaves the execution number and status marker
+
+- **Status:** open
+- **Symptom:** (user 2026-07-14) Clearing outputs clears the output area but
+  the cell's `[N]` execution number and its ✓/✕ status stay; it should clear
+  everything back to a never-run look.
+- **Fix plan:** the user-facing clear paths (Clear All Outputs, the
+  `ClearCellOutputs` action, and the output "…" menu's Clear Output) call a
+  new `clear_execution_record` that wipes outputs + execution_count +
+  status + duration. The internal `clear_outputs` used by `begin_running`
+  keeps status/timing (a starting run must not lose its spinner).
 - **Tested:** n/a

@@ -19,17 +19,7 @@ here, add a one-line entry to `CHANGELOG.md`, and delete the bug's `bugs.md`
 entry. If a fix failed, leave the bug open with the new finding and keep it
 listed here.
 
-- [ ] Bug #26 — run a cell that raises (e.g. a bad import) → red ✕ + time
-      (traceback below); interrupt a running cell → still the muted ✕
-      "Cancelled"; successful cells still show ✓.
-- [ ] Bug #28 — Run All with no kernel → Escape the picker → cells show NO
-      status marker (not Cancelled). Run All → pick a kernel → cells stay
-      Pending through kernel startup (no Cancelled flash), then run. Restart
-      Kernel mid-batch still cancels the queue (no frozen queue).
-
-- [ ] Bug #25 — (2nd fix: the reveal now re-runs after the new cell is
-      measured) scroll to the very bottom, add a cell below the last cell → the
-      new cell scrolls fully into view.
+(Bugs #30–#33 have fixes in progress and will get pointer lines as they land.)
 
 ## Phase 24 — Cell operations polish
 
@@ -46,38 +36,11 @@ listed here.
       between cells. (That's what the popup caveat means: the `!menu` gate is
       supposed to hand up/down to the popup while it's open.)
 
-## Phase 25 — Kernel selection quality-of-life
-
-(Revised after adversarial review: adoption is PER-NOTEBOOK display-only — it
-never writes the worktree selection, so opening a notebook can't hijack
-sibling notebooks or the inline REPL. The picker therefore does NOT show a
-checkmark for a metadata-adopted kernel until you run or pick — only the
-status bar shows it.)
-
-- [ ] Select a kernel, save the notebook, FULLY quit Zed, reopen the notebook →
-      the kernel shows in the STATUS BAR without re-picking, and the first run
-      lazy-starts it. (Match is by the kernelspec name saved in the .ipynb, so
-      it also works for notebooks last run in VS Code.)
-- [ ] Two notebooks in one worktree with DIFFERENT saved kernels: each shows
-      and runs its OWN kernel. After an EXPLICIT pick in one, that pick wins
-      for cells run in either (explicit selection beats metadata).
-- [ ] A notebook whose saved kernelspec no longer exists (deleted env) simply
-      shows "Select Kernel" and prompts on run — no error. Same for a saved
-      env that lost ipykernel, and remote-server kernels are never silently
-      adopted.
-- [ ] Restart Kernel on a freshly opened notebook (kernel shown but never
-      started) must NOT dirty the notebook or wipe the `In [N]` numbers loaded
-      from disk.
-- [ ] Auto-run after pick (re-verify while here): run cells with no kernel →
-      picker opens → pick → the queued cells run in order once the kernel is
-      ready.
-
 ## Phase 26 — More multi-select gestures
 
-- [ ] In command mode: `ctrl-a` (`cmd-a` on mac) selects ALL cells as one
-      contiguous selection (no scroll jump).
-- [ ] In command mode: `shift-home` selects from the current cell up to the
-      FIRST cell; `shift-end` down to the LAST cell (view follows the primary).
+- [x] In command mode: `ctrl-a`/`cmd-a` selects ALL cells. CONFIRMED 2026-07-14.
+- [x] In command mode: `shift-home`/`shift-end` select to the first/last cell.
+      CONFIRMED 2026-07-14.
 - [ ] In EDIT mode all three keep their text meanings inside the cell editor:
       ctrl/cmd-a selects the cell's text, shift-home/end select to line
       start/end.
@@ -87,15 +50,5 @@ status bar shows it.)
 - [ ] No Python on PATH: clicking "Create Python Environment" shows a clear
       error toast (instead of failing silently). (Needs a machine/session
       where `python3`/`python` isn't on PATH.)
-
-## Phase 21 — Live elapsed-time counter while a cell runs
-
-- [x] Run a multi-second cell → the time ticks up live next to "Running…",
-      then settles to the final ✓ + time. CONFIRMED 2026-07-12.
-- [ ] No stray ticking/refreshing when nothing is running (ongoing
-      observation): the per-cell 100ms refresh timer exists only while a cell
-      is Running and self-terminates on finish/cancel, so an idle notebook
-      should not be repainting on a timer. Verify nothing keeps refreshing
-      after all cells finish.
 
 
