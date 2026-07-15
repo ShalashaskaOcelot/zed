@@ -331,16 +331,19 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ## 33. Clearing outputs leaves the execution number and status marker
 
-- **Status:** open
+- **Status:** fix attempted - untested
 - **Symptom:** (user 2026-07-14) Clearing outputs clears the output area but
   the cell's `[N]` execution number and its ✓/✕ status stay; it should clear
   everything back to a never-run look.
-- **Fix plan:** the user-facing clear paths (Clear All Outputs, the
-  `ClearCellOutputs` action, and the output "…" menu's Clear Output) call a
-  new `clear_execution_record` that wipes outputs + execution_count +
-  status + duration. The internal `clear_outputs` used by `begin_running`
-  keeps status/timing (a starting run must not lose its spinner).
-- **Tested:** n/a
+- **Fix attempted (2026-07-14):** the user-facing clear paths (Clear All
+  Outputs, the `ClearCellOutputs` action, and the output "…" menu's Clear
+  Output) now call a new `clear_execution_record` that wipes outputs +
+  execution number + status marker + duration, returning the cell to a
+  never-run look. The internal `clear_outputs` used by `begin_running` keeps
+  status/timing (a starting run must not lose its spinner).
+- **Tested:** no — needs user confirmation (clear a ran cell's output → the
+  [N] number and ✓/✕ disappear too, for single-cell, selection, and
+  clear-all)
 
 ## 32. Notebook is dirty immediately upon opening
 

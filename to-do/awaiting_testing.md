@@ -19,7 +19,15 @@ here, add a one-line entry to `CHANGELOG.md`, and delete the bug's `bugs.md`
 entry. If a fix failed, leave the bug open with the new finding and keep it
 listed here.
 
-(Bugs #30–#33 have fixes in progress and will get pointer lines as they land.)
+- [ ] Bug #32 — open a notebook → NO dirty dot / no save prompt on close.
+      Then: Restart Kernel on a never-started notebook → still not dirty.
+      (Restarting a RUNNING kernel still dirties by design — it resets the
+      cells' [N] execution numbers, which are savable state.)
+- [ ] Bug #33 — clear a ran cell's output (single, selection, and Clear All) →
+      the [N] number and ✓/✕ status disappear along with the output.
+
+(Bugs #30/#31 have fixes in progress and will get pointer lines when they
+land.)
 
 ## Phase 24 — Cell operations polish
 

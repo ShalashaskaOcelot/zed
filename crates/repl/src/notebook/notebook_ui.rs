@@ -1533,7 +1533,7 @@ impl NotebookEditor {
         for cell in self.cell_map.values() {
             if let Cell::Code(code_cell) = cell {
                 code_cell.update(cx, |cell, cx| {
-                    cell.clear_outputs();
+                    cell.clear_execution_record();
                     cx.notify();
                 });
             }
@@ -1908,7 +1908,7 @@ impl NotebookEditor {
             {
                 self.execution_state_changed = true;
                 cell.update(cx, |cell, cx| {
-                    cell.clear_outputs();
+                    cell.clear_execution_record();
                     cx.notify();
                 });
             }

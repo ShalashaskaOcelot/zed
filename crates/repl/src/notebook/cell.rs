@@ -980,6 +980,20 @@ impl CodeCell {
         self.outputs.clear();
     }
 
+    /// The user-facing "clear outputs": wipe the outputs AND the whole run
+    /// record — execution number, status marker, duration — returning the
+    /// cell to a never-run look (bug #33). The run path uses `clear_outputs`
+    /// instead, which must keep the in-flight status/timing.
+    pub fn clear_execution_record(&mut self) {
+        self.outputs.clear();
+        self.execution_count = None;
+        self.execution_duration = None;
+        self.execution_start_time = None;
+        self.submitted_at = None;
+        self._run_timer = None;
+        self.execution_status = CellExecutionStatus::Idle;
+    }
+
     /// Concatenated plain text of the cell's text-bearing outputs (stdout/plain
     /// results and error tracebacks), for the "Copy Output" menu action.
     fn outputs_as_text(&self, cx: &App) -> String {
@@ -1490,7 +1504,7 @@ impl CodeCell {
                                                 None,
                                                 move |_, cx| {
                                                     cell.update(cx, |cell, cx| {
-                                                        cell.clear_outputs();
+                                                        cell.clear_execution_record();
                                                         cx.notify();
                                                     });
                                                 },
