@@ -538,10 +538,20 @@ impl NotebookEditor {
             return Some(spec.clone());
         }
         let store = ReplStore::global(cx);
-        let store = store.read(cx);
-        if let Some(spec) = store.selected_kernel(self.worktree_id) {
+        if let Some(spec) = store.read(cx).selected_kernel(self.worktree_id) {
             return Some(spec.clone());
         }
+        self.metadata_matched_kernel_spec(cx)
+    }
+
+    /// The discovered kernel matching the notebook's saved
+    /// `metadata.kernelspec.name`, if any. Only kernels that are safe to start
+    /// SILENTLY are eligible: remote-server specs are excluded (a run must
+    /// never leave the machine without an explicit pick), as are Python envs
+    /// missing ipykernel (the picker greys those out with a warning — silently
+    /// adopting one would loop through launch failures without ever showing
+    /// that warning).
+    fn metadata_matched_kernel_spec(&self, cx: &App) -> Option<KernelSpecification> {
         let kernelspec = self
             .notebook_item
             .read(cx)
@@ -550,58 +560,44 @@ impl NotebookEditor {
             .kernelspec
             .as_ref()?;
         let name = kernelspec.name.clone();
-        store
+        ReplStore::global(cx)
+            .read(cx)
             .kernel_specifications_for_worktree(self.worktree_id)
-            .find(|spec| spec.name().as_ref() == name)
+            .find(|spec| {
+                spec.name().as_ref() == name
+                    && spec.has_ipykernel()
+                    && !matches!(
+                        spec,
+                        KernelSpecification::JupyterServer(_) | KernelSpecification::SshRemote(_)
+                    )
+            })
             .cloned()
     }
 
-    /// If nothing has been selected this session, adopt the kernel matching
-    /// the notebook's saved `kernelspec` metadata as the selection (phase 25):
-    /// the status bar shows it and the first run lazy-starts it, VS Code
-    /// style — no re-picking after a full restart. Discovery is async, so
-    /// this is called on open AND from a store observer; it no-ops until a
-    /// matching spec is discovered. A stale metadata name simply never
-    /// matches, leaving the picker flow untouched, and an explicit in-session
-    /// selection always wins.
+    /// If nothing has been selected this session, adopt the kernel this
+    /// notebook remembers (an explicit worktree selection, else the kernel
+    /// matching its saved `kernelspec` metadata) for DISPLAY (phase 25): the
+    /// status bar shows it and the first run lazy-starts it, VS Code style —
+    /// no re-picking after a full restart. Discovery is async, so this is
+    /// called on open AND from a store observer; it no-ops until a matching
+    /// spec is discovered, and a stale metadata name simply never matches.
+    ///
+    /// Deliberately PER-NOTEBOOK: this never writes the store's
+    /// worktree-level selection. Doing so let merely OPENING one notebook
+    /// hijack which kernel sibling notebooks and the inline REPL resolve to
+    /// (and displace the picker's Recommended entry). Only an explicit pick
+    /// (`change_kernel`) writes the store, so each notebook adopts its own
+    /// metadata kernel and an explicit selection still wins everywhere.
     fn adopt_metadata_kernel_selection(&mut self, cx: &mut Context<Self>) {
         if self.kernel_specification.is_some() {
             return;
         }
-        let store = ReplStore::global(cx);
-        if let Some(selected) = store.read(cx).selected_kernel(self.worktree_id) {
-            // Someone already picked for this worktree this session — show
-            // that, exactly what a run would use.
-            self.kernel_specification = Some(selected.clone());
-            cx.notify();
-            return;
-        }
-        let Some(name) = self
-            .notebook_item
-            .read(cx)
-            .notebook
-            .metadata
-            .kernelspec
-            .as_ref()
-            .map(|kernelspec| kernelspec.name.clone())
-        else {
-            return;
-        };
-        let matched = store
-            .read(cx)
-            .kernel_specifications_for_worktree(self.worktree_id)
-            .find(|spec| spec.name().as_ref() == name)
-            .cloned();
-        if let Some(spec) = matched {
-            log::info!("notebook: pre-selected kernel '{name}' from notebook metadata");
-            self.kernel_specification = Some(spec.clone());
-            // Written through to the store so the kernel picker shows it as
-            // the current selection too. The observer can't loop: on the next
-            // store notify, `kernel_specification` is Some and we bail above.
-            store.update(cx, |store, cx| {
-                store.set_active_kernelspec(self.worktree_id, spec, cx);
-                cx.notify();
-            });
+        if let Some(spec) = self.remembered_kernel_spec(cx) {
+            log::info!(
+                "notebook: pre-selected kernel '{}' (saved selection/metadata)",
+                spec.name()
+            );
+            self.kernel_specification = Some(spec);
             cx.notify();
         }
     }
@@ -1246,14 +1242,22 @@ impl NotebookEditor {
         self.stop_executing_cells(cx);
         // The restarted kernel's execution counter starts over at 1, so the
         // cells' `In [N]` numbers from the old session are stale — clear them
-        // so a fresh run-through is visually distinct.
-        self.execution_state_changed = true;
-        for cell in self.cell_map.values() {
-            if let Cell::Code(code_cell) = cell {
-                code_cell.update(cx, |code_cell, cx| {
-                    code_cell.reset_execution_count();
-                    cx.notify();
-                });
+        // so a fresh run-through is visually distinct. Only when a session
+        // actually existed, though: "restarting" a never-launched kernel
+        // (possible since phase 25 pre-selects one on open) must not wipe the
+        // counts loaded from disk or dirty the notebook.
+        if matches!(
+            kernel,
+            Kernel::RunningKernel(_) | Kernel::StartingKernel(_) | Kernel::Restarting
+        ) {
+            self.execution_state_changed = true;
+            for cell in self.cell_map.values() {
+                if let Cell::Code(code_cell) = cell {
+                    code_cell.update(cx, |code_cell, cx| {
+                        code_cell.reset_execution_count();
+                        cx.notify();
+                    });
+                }
             }
         }
         cx.notify();

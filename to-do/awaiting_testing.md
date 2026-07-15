@@ -48,16 +48,26 @@ listed here.
 
 ## Phase 25 — Kernel selection quality-of-life
 
+(Revised after adversarial review: adoption is PER-NOTEBOOK display-only — it
+never writes the worktree selection, so opening a notebook can't hijack
+sibling notebooks or the inline REPL. The picker therefore does NOT show a
+checkmark for a metadata-adopted kernel until you run or pick — only the
+status bar shows it.)
+
 - [ ] Select a kernel, save the notebook, FULLY quit Zed, reopen the notebook →
-      the kernel shows as selected in the status bar (and checked in the
-      picker) without re-picking, and the first run lazy-starts it. (The match
-      is by the kernelspec name saved in the .ipynb metadata, so it also works
-      for notebooks last run in VS Code.)
-- [ ] With a kernel already selected in the session, opening another notebook
-      in the same worktree shows that selection (explicit choice wins over
-      notebook metadata).
+      the kernel shows in the STATUS BAR without re-picking, and the first run
+      lazy-starts it. (Match is by the kernelspec name saved in the .ipynb, so
+      it also works for notebooks last run in VS Code.)
+- [ ] Two notebooks in one worktree with DIFFERENT saved kernels: each shows
+      and runs its OWN kernel. After an EXPLICIT pick in one, that pick wins
+      for cells run in either (explicit selection beats metadata).
 - [ ] A notebook whose saved kernelspec no longer exists (deleted env) simply
-      shows "Select Kernel" and prompts on run — no error.
+      shows "Select Kernel" and prompts on run — no error. Same for a saved
+      env that lost ipykernel, and remote-server kernels are never silently
+      adopted.
+- [ ] Restart Kernel on a freshly opened notebook (kernel shown but never
+      started) must NOT dirty the notebook or wipe the `In [N]` numbers loaded
+      from disk.
 - [ ] Auto-run after pick (re-verify while here): run cells with no kernel →
       picker opens → pick → the queued cells run in order once the kernel is
       ready.

@@ -306,6 +306,11 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   Failed renders as a red ✕ + duration; Failed added to `begin_running`'s
   monotonic guard so a late `execute_input` can't revive a failed fast cell.
   Stop-on-error batch handling unchanged (it already keyed off the reply).
+  AMENDED same day after adversarial review: the reply arm now recognizes an
+  interrupt from the reply's own `error.ename == "KeyboardInterrupt"` — shell
+  and iopub can reorder, and when the Error reply beat the iopub
+  KeyboardInterrupt message the cell would have shown a red ✕ instead of the
+  muted Cancelled ✕.
 - **Tested:** no — needs user confirmation (run a cell that raises → red ✕ +
   time, traceback below; interrupt a running cell → still the muted ✕
   "Cancelled"; successful cells still ✓)
@@ -368,3 +373,23 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   picker → cells show NO status marker, not Cancelled; Run All → pick a kernel →
   cells stay Pending through startup with no Cancelled flash, then run; Restart
   Kernel mid-batch still cancels the queue)
+
+## 29. Notebook kernel matching never works for WSL-authored notebooks
+
+- **Status:** open (low priority; pre-existing, surfaced by the phase-25 review)
+- **Symptom:** (adversarial code review, 2026-07-14) A notebook authored in
+  JupyterLab inside WSL saves `metadata.kernelspec.name = "python3"`, but the
+  saved-kernel matching (both `remembered_kernel_spec`'s fallback from phase 6
+  and phase 25's pre-selection) can never match the WSL kernel — and a
+  same-named Windows-local kernel can silently steal the match instead.
+- **Analysis:** `KernelSpecification::name()` (`kernels/mod.rs`) returns the
+  DISPLAY name (e.g. "Python 3 (ipykernel)") for the `WslRemote` variant only;
+  every other variant returns the real kernelspec name. So `"python3"` never
+  equals the WSL spec's `name()`. Notebooks round-trip fine WITHIN Zed (we
+  write `spec.name()` back into the metadata on launch), but externally-authored
+  WSL notebooks miss, and a Windows-local kernel dir named `python3` matches
+  first. Fix direction: make `WslRemote`'s `name()` return the kernelspec dir
+  name like the other variants — but audit the display sites first (labels use
+  `name()` too), or match on both name fields.
+- **Fix attempted:** none
+- **Tested:** n/a

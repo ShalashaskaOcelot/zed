@@ -1372,10 +1372,23 @@ impl CodeCell {
                     // interrupt without executing them — those cells were
                     // never run, so they must not get a completed tick.
                     ReplyStatus::Aborted => self.cancel_execution(),
-                    // The cell ran and raised → red ✕ (interrupted cells are
-                    // already Cancelled and stay that way — see
-                    // `complete_execution`).
-                    ReplyStatus::Error => self.fail_execution(),
+                    ReplyStatus::Error => {
+                        // An interrupt's reply also reports Error
+                        // (KeyboardInterrupt). The iopub error usually lands
+                        // first and marks the cell Cancelled, but shell and
+                        // iopub can reorder — recognize the interrupt from
+                        // the reply itself so a user stop never shows as a
+                        // red ✕ failure. Real errors → red ✕.
+                        let interrupted = reply
+                            .error
+                            .as_ref()
+                            .is_some_and(|error| error.ename == "KeyboardInterrupt");
+                        if interrupted {
+                            self.cancel_execution();
+                        } else {
+                            self.fail_execution();
+                        }
+                    }
                     _ => self.finish_execution(),
                 }
             }
