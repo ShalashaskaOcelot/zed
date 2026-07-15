@@ -312,7 +312,7 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ## 31. A stale (deleted) kernel is retried forever instead of re-prompting
 
-- **Status:** open (phase 25 test item FAILED 2026-07-14)
+- **Status:** fix attempted - untested
 - **Symptom:** (user 2026-07-14) Delete the kernel env while the notebook is
   closed but Zed stays running; reopen the notebook and run → "Kernel error:
   cell could not be executed" (launch failure), and every subsequent run
@@ -324,10 +324,16 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   ErroredLaunch-with-remembered-kernel is `Queued { launch: true }` — an
   endless retry loop with the same broken spec, and the picker (which would
   offer alternatives and refresh discovery) is never shown.
-- **Fix plan:** after a failed launch, the next run PROMPTS: split
-  `Kernel::ErroredLaunch` out of the `Shutdown` disposition arm and always
-  return `Prompt` for it. Opening the picker also re-runs kernel discovery.
-- **Tested:** n/a
+- **Fix attempted (2026-07-14):** after a failed launch the next run PROMPTS:
+  `Kernel::ErroredLaunch` is split out of the `Shutdown` disposition arm and
+  always yields `Prompt`, and the Prompt branch now opens the picker DIRECTLY
+  (previously it went through `launch_kernel`, whose remembered-spec fallback
+  would have relaunched the very spec that just failed). An explicit pick
+  replaces the broken selection; dismissing leaves the cells idle (bug #28
+  behavior).
+- **Tested:** no — needs user confirmation (delete the kernel env while Zed is
+  running with the notebook closed; reopen + run → the launch fails ONCE, and
+  the NEXT run opens the kernel picker instead of erroring again)
 
 ## 33. Clearing outputs leaves the execution number and status marker
 

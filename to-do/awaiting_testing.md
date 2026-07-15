@@ -26,8 +26,11 @@ listed here.
 - [ ] Bug #33 — clear a ran cell's output (single, selection, and Clear All) →
       the [N] number and ✓/✕ status disappear along with the output.
 
-(Bugs #30/#31 have fixes in progress and will get pointer lines when they
-land.)
+- [ ] Bug #31 — delete the kernel env while Zed stays running (notebook
+      closed); reopen + run → the launch errors once, and the NEXT run opens
+      the kernel picker instead of repeating the error forever.
+
+(Bug #30's fix is in progress and will get a pointer line when it lands.)
 
 ## Phase 24 — Cell operations polish
 

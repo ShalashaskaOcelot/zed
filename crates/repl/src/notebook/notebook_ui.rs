@@ -1382,23 +1382,32 @@ impl NotebookEditor {
                 }
             }
             Kernel::StartingKernel(_) | Kernel::Restarting => Disposition::Queued { launch: false },
-            Kernel::Shutdown | Kernel::ErroredLaunch(_) => {
+            Kernel::Shutdown => {
                 if has_remembered_kernel {
                     Disposition::Queued { launch: true }
                 } else {
                     Disposition::Prompt
                 }
             }
+            // A previous launch FAILED: silently relaunching the remembered
+            // spec would loop the error forever (e.g. an env deleted
+            // mid-session that discovery still lists — bug #31). Re-prompt
+            // instead; an explicit pick replaces the broken selection.
+            Kernel::ErroredLaunch(_) => Disposition::Prompt,
             Kernel::ShuttingDown => Disposition::Failed("the kernel is shutting down".to_string()),
         };
 
         if let Disposition::Prompt = disposition {
-            // Hold the cell (no spinner) and open the picker. It will run if a
-            // kernel is chosen (see change_kernel), or be cleared on dismiss.
+            // Hold the cell (no spinner) and open the picker directly — NOT
+            // via launch_kernel, whose remembered-spec fallback would relaunch
+            // the very spec that just failed (bug #31). Both Prompt producers
+            // want the picker: Shutdown-without-remembered has nothing to
+            // launch, and ErroredLaunch must not relaunch. The cell runs if a
+            // kernel is chosen (see change_kernel), or is cleared on dismiss.
             if !self.cells_awaiting_kernel_choice.contains(&cell_id) {
                 self.cells_awaiting_kernel_choice.push(cell_id);
             }
-            self.launch_kernel(window, cx);
+            self.kernel_picker_handle.show(window, cx);
             return;
         }
 
