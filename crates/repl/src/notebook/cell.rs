@@ -969,6 +969,10 @@ impl CodeCell {
         !self.outputs.is_empty()
     }
 
+    pub fn outputs(&self) -> &[Output] {
+        &self.outputs
+    }
+
     pub fn clear_outputs(&mut self) {
         // Only the outputs — NOT the recorded duration. `begin_running` clears
         // outputs at the start of every run (including a late iopub

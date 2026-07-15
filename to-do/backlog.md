@@ -8,11 +8,6 @@ high → low within each group.
 
 ## Medium priority
 
-- Esc in command mode with a multi-cell selection should collapse it back to a
-  single-cell selection on the primary/focused cell (user 2026-07-14, phase 26
-  follow-up). Today Esc in command mode is only a mode/focus recovery no-op;
-  give it this VS Code-style collapse when `selected_indices.len() > 1`.
-
 - Dedicated REPL / Notebook section in the GUI settings UI (user 2026-07-11):
   as notebook config grows (landing mode, and future options), surface a
   grouped settings page/section so they're discoverable and editable in one
@@ -45,12 +40,6 @@ high → low within each group.
   process group and uses `GenerateConsoleCtrlEvent(CTRL_BREAK/ CTRL_C)` for
   prompt interruption — bigger launch change; normal Python loops already
   interrupt promptly.
-
-- Return keyboard focus to the notebook after toolbar-button / popover
-  interactions so command-mode shortcuts keep working without clicking a cell
-  (follow-up to bug #15 if the on_focus/Escape mitigations aren't enough).
-
-- Markdown cell rendered-preview toggle improvements (render on exit-edit).
 
 ## Low priority
 

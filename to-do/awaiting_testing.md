@@ -35,6 +35,12 @@ listed here.
       kernel unchanged (check the picker checkmark shows the current
       notebook's kernel too).
 
+## Phase 27 — Retain cell output through clipboard & undo
+
+- [ ] Run a cell (text output) and one with a rich output (DataFrame/plot);
+      cut → paste: outputs come back with the cells.
+- [ ] Delete → undo and cut → undo: outputs restored too.
+
 ## Phase 24 — Cell operations polish
 
 - [x] Paste Cell Above: the COMMAND works (confirmed via the palette,

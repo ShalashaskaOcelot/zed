@@ -4516,6 +4516,76 @@ mod tests {
         });
     }
 
+    /// A cell's OUTPUTS must survive the snapshot round-trip used by
+    /// copy/cut/paste and delete/undo: live cell → nbformat (what the
+    /// clipboard and the undo stack store) → live cell → nbformat again
+    /// (phase 27). Covers stream, plain-result, and rich (markdown) outputs —
+    /// the rich kind is what bug #24 used to drop.
+    #[gpui::test]
+    async fn test_cell_outputs_round_trip_through_snapshot(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            editor::init(cx);
+        });
+        let cx = cx.add_empty_window();
+
+        let cell_json = r##"{
+            "cell_type": "code",
+            "id": "cell-out",
+            "metadata": {},
+            "execution_count": 7,
+            "outputs": [
+                { "output_type": "stream", "name": "stdout", "text": ["hello\n"] },
+                {
+                    "output_type": "execute_result",
+                    "execution_count": 7,
+                    "metadata": {},
+                    "data": { "text/plain": ["42"] }
+                },
+                {
+                    "output_type": "display_data",
+                    "metadata": {},
+                    "data": { "text/markdown": ["**bold**"] }
+                }
+            ],
+            "source": ["print('hello')"]
+        }"##;
+        let nbformat_cell: nbformat::v4::Cell =
+            serde_json::from_str(cell_json).expect("fixture cell should parse");
+
+        let languages = Arc::new(LanguageRegistry::test(cx.executor()));
+        let notebook_language = Task::ready(None).shared();
+
+        // Load exactly like paste/undo do (raw_insert_cell → Cell::load), then
+        // snapshot exactly like copy/cut/delete do (to_nbformat_cell).
+        let (loaded_count, resnapshotted) = cx.update(|window, cx| {
+            let cell = Cell::load(&nbformat_cell, &languages, notebook_language, window, cx);
+            let Cell::Code(code_cell) = &cell else {
+                panic!("expected a code cell");
+            };
+            let loaded_count = code_cell.read(cx).outputs().len();
+            (loaded_count, cell.to_nbformat_cell(cx))
+        });
+
+        assert_eq!(loaded_count, 3, "all three outputs should load");
+        let nbformat::v4::Cell::Code {
+            outputs,
+            execution_count,
+            ..
+        } = resnapshotted
+        else {
+            panic!("expected a code cell");
+        };
+        assert_eq!(execution_count, Some(7), "execution count should survive");
+        assert_eq!(
+            outputs.len(),
+            3,
+            "all three outputs should serialize back (rich ones included)"
+        );
+    }
+
     /// An empty/whitespace `.ipynb` must open as a one-cell notebook (not a
     /// blank pane), and the generated template must round-trip back through the
     /// parser as valid nbformat.

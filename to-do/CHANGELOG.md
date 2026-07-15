@@ -43,6 +43,10 @@ entry rather than archiving it.
   of cells queued behind the kernel picker verified working.
 - Phase 26 — More multi-select gestures: ctrl/cmd-a select-all,
   shift-home/shift-end to first/last cell (command mode only).
+- Phase 27 — Retain cell output through clipboard & undo: verified the whole
+  snapshot pipeline (copy/cut/delete → paste/undo) carries outputs — bug #24's
+  source-media fix supplied the missing serialization — and locked it in with a
+  round-trip test.
 
 ## Fixed bugs (confirmed)
 
