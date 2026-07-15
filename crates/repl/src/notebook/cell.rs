@@ -767,6 +767,10 @@ pub struct CodeCell {
     /// such cells finish showing a ✓ but no duration.
     submitted_at: Option<Instant>,
     execution_duration: Option<Duration>,
+    /// Wall-clock completion time of the last run (phase 28). Persisted VS
+    /// Code-compatibly in `metadata.execution` ("shell.execute_reply" etc.,
+    /// ISO 8601), so timings round-trip with other Jupyter clients.
+    last_executed_at: Option<chrono::DateTime<chrono::Utc>>,
     execution_status: CellExecutionStatus,
     /// Repeating notify task that keeps the live elapsed-time label ticking
     /// while the cell is Running. Dropped (cancelling it) when the run ends.
@@ -858,6 +862,16 @@ impl CodeCell {
             .and_then(|jupyter| jupyter.outputs_hidden)
             .unwrap_or(false);
 
+        // Restore the last run's record from the saved `metadata.execution`
+        // timestamps (phase 28) — the same keys VS Code writes — so a loaded
+        // notebook shows WHEN each cell last ran (and its ✓ + duration).
+        let (last_executed_at, saved_duration) = Self::parse_execution_metadata(&metadata);
+        let execution_status = if last_executed_at.is_some() {
+            CellExecutionStatus::Finished
+        } else {
+            CellExecutionStatus::Idle
+        };
+
         Self {
             id,
             metadata,
@@ -869,13 +883,45 @@ impl CodeCell {
             cell_position: None,
             execution_start_time: None,
             submitted_at: None,
-            execution_duration: None,
-            execution_status: CellExecutionStatus::Idle,
+            execution_duration: saved_duration,
+            last_executed_at,
+            execution_status,
             _run_timer: None,
             source_collapsed,
             outputs_collapsed,
             _language_task: language_task,
         }
+    }
+
+    /// Read the last run's completion time and duration out of the saved
+    /// `metadata.execution` timestamps (ISO 8601, VS Code / Jupyter shape):
+    /// completion from "shell.execute_reply" (falling back to
+    /// "iopub.status.idle"), duration from idle − busy (falling back to
+    /// reply − reply.started). Anything unparseable simply yields None.
+    fn parse_execution_metadata(
+        metadata: &CellMetadata,
+    ) -> (Option<chrono::DateTime<chrono::Utc>>, Option<Duration>) {
+        let Some(execution) = metadata.execution.as_ref() else {
+            return (None, None);
+        };
+        let parse = |value: &Option<String>| {
+            value.as_ref().and_then(|text| {
+                chrono::DateTime::parse_from_rfc3339(text)
+                    .ok()
+                    .map(|parsed| parsed.with_timezone(&chrono::Utc))
+            })
+        };
+        let reply = parse(&execution.shell_execute_reply);
+        let idle = parse(&execution.iopub_status_idle);
+        let busy = parse(&execution.iopub_status_busy);
+        let started = parse(&execution.shell_execute_reply_started);
+
+        let completed = reply.or(idle);
+        let duration = match (idle.or(reply), busy.or(started)) {
+            (Some(end), Some(start)) => (end - start).to_std().ok(),
+            _ => None,
+        };
+        (completed, duration)
     }
 
     pub fn set_language(&mut self, language: Option<Arc<Language>>, cx: &mut Context<Self>) {
@@ -915,19 +961,22 @@ impl CodeCell {
 
         nbformat::v4::Cell::Code {
             id: self.id.clone(),
-            metadata: self.metadata_with_visibility(),
+            metadata: self.metadata_for_save(),
             execution_count: self.execution_count,
             source: source_lines,
             outputs,
         }
     }
 
-    /// The cell metadata with the current collapse state written into
-    /// `jupyter.source_hidden` / `jupyter.outputs_hidden` (VS Code / Jupyter
-    /// compatible). Expanded state omits the keys to keep the file clean,
-    /// preserving any other `jupyter.*` fields.
-    fn metadata_with_visibility(&self) -> CellMetadata {
+    /// The cell metadata as it should be SAVED: the current collapse state in
+    /// `jupyter.source_hidden` / `jupyter.outputs_hidden`, and the last run's
+    /// timestamps in `metadata.execution` — both in the shapes VS Code /
+    /// Jupyter use, so they round-trip with other clients. Expanded state
+    /// omits the collapse keys to keep the file clean, and other fields are
+    /// preserved.
+    fn metadata_for_save(&self) -> CellMetadata {
         let mut metadata = self.metadata.clone();
+
         let mut jupyter =
             metadata
                 .jupyter
@@ -943,6 +992,41 @@ impl CodeCell {
             || jupyter.outputs_hidden.is_some()
             || !jupyter.additional.is_empty();
         metadata.jupyter = keep.then_some(jupyter);
+
+        // Persist WHEN the cell last ran (phase 28). Completion goes into
+        // "shell.execute_reply"/"iopub.status.idle"; when the duration is
+        // known, the derived start goes into "iopub.status.busy"/
+        // "shell.execute_reply.started" so other clients (and our load path)
+        // can recover the duration too. Unknown fields from other clients are
+        // preserved via the struct's `additional` map.
+        if let Some(completed) = self.last_executed_at {
+            let mut execution =
+                metadata
+                    .execution
+                    .take()
+                    .unwrap_or(nbformat::v4::ExecutionMetadata {
+                        iopub_execute_input: None,
+                        iopub_status_busy: None,
+                        shell_execute_reply: None,
+                        shell_execute_reply_started: None,
+                        iopub_status_idle: None,
+                        additional: Default::default(),
+                    });
+            let completed_text =
+                completed.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            execution.shell_execute_reply = Some(completed_text.clone());
+            execution.iopub_status_idle = Some(completed_text);
+            if let Some(duration) = self.execution_duration
+                && let Ok(duration) = chrono::Duration::from_std(duration)
+            {
+                let started_text = (completed - duration)
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                execution.iopub_status_busy = Some(started_text.clone());
+                execution.shell_execute_reply_started = Some(started_text);
+            }
+            metadata.execution = Some(execution);
+        }
+
         metadata
     }
 
@@ -985,15 +1069,17 @@ impl CodeCell {
     }
 
     /// The user-facing "clear outputs": wipe the outputs AND the whole run
-    /// record — execution number, status marker, duration — returning the
-    /// cell to a never-run look (bug #33). The run path uses `clear_outputs`
-    /// instead, which must keep the in-flight status/timing.
+    /// record — execution number, status marker, duration, last-executed
+    /// timestamp — returning the cell to a never-run look (bug #33). The run
+    /// path uses `clear_outputs` instead, which must keep in-flight state.
     pub fn clear_execution_record(&mut self) {
         self.outputs.clear();
         self.execution_count = None;
         self.execution_duration = None;
         self.execution_start_time = None;
         self.submitted_at = None;
+        self.last_executed_at = None;
+        self.metadata.execution = None;
         self._run_timer = None;
         self.execution_status = CellExecutionStatus::Idle;
     }
@@ -1108,6 +1194,7 @@ impl CodeCell {
             self.execution_duration = Some(start_time.elapsed());
         }
         self.submitted_at = None;
+        self.last_executed_at = Some(chrono::Utc::now());
         self.execution_status = final_status;
     }
 
@@ -1240,7 +1327,10 @@ impl CodeCell {
                 .when_some(
                     self.execution_duration.map(Self::format_duration),
                     |this, duration_text| this.child(label(duration_text, cx)),
-                ),
+                )
+                .when_some(self.last_executed_label(cx), |this, timestamp_text| {
+                    this.child(label(timestamp_text, cx))
+                }),
             CellExecutionStatus::Failed => h_flex()
                 .gap_1()
                 .items_center()
@@ -1252,7 +1342,10 @@ impl CodeCell {
                 .when_some(
                     self.execution_duration.map(Self::format_duration),
                     |this, duration_text| this.child(label(duration_text, cx)),
-                ),
+                )
+                .when_some(self.last_executed_label(cx), |this, timestamp_text| {
+                    this.child(label(timestamp_text, cx))
+                }),
             CellExecutionStatus::Cancelled => h_flex()
                 .gap_1()
                 .items_center()
@@ -1264,6 +1357,22 @@ impl CodeCell {
                 .child(label("Cancelled".to_string(), cx)),
         };
         Some(element.into_any_element())
+    }
+
+    /// The "last executed at" timestamp for the status line (phase 28), when
+    /// the setting is on: a proper local-time timestamp — today's runs as
+    /// `14:32:05`, older ones with the date.
+    fn last_executed_label(&self, cx: &App) -> Option<String> {
+        if !ReplSettings::get_global(cx).notebook_show_last_executed {
+            return None;
+        }
+        let local = self.last_executed_at?.with_timezone(&chrono::Local);
+        let text = if local.date_naive() == chrono::Local::now().date_naive() {
+            local.format("· %H:%M:%S").to_string()
+        } else {
+            local.format("· %Y-%m-%d %H:%M").to_string()
+        };
+        Some(text)
     }
 
     fn format_duration(duration: Duration) -> String {

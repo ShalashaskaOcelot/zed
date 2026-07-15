@@ -14,17 +14,6 @@ high → low within each group.
   place rather than only via settings.json. (Depends on how Zed's settings UI
   registers sections.)
 
-- "New Jupyter Notebook" should open a truly UNSAVED notebook (phase 12
-  follow-up, user 2026-07-11). Currently the command writes `Untitled-N.ipynb`
-  into the workspace immediately and opens that. It should behave like Ctrl-N:
-  an untitled, session-only buffer that only hits disk on manual save (with a
-  save-as flow on first save). This applies ONLY to the command-palette
-  command — notebooks created via the file browser's New File are correctly
-  saved where they're created, with the given name, and must stay that way.
-  Needs project-item / editor routing for a notebook backed by a path-less
-  buffer (the `NotebookItem` open path currently requires a `ProjectEntryId`
-  and a saved `.ipynb`). Bigger plumbing — schedule as its own phase.
-
 - Let "Create Python Environment" choose the location (user 2026-07-08 —
   for user-based rather than repo-based venvs in a central place). Default to
   the local workspace `.venv` so Enter/OK just creates it there, but allow

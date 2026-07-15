@@ -47,6 +47,10 @@ entry rather than archiving it.
   snapshot pipeline (copy/cut/delete → paste/undo) carries outputs — bug #24's
   source-media fix supplied the missing serialization — and locked it in with a
   round-trip test.
+- Phase 28 — Per-cell "last executed" timestamp: completion time shown next to
+  the ✓/✕ + duration (setting `notebook_show_last_executed`, default on),
+  persisted VS Code-compatibly in cell metadata.execution; loaded notebooks
+  restore ✓ + duration + time from saved timestamps.
 
 ## Fixed bugs (confirmed)
 

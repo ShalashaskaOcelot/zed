@@ -35,6 +35,18 @@ listed here.
       kernel unchanged (check the picker checkmark shows the current
       notebook's kernel too).
 
+## Phase 28 — Per-cell "last executed" timestamp
+
+- [ ] Run a cell → a timestamp (e.g. `· 14:32:05`) appears after the ✓ and
+      duration; failed cells show it after the red ✕ too.
+- [ ] Save, close, reopen → previously-run cells show ✓ + duration + time
+      restored from the file (no kernel needed).
+- [ ] Open a notebook last run in VS CODE → its cells show VS Code's recorded
+      times; run a cell in Zed, save, open in VS Code → VS Code shows the time.
+- [ ] Clear outputs → the timestamp clears with the rest of the run record.
+- [ ] Set `"repl": { "notebook_show_last_executed": false }` → timestamps hide
+      (✓ + duration remain).
+
 ## Phase 27 — Retain cell output through clipboard & undo
 
 - [ ] Run a cell (text output) and one with a rich output (DataFrame/plot);

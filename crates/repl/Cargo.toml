@@ -18,6 +18,7 @@ doctest = false
 [dependencies]
 anyhow.workspace = true
 async-dispatcher.workspace = true
+chrono.workspace = true
 async-task.workspace = true
 async-tungstenite = { workspace = true, features = ["tokio", "tokio-rustls-manual-roots", "tokio-runtime"] }
 base64.workspace = true

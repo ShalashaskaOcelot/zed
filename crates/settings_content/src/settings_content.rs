@@ -1325,6 +1325,12 @@ pub struct ReplSettingsContent {
     ///
     /// Default: command
     pub notebook_run_landing_mode: Option<NotebookRunLandingMode>,
+    /// Whether to show WHEN a cell was last executed (a timestamp next to the
+    /// ✓/✕ and duration), VS Code style. The time persists in the notebook's
+    /// cell metadata, so it round-trips with other Jupyter clients.
+    ///
+    /// Default: true
+    pub notebook_show_last_executed: Option<bool>,
 }
 
 /// Which mode a notebook lands in after running a cell.

@@ -33,6 +33,11 @@ pub struct ReplSettings {
     ///
     /// Default: command
     pub notebook_run_landing_mode: NotebookRunLandingMode,
+    /// Whether to show WHEN a cell was last executed (a timestamp next to the
+    /// ✓/✕ and duration), VS Code style.
+    ///
+    /// Default: true
+    pub notebook_show_last_executed: bool,
 }
 
 impl Settings for ReplSettings {
@@ -46,6 +51,7 @@ impl Settings for ReplSettings {
             inline_output_max_length: repl.inline_output_max_length.unwrap_or(50),
             output_max_height_lines: repl.output_max_height_lines.unwrap_or(0),
             notebook_run_landing_mode: repl.notebook_run_landing_mode.unwrap_or_default(),
+            notebook_show_last_executed: repl.notebook_show_last_executed.unwrap_or(true),
         }
     }
 }

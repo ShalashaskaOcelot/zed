@@ -4586,6 +4586,76 @@ mod tests {
         );
     }
 
+    /// The last-executed timestamps saved in `metadata.execution` (VS Code /
+    /// Jupyter shape) must restore a loaded cell's run record — ✓ status,
+    /// duration, completion time — and survive re-serialization (phase 28).
+    #[gpui::test]
+    async fn test_execution_timestamps_round_trip(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            editor::init(cx);
+        });
+        let cx = cx.add_empty_window();
+
+        let cell_json = r##"{
+            "cell_type": "code",
+            "id": "cell-timed",
+            "metadata": {
+                "execution": {
+                    "iopub.status.busy": "2026-07-14T10:00:00.000Z",
+                    "iopub.status.idle": "2026-07-14T10:00:02.500Z",
+                    "shell.execute_reply": "2026-07-14T10:00:02.500Z"
+                }
+            },
+            "execution_count": 4,
+            "outputs": [],
+            "source": ["x = 1"]
+        }"##;
+        let nbformat_cell: nbformat::v4::Cell =
+            serde_json::from_str(cell_json).expect("fixture cell should parse");
+
+        let languages = Arc::new(LanguageRegistry::test(cx.executor()));
+        let notebook_language = Task::ready(None).shared();
+
+        let resnapshotted = cx.update(|window, cx| {
+            let cell = Cell::load(&nbformat_cell, &languages, notebook_language, window, cx);
+            let Cell::Code(code_cell) = &cell else {
+                panic!("expected a code cell");
+            };
+            let code_cell = code_cell.read(cx);
+            assert_eq!(
+                code_cell.execution_status(),
+                CellExecutionStatus::Finished,
+                "a loaded cell with saved execution timestamps shows as run"
+            );
+            assert_eq!(
+                code_cell.execution_duration(),
+                Some(Duration::from_millis(2500)),
+                "duration should be recovered from busy→idle"
+            );
+            cell.to_nbformat_cell(cx)
+        });
+
+        let nbformat::v4::Cell::Code { metadata, .. } = resnapshotted else {
+            panic!("expected a code cell");
+        };
+        let execution = metadata
+            .execution
+            .expect("execution metadata should be written back on save");
+        assert_eq!(
+            execution.shell_execute_reply.as_deref(),
+            Some("2026-07-14T10:00:02.500Z"),
+            "completion timestamp should round-trip"
+        );
+        assert_eq!(
+            execution.iopub_status_busy.as_deref(),
+            Some("2026-07-14T10:00:00.000Z"),
+            "derived start (completion − duration) should round-trip"
+        );
+    }
+
     /// An empty/whitespace `.ipynb` must open as a one-cell notebook (not a
     /// blank pane), and the generated template must round-trip back through the
     /// parser as valid nbformat.
