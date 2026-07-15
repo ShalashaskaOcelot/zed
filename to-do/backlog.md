@@ -16,11 +16,4 @@ high → low within each group.
   toolchain + `conda create` flow).
 - Split cell / join cells (user: low priority, rarely used).
 - Cell grouping (user: low priority, rarely used).
-- Implement `open_notebook` (currently a `println!` stub, `notebook_ui.rs`).
-- Implement `Item::pixel_position_of_cursor` so the workspace can track the
-  notebook cursor (`notebook_ui.rs`).
 
-## Cleanup (do once the feature stabilises)
-
-- Remove `#![allow(unused, dead_code)]` from `notebook_ui.rs` and delete the
-  large commented-out `NotebookControls` block.

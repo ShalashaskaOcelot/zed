@@ -58,6 +58,10 @@ entry rather than archiving it.
   multi-selection to the primary cell; output-menu actions return focus to
   the notebook (command mode); markdown preview render-on-blur verified
   already wired.
+- Phase 31 — Kernel launch robustness: the fixed 500ms readiness sleep is
+  replaced by a heartbeat handshake (echo = ready, 30s cap, early-exit watch
+  with stderr); kernels that die after connecting report their last stderr
+  lines instead of a bare exit status.
 
 ## Fixed bugs (confirmed)
 

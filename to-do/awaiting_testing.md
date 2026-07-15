@@ -35,6 +35,17 @@ listed here.
       kernel unchanged (check the picker checkmark shows the current
       notebook's kernel too).
 
+## Phase 31 — Kernel launch robustness
+
+- [ ] Kernels start reliably from a fresh app start (no os error 10054); fast
+      machines launch with no artificial delay, slow ones no longer get cut
+      off at 500ms. (Windows is the machine that mattered for bug #6.)
+- [ ] Break a kernel deliberately (e.g. remove ipykernel from its env) → the
+      cell error shows the kernel's own stderr, both when it dies at startup
+      and when it dies after connecting.
+- [ ] A kernel that hangs at startup gives "did not answer its heartbeat
+      within 30s" instead of waiting forever.
+
 ## Phase 32 — Notebook UX niceties
 
 - [ ] Multi-select some cells (shift-down or ctrl-a), press Esc → selection

@@ -160,27 +160,82 @@ impl NativeRunningKernel {
                 std::process::Stdio::piped(),
             )?;
 
-            // A kernel that fails immediately (missing ipykernel, broken
-            // interpreter) would otherwise surface as a cryptic socket error
-            // when we connect below; catch the early exit here so we can
-            // report its stderr instead.
-            cx.background_executor()
-                .timer(std::time::Duration::from_millis(500))
-                .await;
-            if let Ok(Some(exit_status)) = process.try_status() {
-                let mut stderr_content = String::new();
-                if let Some(mut stderr) = process.stderr.take() {
-                    let mut bytes = Vec::new();
-                    if futures::AsyncReadExt::read_to_end(&mut stderr, &mut bytes)
-                        .await
-                        .is_ok()
-                    {
-                        stderr_content = String::from_utf8_lossy(&bytes).to_string();
+            // Readiness handshake (phase 31): rather than hoping a fixed sleep
+            // is enough, wait until the kernel answers on its heartbeat socket.
+            // zmq queues the REQ ping until the kernel binds the port, so the
+            // echo IS the readiness signal — fast kernels proceed immediately,
+            // slow machines aren't cut off at an arbitrary 500ms. While
+            // waiting, watch the process so a kernel that dies during startup
+            // (missing ipykernel, broken interpreter) reports its own stderr
+            // instead of a cryptic socket error.
+            enum StartupOutcome {
+                Ready,
+                HeartbeatFailed(anyhow::Error),
+                Exited(std::process::ExitStatus),
+                TimedOut,
+            }
+            const READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+            const EXIT_POLL: std::time::Duration = std::time::Duration::from_millis(100);
+
+            // Scoped so both racing futures (and their borrows of `process`)
+            // are dropped before the outcome handling below touches it again.
+            let outcome = {
+                let heartbeat = async {
+                    let mut heartbeat =
+                        runtimelib::create_client_heartbeat_connection(&connection_info).await?;
+                    heartbeat.single_heartbeat().await?;
+                    anyhow::Ok(())
+                };
+                let watch = async {
+                    let deadline = std::time::Instant::now() + READY_TIMEOUT;
+                    loop {
+                        if let Ok(Some(exit_status)) = process.try_status() {
+                            return StartupOutcome::Exited(exit_status);
+                        }
+                        if std::time::Instant::now() >= deadline {
+                            return StartupOutcome::TimedOut;
+                        }
+                        cx.background_executor().timer(EXIT_POLL).await;
                     }
+                };
+                futures::pin_mut!(heartbeat);
+                futures::pin_mut!(watch);
+                match futures::future::select(heartbeat, watch).await {
+                    futures::future::Either::Left((Ok(()), _)) => StartupOutcome::Ready,
+                    futures::future::Either::Left((Err(error), _)) => {
+                        StartupOutcome::HeartbeatFailed(error)
+                    }
+                    futures::future::Either::Right((outcome, _)) => outcome,
                 }
-                anyhow::bail!(
-                    "kernel process exited before connecting (status: {exit_status:?})\n{stderr_content}"
-                );
+            };
+            match outcome {
+                StartupOutcome::Ready => {}
+                StartupOutcome::HeartbeatFailed(error) => {
+                    process.kill().ok();
+                    anyhow::bail!("kernel heartbeat failed during startup: {error}");
+                }
+                StartupOutcome::Exited(exit_status) => {
+                    let mut stderr_content = String::new();
+                    if let Some(mut stderr) = process.stderr.take() {
+                        let mut bytes = Vec::new();
+                        if futures::AsyncReadExt::read_to_end(&mut stderr, &mut bytes)
+                            .await
+                            .is_ok()
+                        {
+                            stderr_content = String::from_utf8_lossy(&bytes).to_string();
+                        }
+                    }
+                    anyhow::bail!(
+                        "kernel process exited before connecting (status: {exit_status:?})\n{stderr_content}"
+                    );
+                }
+                StartupOutcome::TimedOut => {
+                    process.kill().ok();
+                    anyhow::bail!(
+                        "kernel did not answer its heartbeat within {READY_TIMEOUT:?} — \
+                         the process was killed"
+                    );
+                }
             }
 
             let session_id = Uuid::new_v4().to_string();
@@ -217,28 +272,46 @@ impl NativeRunningKernel {
             let stderr = process.stderr.take();
             let stdout = process.stdout.take();
 
-            cx.spawn(async move |_cx| {
-                use futures::future::Either;
+            // The last stderr lines are kept so a kernel that dies AFTER
+            // connecting can report its own error, not just a bare exit
+            // status (phase 31).
+            let stderr_tail: Arc<std::sync::Mutex<std::collections::VecDeque<String>>> =
+                Arc::default();
+            const STDERR_TAIL_LINES: usize = 20;
 
-                let stderr_lines = match stderr {
-                    Some(s) => Either::Left(
-                        BufReader::new(s)
-                            .lines()
-                            .map(|line| (log::Level::Error, line)),
-                    ),
-                    None => Either::Right(futures::stream::empty()),
-                };
-                let stdout_lines = match stdout {
-                    Some(s) => Either::Left(
-                        BufReader::new(s)
-                            .lines()
-                            .map(|line| (log::Level::Info, line)),
-                    ),
-                    None => Either::Right(futures::stream::empty()),
-                };
-                let mut lines = futures::stream::select(stderr_lines, stdout_lines);
-                while let Some((level, Ok(line))) = lines.next().await {
-                    log::log!(level, "kernel: {}", line);
+            cx.spawn({
+                let stderr_tail = stderr_tail.clone();
+                async move |_cx| {
+                    use futures::future::Either;
+
+                    let stderr_lines = match stderr {
+                        Some(s) => Either::Left(
+                            BufReader::new(s)
+                                .lines()
+                                .map(|line| (log::Level::Error, line)),
+                        ),
+                        None => Either::Right(futures::stream::empty()),
+                    };
+                    let stdout_lines = match stdout {
+                        Some(s) => Either::Left(
+                            BufReader::new(s)
+                                .lines()
+                                .map(|line| (log::Level::Info, line)),
+                        ),
+                        None => Either::Right(futures::stream::empty()),
+                    };
+                    let mut lines = futures::stream::select(stderr_lines, stdout_lines);
+                    while let Some((level, Ok(line))) = lines.next().await {
+                        log::log!(level, "kernel: {}", line);
+                        if level == log::Level::Error
+                            && let Ok(mut tail) = stderr_tail.lock()
+                        {
+                            if tail.len() >= STDERR_TAIL_LINES {
+                                tail.pop_front();
+                            }
+                            tail.push_back(line);
+                        }
+                    }
                 }
             })
             .detach();
@@ -262,6 +335,15 @@ impl NativeRunningKernel {
                     Err(err) => {
                         format!("kernel process exited with error: {:?}", err)
                     }
+                };
+
+                // Attach the kernel's own last words, if any were captured.
+                let error_message = match stderr_tail.lock() {
+                    Ok(tail) if !tail.is_empty() => {
+                        let lines: Vec<&str> = tail.iter().map(String::as_str).collect();
+                        format!("{error_message}\nkernel stderr:\n{}", lines.join("\n"))
+                    }
+                    _ => error_message,
                 };
 
                 log::error!("{}", error_message);
