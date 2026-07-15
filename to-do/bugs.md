@@ -292,7 +292,7 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ## 30. Explicit kernel pick in one notebook changes other notebooks' kernels
 
-- **Status:** open (phase 25 test item FAILED 2026-07-14)
+- **Status:** fix attempted - untested
 - **Symptom:** (user 2026-07-14) "Selecting a different kernel in one notebook
   still changes the kernel for other notebooks also." Expected: per-notebook.
 - **Analysis:** the adversarial-review fix made METADATA adoption per-notebook,
@@ -300,15 +300,18 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   `ReplStore::set_active_kernelspec`, which is keyed BY WORKTREE — and
   `remembered_kernel_spec` consults that store selection BEFORE the notebook's
   own metadata. So a pick in notebook A wins over B's saved kernel.
-- **Fix plan:** make explicit picks per-notebook too: key the store's
-  in-session memory by NOTEBOOK PATH instead of worktree for notebooks
-  (`change_kernel` writes the per-notebook entry; `remembered_kernel_spec`
-  reads own-spec → per-notebook store → own metadata). Cross-session
-  persistence already flows through the notebook's own metadata (written at
-  launch). Show the notebook's own selection in the picker via a
-  selected-override on `KernelSelector`. The inline `.py` REPL's worktree
-  selection mechanism is left untouched.
-- **Tested:** n/a
+- **Fix attempted (2026-07-14):** explicit picks are per-notebook: the store
+  gains `selected_kernel_for_notebook` keyed by the notebook's absolute path;
+  `change_kernel` writes that (never the worktree entry), and
+  `remembered_kernel_spec` resolves own-spec → per-notebook memory → own
+  metadata. Cross-session persistence flows through the notebook's own
+  kernelspec metadata (written at launch). The kernel picker rendered from a
+  notebook now shows THAT notebook's kernel as selected (new
+  `KernelSelector::with_selected` override) instead of the worktree selection,
+  which now belongs solely to the inline `.py` REPL.
+- **Tested:** no — needs user confirmation (two notebooks with different saved
+  kernels: each shows/runs its own; pick a different kernel in one → the other
+  keeps its kernel, before and after runs)
 
 ## 31. A stale (deleted) kernel is retried forever instead of re-prompting
 

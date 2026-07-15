@@ -21,11 +21,14 @@ pub enum KernelPickerEntry {
     },
 }
 
-fn build_grouped_entries(store: &ReplStore, worktree_id: WorktreeId) -> Vec<KernelPickerEntry> {
+fn build_grouped_entries(
+    store: &ReplStore,
+    worktree_id: WorktreeId,
+    selected_kernel: Option<&KernelSpecification>,
+) -> Vec<KernelPickerEntry> {
     let mut entries = Vec::new();
     let mut recommended_entry: Option<KernelPickerEntry> = None;
     let mut found_selected = false;
-    let selected_kernel = store.selected_kernel(worktree_id);
 
     let mut python_envs = Vec::new();
     let mut jupyter_kernels = Vec::new();
@@ -141,6 +144,10 @@ where
     tooltip: TT,
     info_text: Option<SharedString>,
     worktree_id: WorktreeId,
+    /// When set, this is the current selection shown in the picker (checkmark
+    /// + Recommended override) instead of the store's worktree-level
+    /// selection. Notebooks pass their own per-notebook kernel here (bug #30).
+    selected_override: Option<Option<KernelSpecification>>,
 }
 
 pub struct KernelPickerDelegate {
@@ -168,7 +175,15 @@ where
             tooltip,
             info_text: None,
             worktree_id,
+            selected_override: None,
         }
+    }
+
+    /// Show `selected` as the picker's current selection instead of the
+    /// store's worktree-level selection (which belongs to the inline REPL).
+    pub fn with_selected(mut self, selected: Option<KernelSpecification>) -> Self {
+        self.selected_override = Some(selected);
+        self
     }
 
     /// Called when the user chooses "Create Python Environment" in the picker
@@ -496,8 +511,12 @@ where
         store_entity.update(cx, |store, cx| store.ensure_kernelspecs(cx));
         let store = store_entity.read(cx);
 
-        let all_entries = build_grouped_entries(store, self.worktree_id);
-        let selected_kernelspec = store.active_kernelspec(self.worktree_id, None, cx);
+        let selected_kernelspec = match &self.selected_override {
+            Some(selected) => selected.clone(),
+            None => store.active_kernelspec(self.worktree_id, None, cx),
+        };
+        let all_entries =
+            build_grouped_entries(store, self.worktree_id, selected_kernelspec.as_ref());
         let selected_index = all_entries
             .iter()
             .position(|entry| {
@@ -509,6 +528,7 @@ where
             })
             .unwrap_or_else(|| KernelPickerDelegate::first_selectable_index(&all_entries));
 
+        let selected_for_rebuild = selected_kernelspec.clone();
         let delegate = KernelPickerDelegate {
             on_select: self.on_select,
             on_dismiss: self.on_dismiss,
@@ -529,7 +549,11 @@ where
                 &store_entity,
                 window,
                 move |picker: &mut Picker<KernelPickerDelegate>, store, window, cx| {
-                    let entries = build_grouped_entries(store.read(cx), worktree_id);
+                    let entries = build_grouped_entries(
+                        store.read(cx),
+                        worktree_id,
+                        selected_for_rebuild.as_ref(),
+                    );
                     if picker.delegate.selected_kernelspec.is_none() {
                         picker.delegate.selected_index =
                             KernelPickerDelegate::first_selectable_index(&entries);

@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
@@ -31,6 +32,11 @@ pub struct ReplStore {
     kernel_specifications: Vec<KernelSpecification>,
     kernelspecs_initialized: bool,
     selected_kernel_for_worktree: HashMap<WorktreeId, KernelSpecification>,
+    /// In-session kernel choice PER NOTEBOOK (keyed by the notebook's absolute
+    /// path), so picking a kernel in one notebook never changes which kernel a
+    /// sibling notebook resolves to (bug #30). Cross-session persistence flows
+    /// through each notebook's own saved `kernelspec` metadata.
+    selected_kernel_for_notebook: HashMap<PathBuf, KernelSpecification>,
     kernel_specifications_for_worktree: HashMap<WorktreeId, Vec<KernelSpecification>>,
     active_python_toolchain_for_worktree: HashMap<WorktreeId, SharedString>,
     remote_worktrees: HashSet<WorktreeId>,
@@ -67,6 +73,7 @@ impl ReplStore {
             _subscriptions: subscriptions,
             kernel_specifications_for_worktree: HashMap::default(),
             selected_kernel_for_worktree: HashMap::default(),
+            selected_kernel_for_notebook: HashMap::default(),
             active_python_toolchain_for_worktree: HashMap::default(),
             remote_worktrees: HashSet::default(),
             fetching_python_kernelspecs: HashSet::default(),
@@ -307,6 +314,23 @@ impl ReplStore {
 
     pub fn selected_kernel(&self, worktree_id: WorktreeId) -> Option<&KernelSpecification> {
         self.selected_kernel_for_worktree.get(&worktree_id)
+    }
+
+    /// Remember an explicit kernel pick for ONE notebook (by absolute path).
+    /// Notebook picks deliberately do not touch the worktree-level selection,
+    /// which belongs to the inline REPL (bug #30).
+    pub fn set_notebook_kernelspec(
+        &mut self,
+        notebook_path: PathBuf,
+        kernelspec: KernelSpecification,
+        _cx: &mut Context<Self>,
+    ) {
+        self.selected_kernel_for_notebook
+            .insert(notebook_path, kernelspec);
+    }
+
+    pub fn notebook_kernelspec(&self, notebook_path: &Path) -> Option<&KernelSpecification> {
+        self.selected_kernel_for_notebook.get(notebook_path)
     }
 
     pub fn is_recommended_kernel(

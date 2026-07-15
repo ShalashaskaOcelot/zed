@@ -30,7 +30,10 @@ listed here.
       closed); reopen + run → the launch errors once, and the NEXT run opens
       the kernel picker instead of repeating the error forever.
 
-(Bug #30's fix is in progress and will get a pointer line when it lands.)
+- [ ] Bug #30 — two notebooks with DIFFERENT saved kernels: each shows and
+      runs its own; picking a different kernel in one leaves the other's
+      kernel unchanged (check the picker checkmark shows the current
+      notebook's kernel too).
 
 ## Phase 24 — Cell operations polish
 

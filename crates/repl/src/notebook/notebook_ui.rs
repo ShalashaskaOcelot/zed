@@ -529,16 +529,20 @@ impl NotebookEditor {
     }
 
     /// The kernel the notebook should use without any explicit choice yet:
-    /// an active in-session selection, a selection persisted for this worktree,
-    /// or one matching the notebook's saved metadata. Deliberately does NOT
-    /// fall back to the "recommended"/global kernel — an unremembered notebook
-    /// should prompt rather than silently start the wrong interpreter.
+    /// the active in-session selection, this NOTEBOOK's remembered pick, or
+    /// one matching the notebook's saved metadata. All per-notebook (bug #30)
+    /// — the worktree-level selection belongs to the inline REPL. Deliberately
+    /// does NOT fall back to the "recommended"/global kernel — an unremembered
+    /// notebook should prompt rather than silently start the wrong interpreter.
     fn remembered_kernel_spec(&self, cx: &App) -> Option<KernelSpecification> {
         if let Some(spec) = &self.kernel_specification {
             return Some(spec.clone());
         }
-        let store = ReplStore::global(cx);
-        if let Some(spec) = store.read(cx).selected_kernel(self.worktree_id) {
+        let notebook_path = &self.notebook_item.read(cx).path;
+        if let Some(spec) = ReplStore::global(cx)
+            .read(cx)
+            .notebook_kernelspec(notebook_path)
+        {
             return Some(spec.clone());
         }
         self.metadata_matched_kernel_spec(cx)
@@ -575,19 +579,17 @@ impl NotebookEditor {
     }
 
     /// If nothing has been selected this session, adopt the kernel this
-    /// notebook remembers (an explicit worktree selection, else the kernel
-    /// matching its saved `kernelspec` metadata) for DISPLAY (phase 25): the
-    /// status bar shows it and the first run lazy-starts it, VS Code style —
-    /// no re-picking after a full restart. Discovery is async, so this is
-    /// called on open AND from a store observer; it no-ops until a matching
-    /// spec is discovered, and a stale metadata name simply never matches.
+    /// notebook remembers (its own in-session pick, else the kernel matching
+    /// its saved `kernelspec` metadata) for DISPLAY (phase 25): the status bar
+    /// shows it and the first run lazy-starts it, VS Code style — no
+    /// re-picking after a full restart. Discovery is async, so this is called
+    /// on open AND from a store observer; it no-ops until a matching spec is
+    /// discovered, and a stale metadata name simply never matches.
     ///
-    /// Deliberately PER-NOTEBOOK: this never writes the store's
-    /// worktree-level selection. Doing so let merely OPENING one notebook
-    /// hijack which kernel sibling notebooks and the inline REPL resolve to
-    /// (and displace the picker's Recommended entry). Only an explicit pick
-    /// (`change_kernel`) writes the store, so each notebook adopts its own
-    /// metadata kernel and an explicit selection still wins everywhere.
+    /// Deliberately PER-NOTEBOOK (bug #30): nothing here touches the
+    /// worktree-level selection, which belongs to the inline REPL. Each
+    /// notebook resolves its own pick/metadata, so neither opening nor picking
+    /// in one notebook changes what a sibling notebook runs.
     fn adopt_metadata_kernel_selection(&mut self, cx: &mut Context<Self>) {
         if self.kernel_specification.is_some() {
             return;
@@ -1218,10 +1220,13 @@ impl NotebookEditor {
             self.stop_executing_cells(cx);
         }
 
-        // Persist the choice for this worktree so reopening the notebook (or
-        // opening a sibling notebook) uses it instead of the global default.
+        // Remember the choice for THIS notebook only (bug #30): a pick here
+        // must not change which kernel sibling notebooks or the inline REPL
+        // resolve to. Cross-session persistence flows through the notebook's
+        // own kernelspec metadata, written below on launch.
+        let notebook_path = self.notebook_item.read(cx).path.clone();
         ReplStore::global(cx).update(cx, |store, cx| {
-            store.set_active_kernelspec(self.worktree_id, spec.clone(), cx);
+            store.set_notebook_kernelspec(notebook_path, spec.clone(), cx);
         });
 
         // Any cell the user ran before picking a kernel should now run once
@@ -3414,6 +3419,9 @@ impl NotebookEditor {
                         kernel_status.to_string()
                     )),
                 )
+                // The picker reflects THIS notebook's kernel, not the
+                // worktree-level selection (bug #30).
+                .with_selected(self.kernel_specification.clone())
                 .with_dismiss(Box::new(move |_window, cx| {
                     if let Some(view) = view_for_dismiss.upgrade() {
                         view.update(cx, |this, cx| {
@@ -4302,7 +4310,11 @@ mod tests {
         });
         cx.update(|cx| {
             ReplStore::global(cx).update(cx, |store, cx| {
-                store.set_active_kernelspec(worktree_id, broken_spec, cx);
+                store.set_notebook_kernelspec(
+                    PathBuf::from(path!("/notebooks/test.ipynb")),
+                    broken_spec,
+                    cx,
+                );
             })
         });
 
