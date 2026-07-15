@@ -38,6 +38,11 @@ pub struct ReplSettings {
     ///
     /// Default: true
     pub notebook_show_last_executed: bool,
+    /// Whether to start a notebook's remembered kernel on open instead of
+    /// waiting for the first run (opt-in; lazy start is the default).
+    ///
+    /// Default: false
+    pub notebook_autostart_kernel: bool,
 }
 
 impl Settings for ReplSettings {
@@ -52,6 +57,7 @@ impl Settings for ReplSettings {
             output_max_height_lines: repl.output_max_height_lines.unwrap_or(0),
             notebook_run_landing_mode: repl.notebook_run_landing_mode.unwrap_or_default(),
             notebook_show_last_executed: repl.notebook_show_last_executed.unwrap_or(true),
+            notebook_autostart_kernel: repl.notebook_autostart_kernel.unwrap_or(false),
         }
     }
 }

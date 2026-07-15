@@ -366,8 +366,8 @@ impl NotebookEditor {
         // Lazy start: don't launch a kernel on open. Show the remembered
         // kernel's name if we can resolve one now (a real launch happens on
         // first run or explicit selection); otherwise the status bar shows
-        // "Select Kernel" until the user picks or runs a cell.
-        editor.kernel_specification = editor.remembered_kernel_spec(cx);
+        // "Select Kernel" until the user picks or runs a cell. The resolution
+        // itself happens in adopt_metadata_kernel_selection below.
         editor.refresh_language(cx);
         editor.refresh_kernelspecs(cx);
 
@@ -391,11 +391,11 @@ impl NotebookEditor {
         // lazy-starts it on first run) without re-picking (phase 25). Discovery
         // is async, so try now AND whenever the store updates; an explicit
         // in-session selection always wins — this only ever fills a void.
-        cx.observe(&ReplStore::global(cx), |this, _store, cx| {
-            this.adopt_metadata_kernel_selection(cx);
+        cx.observe_in(&ReplStore::global(cx), window, |this, _store, window, cx| {
+            this.adopt_metadata_kernel_selection(window, cx);
         })
         .detach();
-        editor.adopt_metadata_kernel_selection(cx);
+        editor.adopt_metadata_kernel_selection(window, cx);
 
         // Keep `notebook_mode` in sync with focus: when the notebook itself
         // (not a cell editor) holds focus, we are in command mode. This avoids
@@ -575,7 +575,7 @@ impl NotebookEditor {
     /// worktree-level selection, which belongs to the inline REPL. Each
     /// notebook resolves its own pick/metadata, so neither opening nor picking
     /// in one notebook changes what a sibling notebook runs.
-    fn adopt_metadata_kernel_selection(&mut self, cx: &mut Context<Self>) {
+    fn adopt_metadata_kernel_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.kernel_specification.is_some() {
             return;
         }
@@ -584,7 +584,18 @@ impl NotebookEditor {
                 "notebook: pre-selected kernel '{}' (saved selection/metadata)",
                 spec.name()
             );
-            self.kernel_specification = Some(spec);
+            self.kernel_specification = Some(spec.clone());
+            // Opt-in autostart (phase 34): launch the adopted kernel on open
+            // instead of waiting for the first run. Only from a clean Shutdown
+            // — never after a failed launch (bug #31's re-prompt rule), and
+            // never a kernel that is already starting/running. Remote and
+            // ipykernel-less specs were already excluded by the matcher.
+            if ReplSettings::get_global(cx).notebook_autostart_kernel
+                && matches!(self.kernel, Kernel::Shutdown)
+            {
+                log::info!("notebook: autostarting kernel '{}'", spec.name());
+                self.launch_kernel_with_spec(spec, window, cx);
+            }
             cx.notify();
         }
     }
@@ -621,8 +632,73 @@ impl NotebookEditor {
             return;
         };
 
+        // The fast path stays one keypress — Enter creates the workspace
+        // `.venv` as before. "Choose Location…" opens a directory picker for
+        // user-central environments (phase 34): the SELECTED folder becomes
+        // the environment directory (create a fresh folder in the dialog for
+        // a new named env, e.g. ~/venvs/myproject).
+        let answer = window.prompt(
+            PromptLevel::Info,
+            "Create a Python environment?",
+            Some(
+                "\"Create .venv\" creates it in the project root. \
+                 \"Choose Location…\" makes the selected folder the environment.",
+            ),
+            &["Create .venv", "Choose Location…", "Cancel"],
+            cx,
+        );
+        cx.spawn_in(window, async move |this, cx| {
+            match answer.await {
+                Ok(0) => {
+                    this.update_in(cx, |this, window, cx| {
+                        this.create_python_environment_at(
+                            worktree_root.join(".venv"),
+                            ".venv".to_string(),
+                            window,
+                            cx,
+                        );
+                    })
+                    .ok();
+                }
+                Ok(1) => {
+                    let paths = cx.update(|_, cx| {
+                        cx.prompt_for_paths(gpui::PathPromptOptions {
+                            files: false,
+                            directories: true,
+                            multiple: false,
+                            prompt: Some("Use as Environment".into()),
+                        })
+                    })?;
+                    if let Ok(Ok(Some(mut paths))) = paths.await
+                        && let Some(env_dir) = paths.pop()
+                    {
+                        let env_name = env_dir
+                            .file_name()
+                            .map(|name| name.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "venv".to_string());
+                        this.update_in(cx, |this, window, cx| {
+                            this.create_python_environment_at(env_dir, env_name, window, cx);
+                        })
+                        .ok();
+                    }
+                }
+                _ => {}
+            }
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
+    }
+
+    /// Create (or reuse) a Python venv at `venv_dir`, install ipykernel into
+    /// it, and select it as this notebook's kernel.
+    fn create_python_environment_at(
+        &mut self,
+        venv_dir: PathBuf,
+        env_name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let fs = self.project.read(cx).fs().clone();
-        let venv_dir = worktree_root.join(".venv");
         let venv_python = if cfg!(windows) {
             venv_dir.join("Scripts").join("python.exe")
         } else {
@@ -637,7 +713,7 @@ impl NotebookEditor {
                 workspace.show_toast(
                     workspace::Toast::new(
                         notification_id.clone(),
-                        "Creating .venv and installing ipykernel…".to_string(),
+                        format!("Creating {env_name} and installing ipykernel…"),
                     ),
                     cx,
                 );
@@ -674,7 +750,7 @@ impl NotebookEditor {
                 }
                 anyhow::ensure!(
                     created,
-                    "could not create .venv (is Python installed and on PATH?): {last_error}"
+                    "could not create the environment (is Python installed and on PATH?): {last_error}"
                 );
             }
 
@@ -706,7 +782,7 @@ impl NotebookEditor {
                                 workspace.show_toast(
                                     workspace::Toast::new(
                                         notification_id.clone(),
-                                        "Created .venv and installed ipykernel".to_string(),
+                                        format!("Created {env_name} and installed ipykernel"),
                                     )
                                     .autohide(),
                                     cx,
@@ -718,7 +794,7 @@ impl NotebookEditor {
                         let spec = KernelSpecification::PythonEnv(
                             PythonEnvKernelSpecification::from_python_path(
                                 venv_python,
-                                ".venv".to_string(),
+                                env_name.clone(),
                                 true,
                                 Some("venv".to_string()),
                             ),

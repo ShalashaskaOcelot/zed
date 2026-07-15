@@ -10,7 +10,5 @@ high → low within each group.
 
 ## Low priority
 
-- Conda environment creation (venv creation exists; conda adds a second
-  toolchain + `conda create` flow).
 - Cell grouping (user: low priority, rarely used).
 

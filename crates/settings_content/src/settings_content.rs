@@ -1294,7 +1294,7 @@ pub struct SshPortForwardOption {
 
 /// Settings for configuring REPL display and behavior.
 #[with_fallible_options]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, MergeFrom)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema, MergeFrom)]
 pub struct ReplSettingsContent {
     /// Maximum number of lines to keep in REPL's scrollback buffer.
     /// Clamped with [4, 256] range.
@@ -1331,13 +1331,31 @@ pub struct ReplSettingsContent {
     ///
     /// Default: true
     pub notebook_show_last_executed: Option<bool>,
+    /// Whether to start a notebook's remembered kernel as soon as the
+    /// notebook opens, instead of waiting for the first run (lazy start).
+    /// Only applies when the notebook already remembers a kernel (an explicit
+    /// pick or a match for its saved kernelspec metadata).
+    ///
+    /// Default: false
+    pub notebook_autostart_kernel: Option<bool>,
 }
 
 /// Which mode a notebook lands in after running a cell.
 ///
 /// Default: command
 #[derive(
-    Copy, Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, MergeFrom,
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    MergeFrom,
+    strum::VariantArray,
+    strum::VariantNames,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum NotebookRunLandingMode {

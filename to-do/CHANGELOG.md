@@ -68,6 +68,12 @@ entry rather than archiving it.
   truncated cells) and fill the output width proportionally when a long
   column exists (compact tables stay compact). In-place text selection
   re-phased as phase 37.
+- Phase 34 — Notebook & kernel configuration: opt-in kernel autostart on open
+  (`notebook_autostart_kernel`, default off, remembered kernels only, never
+  after a failed launch); "Create Python Environment" can now choose the venv
+  location (fast path still the workspace `.venv`); new "REPL & Notebooks"
+  page in the GUI settings UI (landing mode dropdown, timestamps, autostart,
+  REPL output limits).
 - Phase 36 — Notebook code health: removed the file-wide allow(unused,
   dead_code) from notebook_ui.rs and every piece of dead code it hid
   (constants, remote_id field, two dead methods, stale imports, the

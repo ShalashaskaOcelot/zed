@@ -35,6 +35,24 @@ listed here.
       kernel unchanged (check the picker checkmark shows the current
       notebook's kernel too).
 
+## Phase 34 — Notebook & kernel configuration
+
+- [ ] Autostart is OFF by default: open a notebook with a remembered kernel →
+      no kernel starts until the first run. Set
+      `"repl": { "notebook_autostart_kernel": true }` → reopening that
+      notebook starts its kernel immediately; a notebook with NO remembered
+      kernel still doesn't start anything.
+- [ ] Kernel picker → "Create Python Environment" now asks where: "Create
+      .venv" (fast path, same as before → workspace `.venv`) or "Choose
+      Location…" (directory picker; the chosen folder becomes the env, named
+      after the folder). Both produce a working kernel and continue any queued
+      run.
+- [ ] Settings UI (`zed: open settings`) has a new "REPL & Notebooks" page:
+      Notebook section (Run Landing Mode dropdown, Show Last Executed Time,
+      Autostart Kernel) + REPL Output section (max lines/columns, inline
+      output, inline max length, output max height). Changing a value writes
+      it to settings.json and takes effect.
+
 ## Phase 36 — Notebook code health & stubs
 
 - [ ] "notebook: open notebook" from the command palette now opens the

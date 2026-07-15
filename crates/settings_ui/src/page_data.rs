@@ -74,6 +74,7 @@ pub(crate) fn settings_data(cx: &App) -> Vec<SettingsPage> {
         panels_page(),
         debugger_page(),
         terminal_page(),
+        repl_page(),
         version_control_page(),
         collaboration_page(),
         ai_page(cx),
@@ -7372,6 +7373,182 @@ fn terminal_page() -> SettingsPage {
             toolbar_section(),
             scrollbar_section(),
         ],
+    }
+}
+
+fn repl_page() -> SettingsPage {
+    fn notebook_section() -> [SettingsPageItem; 4] {
+        [
+            SettingsPageItem::SectionHeader("Notebook"),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Run Landing Mode",
+                description: "Which mode a notebook lands in after running a cell: always command, always edit, or whatever mode the run was triggered from.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("repl.notebook_run_landing_mode"),
+                    pick: |settings_content| {
+                        settings_content
+                            .repl
+                            .as_ref()?
+                            .notebook_run_landing_mode
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .repl
+                            .get_or_insert_default()
+                            .notebook_run_landing_mode = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Show Last Executed Time",
+                description: "Show when a cell was last executed (a timestamp next to the status and duration).",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("repl.notebook_show_last_executed"),
+                    pick: |settings_content| {
+                        settings_content
+                            .repl
+                            .as_ref()?
+                            .notebook_show_last_executed
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .repl
+                            .get_or_insert_default()
+                            .notebook_show_last_executed = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Autostart Kernel",
+                description: "Start a notebook's remembered kernel as soon as the notebook opens, instead of waiting for the first run.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("repl.notebook_autostart_kernel"),
+                    pick: |settings_content| {
+                        settings_content
+                            .repl
+                            .as_ref()?
+                            .notebook_autostart_kernel
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .repl
+                            .get_or_insert_default()
+                            .notebook_autostart_kernel = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+        ]
+    }
+
+    fn output_section() -> [SettingsPageItem; 6] {
+        [
+            SettingsPageItem::SectionHeader("REPL Output"),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Max Lines",
+                description: "Maximum number of lines to keep in the REPL's scrollback buffer (clamped to 4-256).",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("repl.max_lines"),
+                    pick: |settings_content| settings_content.repl.as_ref()?.max_lines.as_ref(),
+                    write: |settings_content, value, _| {
+                        settings_content.repl.get_or_insert_default().max_lines = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Max Columns",
+                description: "Maximum number of columns to keep in the REPL's scrollback buffer (clamped to 20-512).",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("repl.max_columns"),
+                    pick: |settings_content| settings_content.repl.as_ref()?.max_columns.as_ref(),
+                    write: |settings_content, value, _| {
+                        settings_content.repl.get_or_insert_default().max_columns = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Inline Output",
+                description: "Show small single-line outputs inline instead of in a block.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("repl.inline_output"),
+                    pick: |settings_content| settings_content.repl.as_ref()?.inline_output.as_ref(),
+                    write: |settings_content, value, _| {
+                        settings_content.repl.get_or_insert_default().inline_output = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Inline Output Max Length",
+                description: "Maximum number of characters for an output to be shown inline. Only applies when inline output is enabled.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("repl.inline_output_max_length"),
+                    pick: |settings_content| {
+                        settings_content
+                            .repl
+                            .as_ref()?
+                            .inline_output_max_length
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .repl
+                            .get_or_insert_default()
+                            .inline_output_max_length = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Output Max Height Lines",
+                description: "Maximum number of lines of output to display before scrolling. Set to 0 to disable output height limits.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("repl.output_max_height_lines"),
+                    pick: |settings_content| {
+                        settings_content
+                            .repl
+                            .as_ref()?
+                            .output_max_height_lines
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .repl
+                            .get_or_insert_default()
+                            .output_max_height_lines = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+        ]
+    }
+
+    SettingsPage {
+        title: "REPL & Notebooks",
+        items: concat_sections!(notebook_section(), output_section()),
     }
 }
 
