@@ -151,3 +151,7 @@ entry rather than archiving it.
   and a VS Code run carries Zed's older timestamps forward unchanged.
 - #33 — Clearing outputs left the [N] execution number and ✓/✕ status; now
   the whole run record clears. `cbea20f`
+- #48 — Running a cell with no kernel selected (the prompt path) crashed the
+  app with a GPUI double-lease panic; the kernel picker open is now deferred
+  via `window.defer` so `on_open`'s re-entrant update holds no outer lease.
+  `ff16a00`
