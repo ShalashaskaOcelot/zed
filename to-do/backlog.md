@@ -10,5 +10,7 @@ high → low within each group.
 
 ## Low priority
 
-- Cell grouping (user: low priority, rarely used).
+(EMPTY — everything has been promoted into phases. The user is thinking of
+new items; the next phase completion cannot replenish the rotation until
+some arrive.)
 

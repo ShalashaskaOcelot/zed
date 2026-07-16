@@ -64,6 +64,25 @@ listed here.
       answer determines whether there's anything to fix on Zed's side (see
       bugs.md #39).
 
+## Phase 33 — Truly unsaved "New Jupyter Notebook"
+
+Kind: change to existing behaviour — if the new flow misses the mark, say so
+and it gets fixed in place (not archived-and-refiled).
+
+- [ ] Command palette → "New Jupyter Notebook": tab opens as "Untitled", NO
+      `Untitled-N.ipynb` appears on disk. Edit a cell → dirty dot appears.
+- [ ] Ctrl-S (or closing and choosing Save) on the untitled notebook opens
+      the save-path prompt (suggested name `Untitled.ipynb`); after saving,
+      the tab shows the chosen name, the file exists where chosen, and
+      further saves go straight to it (no prompt).
+- [ ] After that first save the notebook behaves like any opened one:
+      external-change reload/conflict toast works, the kernel picker
+      remembers the pick for that file.
+- [ ] File browser → New File `some.ipynb` still creates and opens the real
+      file immediately (unchanged behaviour).
+- [ ] Untitled notebooks are NOT restored after restarting Zed (accepted v1
+      behaviour — unsaved means gone; confirm nothing crashes on restart).
+
 ## Phase 40 — UI polish from the 2026-07-16 testing round
 
 Kind: change to existing behaviour — if either change didn't take effect,

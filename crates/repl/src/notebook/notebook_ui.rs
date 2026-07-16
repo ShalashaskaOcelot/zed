@@ -20,7 +20,7 @@ use ui::{Tooltip, prelude::*};
 use workspace::item::{SaveOptions, TabContentParams};
 use workspace::notifications::NotificationId;
 use workspace::searchable::SearchableItemHandle;
-use workspace::{Item, Open, OpenOptions, OpenVisible, Pane, ProjectItem, Workspace};
+use workspace::{Item, Open, Pane, ProjectItem, Workspace};
 
 use super::{
     Cell, CellEvent, CellExecutionStatus, CellPosition, CellToolbarAction, MarkdownCellEvent,
@@ -207,7 +207,21 @@ impl NotebookEditor {
         let focus_handle = cx.focus_handle();
 
         let languages = project.read(cx).languages().clone();
-        let worktree_id = notebook_item.read(cx).project_path.worktree_id;
+        // An untitled notebook has no path; fall back to the first visible
+        // worktree so kernel discovery / the picker still have a scope.
+        let worktree_id = notebook_item
+            .read(cx)
+            .project_path
+            .as_ref()
+            .map(|project_path| project_path.worktree_id)
+            .or_else(|| {
+                project
+                    .read(cx)
+                    .visible_worktrees(cx)
+                    .next()
+                    .map(|worktree| worktree.read(cx).id())
+            })
+            .unwrap_or_else(|| project::WorktreeId::from_usize(0));
 
         let notebook_language = notebook_item.read(cx).notebook_language();
         let notebook_language = cx
@@ -357,8 +371,13 @@ impl NotebookEditor {
             kernel_picker_handle: PopoverMenuHandle::default(),
             disk_changed_externally: false,
             execution_state_changed: false,
-            // What we loaded IS what is on disk right now.
-            last_saved_disk_text: Some(notebook_item.read(cx).buffer.read(cx).text()),
+            // What we loaded IS what is on disk right now (nothing is on disk
+            // for an untitled notebook).
+            last_saved_disk_text: notebook_item
+                .read(cx)
+                .buffer
+                .as_ref()
+                .map(|buffer| buffer.read(cx).text()),
             resume_run_queue_on_idle: false,
             selected_indices: BTreeSet::new(),
             selection_anchor: None,
@@ -377,14 +396,12 @@ impl NotebookEditor {
         .detach();
 
         // Reload the notebook when its .ipynb changes on disk (the project
-        // auto-reloads the backing buffer and emits `Reloaded`).
-        let buffer = notebook_item.read(cx).buffer.clone();
-        cx.subscribe_in(&buffer, window, |this, buffer, event, window, cx| {
-            if let language::BufferEvent::Reloaded = event {
-                this.handle_external_change(buffer, window, cx);
-            }
-        })
-        .detach();
+        // auto-reloads the backing buffer and emits `Reloaded`). Untitled
+        // notebooks have no backing file yet; the watch attaches on first
+        // save-as.
+        if let Some(buffer) = notebook_item.read(cx).buffer.clone() {
+            editor.watch_backing_buffer(buffer, window, cx);
+        }
 
         // Pre-select the notebook's saved kernelspec once discovery delivers a
         // match, so a reopened notebook shows its kernel as selected (and
@@ -523,10 +540,10 @@ impl NotebookEditor {
         if let Some(spec) = &self.kernel_specification {
             return Some(spec.clone());
         }
-        let notebook_path = &self.notebook_item.read(cx).path;
-        if let Some(spec) = ReplStore::global(cx)
-            .read(cx)
-            .notebook_kernelspec(notebook_path)
+        if let Some(notebook_path) = &self.notebook_item.read(cx).path
+            && let Some(spec) = ReplStore::global(cx)
+                .read(cx)
+                .notebook_kernelspec(notebook_path)
         {
             return Some(spec.clone());
         }
@@ -926,9 +943,10 @@ impl NotebookEditor {
         })
     }
 
-    /// Create a new `Untitled-N.ipynb` in the first visible worktree, seeded
-    /// with the one-cell template, and open it as a notebook. Requires a folder
-    /// to be open (there is nowhere to put the file otherwise).
+    /// Open an untitled, session-only notebook seeded with the one-cell
+    /// template (phase 33). Nothing touches disk until the first save, which
+    /// routes through the save-as prompt. Notebooks created via the file
+    /// browser's New File are unaffected — they are real files from creation.
     fn create_new_notebook(
         workspace: &mut Workspace,
         window: &mut Window,
@@ -942,62 +960,20 @@ impl NotebookEditor {
         }
 
         let project = workspace.project().clone();
-        let fs = project.read(cx).fs().clone();
 
-        let Some(worktree_root) = project
-            .read(cx)
-            .visible_worktrees(cx)
-            .next()
-            .map(|worktree| worktree.read(cx).abs_path().to_path_buf())
-        else {
-            struct NewNotebookToast;
-            workspace.show_toast(
-                workspace::Toast::new(
-                    NotificationId::unique::<NewNotebookToast>(),
-                    "Open a folder to create a new notebook.".to_string(),
-                ),
-                cx,
-            );
-            return;
-        };
-
-        let template = match Self::empty_notebook()
-            .and_then(|notebook| Ok(serde_json::to_string_pretty(&notebook)?))
-        {
-            Ok(json) => json,
+        let template = match Self::empty_notebook() {
+            Ok(notebook) => notebook,
             Err(error) => {
                 log::error!("notebook: failed to build the new-notebook template: {error}");
                 return;
             }
         };
 
-        cx.spawn_in(window, async move |workspace, cx| {
-            // Pick a unique Untitled name so repeated invocations don't collide.
-            let mut candidate = worktree_root.join("Untitled.ipynb");
-            let mut index = 1;
-            while fs.is_file(&candidate).await {
-                candidate = worktree_root.join(format!("Untitled-{index}.ipynb"));
-                index += 1;
-            }
-
-            fs.atomic_write(candidate.clone(), template).await?;
-
-            workspace
-                .update_in(cx, |workspace, window, cx| {
-                    workspace.open_abs_path(
-                        candidate,
-                        OpenOptions {
-                            visible: Some(OpenVisible::None),
-                            ..Default::default()
-                        },
-                        window,
-                        cx,
-                    )
-                })?
-                .await?;
-            anyhow::Ok(())
-        })
-        .detach_and_log_err(cx);
+        let languages = project.read(cx).languages().clone();
+        let notebook_item =
+            cx.new(|_| NotebookItem::untitled(project.downgrade(), languages, template));
+        let editor = cx.new(|cx| NotebookEditor::new(project, notebook_item, window, cx));
+        workspace.add_item_to_active_pane(Box::new(editor), None, true, window, cx);
     }
 
     /// Parse `.ipynb` text into a v4 notebook, tolerating empty files, missing
@@ -1097,6 +1073,23 @@ impl NotebookEditor {
                 workspace.dismiss_toast(&NotificationId::unique::<NotebookConflictToast>(), cx);
             });
         }
+    }
+
+    /// Watch the notebook's backing project buffer so external .ipynb changes
+    /// reload it. Called at open for file-backed notebooks, and after the
+    /// first save-as of an untitled one.
+    fn watch_backing_buffer(
+        &mut self,
+        buffer: Entity<Buffer>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.subscribe_in(&buffer, window, |this, buffer, event, window, cx| {
+            if let language::BufferEvent::Reloaded = event {
+                this.handle_external_change(buffer, window, cx);
+            }
+        })
+        .detach();
     }
 
     /// The .ipynb changed on disk (the project auto-reloaded the backing
@@ -1346,11 +1339,14 @@ impl NotebookEditor {
         // Remember the choice for THIS notebook only (bug #30): a pick here
         // must not change which kernel sibling notebooks or the inline REPL
         // resolve to. Cross-session persistence flows through the notebook's
-        // own kernelspec metadata, written below on launch.
-        let notebook_path = self.notebook_item.read(cx).path.clone();
-        ReplStore::global(cx).update(cx, |store, cx| {
-            store.set_notebook_kernelspec(notebook_path, spec.clone(), cx);
-        });
+        // own kernelspec metadata, written below on launch. An untitled
+        // notebook has no path to key on — its own `kernel_specification`
+        // field carries the pick for the session.
+        if let Some(notebook_path) = self.notebook_item.read(cx).path.clone() {
+            ReplStore::global(cx).update(cx, |store, cx| {
+                store.set_notebook_kernelspec(notebook_path, spec.clone(), cx);
+            });
+        }
 
         // Any cell the user ran before picking a kernel should now run once
         // this kernel is ready.
@@ -3839,8 +3835,12 @@ impl Focusable for NotebookEditor {
 
 // Intended to be a NotebookBuffer
 pub struct NotebookItem {
-    path: PathBuf,
-    project_path: ProjectPath,
+    // The file-backing fields are all `Some` together for a notebook opened
+    // from (or saved to) disk, and all `None` for an untitled notebook
+    // created by "New Jupyter Notebook" (phase 33), which only gains them on
+    // its first save-as.
+    path: Option<PathBuf>,
+    project_path: Option<ProjectPath>,
     languages: Arc<LanguageRegistry>,
     // Raw notebook data
     notebook: nbformat::v4::Notebook,
@@ -3849,11 +3849,11 @@ pub struct NotebookItem {
     // worktree entry under a new id; advertising the stale id would defeat
     // the pane's already-open dedup and let the same notebook open in
     // multiple tabs (bug #34).
-    id: ProjectEntryId,
+    id: Option<ProjectEntryId>,
     project: WeakEntity<Project>,
     // The underlying project buffer for the .ipynb file. Retained so the
     // project keeps watching the file and emits `Reloaded` on external change.
-    buffer: Entity<Buffer>,
+    buffer: Option<Entity<Buffer>>,
 }
 
 impl project::ProjectItem for NotebookItem {
@@ -3886,13 +3886,13 @@ impl project::ProjectItem for NotebookItem {
                     .context("Entry not found")?;
 
                 Ok(cx.new(|_| NotebookItem {
-                    path: abs_path,
-                    project_path: path,
+                    path: Some(abs_path),
+                    project_path: Some(path),
                     languages,
                     notebook,
-                    id,
+                    id: Some(id),
                     project: project.downgrade(),
-                    buffer,
+                    buffer: Some(buffer),
                 }))
             }))
         } else {
@@ -3901,15 +3901,16 @@ impl project::ProjectItem for NotebookItem {
     }
 
     fn entry_id(&self, cx: &App) -> Option<ProjectEntryId> {
+        let project_path = self.project_path.as_ref()?;
         self.project
             .upgrade()
-            .and_then(|project| project.read(cx).entry_for_path(&self.project_path, cx))
+            .and_then(|project| project.read(cx).entry_for_path(project_path, cx))
             .map(|entry| entry.id)
-            .or(Some(self.id))
+            .or(self.id)
     }
 
     fn project_path(&self, _: &App) -> Option<ProjectPath> {
-        Some(self.project_path.clone())
+        self.project_path.clone()
     }
 
     fn is_dirty(&self) -> bool {
@@ -3919,6 +3920,28 @@ impl project::ProjectItem for NotebookItem {
 }
 
 impl NotebookItem {
+    /// An untitled, session-only notebook (phase 33): lives purely in memory
+    /// until the first save-as attaches it to a file.
+    pub fn untitled(
+        project: WeakEntity<Project>,
+        languages: Arc<LanguageRegistry>,
+        notebook: nbformat::v4::Notebook,
+    ) -> Self {
+        NotebookItem {
+            path: None,
+            project_path: None,
+            languages,
+            notebook,
+            id: None,
+            project,
+            buffer: None,
+        }
+    }
+
+    fn is_untitled(&self) -> bool {
+        self.path.is_none()
+    }
+
     pub fn language_name(&self) -> Option<String> {
         self.notebook
             .metadata
@@ -3988,11 +4011,18 @@ impl Item for NotebookEditor {
         self.notebook_item
             .read(cx)
             .project_path
-            .path
-            .file_name()
-            .map(|s| s.to_string())
-            .unwrap_or_default()
-            .into()
+            .as_ref()
+            .and_then(|project_path| project_path.path.file_name())
+            .map(|name| name.to_string().into())
+            .unwrap_or_else(|| SharedString::from("Untitled"))
+    }
+
+    fn suggested_filename(&self, cx: &App) -> SharedString {
+        if self.notebook_item.read(cx).is_untitled() {
+            "Untitled.ipynb".into()
+        } else {
+            self.tab_content_text(0, cx)
+        }
     }
 
     fn tab_content(&self, params: TabContentParams, _window: &Window, cx: &App) -> AnyElement {
@@ -4031,7 +4061,13 @@ impl Item for NotebookEditor {
         // TODO
     }
 
-    fn can_save(&self, _cx: &App) -> bool {
+    fn can_save(&self, cx: &App) -> bool {
+        // An untitled notebook has nowhere to save TO yet — the workspace
+        // routes it through the save-as prompt instead (phase 33).
+        !self.notebook_item.read(cx).is_untitled()
+    }
+
+    fn can_save_as(&self, _cx: &App) -> bool {
         true
     }
 
@@ -4043,7 +4079,13 @@ impl Item for NotebookEditor {
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
         let notebook = self.to_notebook(cx);
-        let path = self.notebook_item.read(cx).path.clone();
+        let Some(path) = self.notebook_item.read(cx).path.clone() else {
+            // Untitled: can_save() is false, so the workspace goes through the
+            // save-as prompt instead of here.
+            return Task::ready(Err(anyhow::anyhow!(
+                "an untitled notebook must be saved via save-as"
+            )));
+        };
         let fs = project.read(cx).fs().clone();
 
         if !self.disk_changed_externally {
@@ -4094,7 +4136,7 @@ impl Item for NotebookEditor {
         &mut self,
         project: Entity<Project>,
         path: ProjectPath,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
         let notebook = self.to_notebook(cx);
@@ -4104,14 +4146,39 @@ impl Item for NotebookEditor {
 
         self.mark_as_saved(cx);
 
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let abs_path = abs_path.context("Failed to get absolute path")?;
             let json =
                 serde_json::to_string_pretty(&notebook).context("Failed to serialize notebook")?;
             this.update(cx, |this, _| {
                 this.last_saved_disk_text = Some(json.clone());
             })?;
-            fs.atomic_write(abs_path, json).await?;
+            fs.atomic_write(abs_path.clone(), json).await?;
+
+            // Attach the notebook to its new file (phase 33): from here on it
+            // behaves like any opened notebook — tab title, dedup by entry,
+            // external-change watch, per-notebook kernel memory. This also
+            // re-points an already file-backed notebook that was save-as'd
+            // elsewhere.
+            let buffer = this
+                .update(cx, |this, cx| {
+                    this.project
+                        .update(cx, |project, cx| project.open_buffer(path.clone(), cx))
+                })?
+                .await?;
+            this.update_in(cx, |this, window, cx| {
+                let entry_id = this.project.read(cx).entry_for_path(&path, cx).map(|entry| entry.id);
+                this.worktree_id = path.worktree_id;
+                this.notebook_item.update(cx, |item, cx| {
+                    item.path = Some(abs_path);
+                    item.project_path = Some(path);
+                    item.id = entry_id;
+                    item.buffer = Some(buffer.clone());
+                    cx.emit(());
+                });
+                this.watch_backing_buffer(buffer, window, cx);
+                cx.notify();
+            })?;
             Ok(())
         })
     }
@@ -4122,7 +4189,10 @@ impl Item for NotebookEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
-        let project_path = self.notebook_item.read(cx).project_path.clone();
+        let Some(project_path) = self.notebook_item.read(cx).project_path.clone() else {
+            // Untitled: nothing on disk to reload from.
+            return Task::ready(Ok(()));
+        };
 
         cx.spawn_in(window, async move |this, cx| {
             let buffer = this
@@ -4282,6 +4352,7 @@ mod tests {
     use super::*;
     use crate::kernels::LocalKernelSpecification;
     use gpui::TestAppContext;
+    use project::Fs as _;
     use jupyter_protocol::JupyterKernelspec;
     use project::{FakeFs, Project, ProjectItem as _};
     use serde_json::json;
@@ -4566,6 +4637,90 @@ mod tests {
             assert!(
                 !editor.has_content_changes(cx),
                 "opening must not make any cell buffer dirty"
+            );
+        });
+    }
+
+    /// An untitled notebook (phase 33) lives purely in memory: no file on
+    /// disk, "Untitled" tab, save routed through save-as — and the first
+    /// save-as attaches it to its new file so it behaves like an opened
+    /// notebook from then on.
+    #[gpui::test]
+    async fn test_untitled_notebook_saves_via_save_as(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            editor::init(cx);
+        });
+
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(path!("/notebooks"), json!({})).await;
+
+        let project = Project::test(fs.clone(), [path!("/notebooks").as_ref()], cx).await;
+        cx.update(|cx| ReplStore::init(fs.clone(), cx));
+
+        let worktree_id = project.read_with(cx, |project, cx| {
+            project.worktrees(cx).next().unwrap().read(cx).id()
+        });
+
+        let template = NotebookEditor::empty_notebook().expect("template should build");
+        let languages = project.read_with(cx, |project, _| project.languages().clone());
+        let notebook_item = cx.update(|cx| {
+            cx.new(|_| NotebookItem::untitled(project.downgrade(), languages, template))
+        });
+
+        let cx = cx.add_empty_window();
+        let editor = cx.update(|window, cx| {
+            cx.new(|cx| NotebookEditor::new(project.clone(), notebook_item, window, cx))
+        });
+        cx.run_until_parked();
+
+        assert!(
+            !fs.is_file(std::path::Path::new(path!("/notebooks/Untitled.ipynb")))
+                .await,
+            "creating an untitled notebook must not write anything to disk"
+        );
+        editor.read_with(cx, |editor, cx| {
+            assert!(
+                !Item::can_save(editor, cx),
+                "an untitled notebook has nowhere to save to"
+            );
+            assert!(Item::can_save_as(editor, cx));
+            assert_eq!(Item::tab_content_text(editor, 0, cx), "Untitled");
+            assert_eq!(Item::suggested_filename(editor, cx), "Untitled.ipynb");
+            assert!(
+                !Item::is_dirty(editor, cx),
+                "a fresh untitled notebook starts clean"
+            );
+        });
+
+        let new_path = ProjectPath {
+            worktree_id,
+            path: rel_path("analysis.ipynb").into(),
+        };
+        editor
+            .update_in(cx, |editor, window, cx| {
+                Item::save_as(editor, project.clone(), new_path, window, cx)
+            })
+            .await
+            .expect("save-as should succeed");
+        cx.run_until_parked();
+
+        assert!(
+            fs.is_file(std::path::Path::new(path!("/notebooks/analysis.ipynb")))
+                .await,
+            "save-as must create the chosen file"
+        );
+        editor.read_with(cx, |editor, cx| {
+            assert!(
+                Item::can_save(editor, cx),
+                "after save-as the notebook is file-backed and saves in place"
+            );
+            assert_eq!(Item::tab_content_text(editor, 0, cx), "analysis.ipynb");
+            assert!(
+                !editor.notebook_item.read(cx).is_untitled(),
+                "save-as must attach the notebook to its file"
             );
         });
     }

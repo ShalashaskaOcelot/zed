@@ -83,6 +83,11 @@ entry rather than archiving it.
 - Phase 40 — UI polish (2026-07-16 round): notebook output blocks span the
   cell's full width (`max_columns` now only sizes the inline REPL); slimmer
   notebook top strip.
+- Phase 33 — Truly unsaved "New Jupyter Notebook": the command now opens an
+  untitled, in-memory notebook (no `Untitled-N.ipynb` on disk); first save
+  goes through the save-as prompt, which attaches the notebook to its file
+  (watcher, dedup, kernel memory) — file-browser-created notebooks unchanged.
+  Untitled notebooks are not restored across restarts (v1).
 
 ## Fixed bugs (confirmed)
 
