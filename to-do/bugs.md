@@ -394,7 +394,7 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ## 36. Custom-location venv disappears from the kernel picker after restart
 
-- **Status:** open
+- **Status:** fix attempted - untested
 - **Symptom:** (user 2026-07-16) Created a venv at a custom location
   (`~/Dev/venvs/test_venv`) via kernel picker → "Create Python Environment" →
   "Choose Location…". It worked, ran notebooks, pip-installed fine. After
@@ -408,8 +408,17 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   register a real jupyter kernelspec via `python -m ipykernel install --user
   --name <name>` at creation time, or persist known env paths and re-add them
   during discovery).
-- **Fix attempted:** none
-- **Tested:** n/a
+- **Fix attempted (2026-07-16):** when the created env lies OUTSIDE the
+  worktree, the create flow now also runs `<env python> -m ipykernel install
+  --user --name <name> --display-name "Python (<name>)"`, registering a real
+  per-user Jupyter kernelspec that discovery finds on every future start
+  (worktree `.venv`s skip this — toolchain discovery already finds them).
+  Registration failure is non-fatal but reported in the toast. Existing
+  already-created envs: run that command once by hand, or recreate via the
+  picker.
+- **Tested:** no — needs user confirmation: create an env at a custom
+  location, restart Zed → it appears in the picker (under the Jupyter
+  kernels group as "Python (<name>)") and runs cells.
 
 ## 37. Table (DataFrame) outputs lack "Open in Buffer"; old menu Copy skips them
 

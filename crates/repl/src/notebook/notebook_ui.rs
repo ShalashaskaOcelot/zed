@@ -705,6 +705,18 @@ impl NotebookEditor {
             venv_dir.join("bin").join("python")
         };
 
+        // An env outside the worktree is invisible to toolchain discovery on
+        // the next start (bug #36), so register it as a real Jupyter
+        // kernelspec, which discovery does find. Workspace `.venv`s are
+        // discovered directly and skip this to avoid polluting the per-user
+        // kernelspec list.
+        let register_kernelspec = self
+            .project
+            .read(cx)
+            .worktree_for_id(self.worktree_id, cx)
+            .map(|worktree| worktree.read(cx).abs_path().to_path_buf())
+            .is_none_or(|root| !venv_dir.starts_with(&root));
+
         struct CreatePythonEnv;
         let notification_id = NotificationId::unique::<CreatePythonEnv>();
         let workspace = Workspace::for_window(window, cx);
@@ -721,7 +733,9 @@ impl NotebookEditor {
         }
         let weak_workspace = workspace.map(|workspace| workspace.downgrade());
 
-        let create_task = cx.background_spawn(async move {
+        let create_task = cx.background_spawn({
+            let env_name = env_name.clone();
+            async move {
             // Create the venv unless one already exists (reuse it if so).
             if !fs.is_file(&venv_python).await {
                 let mut last_error = String::new();
@@ -768,25 +782,71 @@ impl NotebookEditor {
                     .unwrap_or("unknown error")
             );
 
-            anyhow::Ok(venv_python)
-        });
+            // Registration failure is non-fatal — the env still works for
+            // this session — but the user must know it won't be listed next
+            // start.
+            let mut registration_warning = None;
+            if register_kernelspec {
+                let kernel_name: String = env_name
+                    .to_lowercase()
+                    .chars()
+                    .map(|character| {
+                        if character.is_ascii_alphanumeric()
+                            || matches!(character, '.' | '_' | '-')
+                        {
+                            character
+                        } else {
+                            '-'
+                        }
+                    })
+                    .collect();
+                let result = util::command::new_command(venv_python.to_string_lossy().as_ref())
+                    .args(["-m", "ipykernel", "install", "--user", "--name"])
+                    .arg(&kernel_name)
+                    .arg("--display-name")
+                    .arg(format!("Python ({env_name})"))
+                    .output()
+                    .await;
+                registration_warning = match result {
+                    Ok(output) if output.status.success() => None,
+                    Ok(output) => Some(
+                        String::from_utf8_lossy(&output.stderr)
+                            .lines()
+                            .last()
+                            .unwrap_or("unknown error")
+                            .to_string(),
+                    ),
+                    Err(error) => Some(error.to_string()),
+                };
+            }
+
+            anyhow::Ok((venv_python, registration_warning))
+        }});
 
         cx.spawn_in(window, async move |this, cx| {
             let result = create_task.await;
             match result {
-                Ok(venv_python) => {
+                Ok((venv_python, registration_warning)) => {
                     if let Some(weak_workspace) = &weak_workspace {
                         weak_workspace
                             .update(cx, |workspace, cx| {
                                 workspace.dismiss_toast(&notification_id, cx);
-                                workspace.show_toast(
-                                    workspace::Toast::new(
-                                        notification_id.clone(),
-                                        format!("Created {env_name} and installed ipykernel"),
-                                    )
-                                    .autohide(),
-                                    cx,
-                                );
+                                let (message, autohide) = match &registration_warning {
+                                    Some(warning) => (
+                                        format!(
+                                            "Created {env_name}, but couldn't register its \
+                                             kernel for future sessions: {warning}"
+                                        ),
+                                        false,
+                                    ),
+                                    None => {
+                                        (format!("Created {env_name} and installed ipykernel"), true)
+                                    }
+                                };
+                                let toast =
+                                    workspace::Toast::new(notification_id.clone(), message);
+                                let toast = if autohide { toast.autohide() } else { toast };
+                                workspace.show_toast(toast, cx);
                             })
                             .ok();
                     }
