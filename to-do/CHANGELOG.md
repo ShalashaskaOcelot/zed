@@ -108,3 +108,7 @@ entry rather than archiving it.
   `b3b7887`
 - #28 — Cells flashed/stuck "Cancelled" around kernel selection (picker Escape
   and post-pick startup). `db1173b`
+- #32 — Notebooks reported dirty immediately upon opening (redundant
+  `set_text` bumped every cell buffer's version at load). `06d8d45`
+- #33 — Clearing outputs left the [N] execution number and ✓/✕ status; now
+  the whole run record clears. `cbea20f`

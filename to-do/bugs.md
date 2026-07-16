@@ -309,9 +309,17 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   notebook now shows THAT notebook's kernel as selected (new
   `KernelSelector::with_selected` override) instead of the worktree selection,
   which now belongs solely to the inline `.py` REPL.
-- **Tested:** no — needs user confirmation (two notebooks with different saved
-  kernels: each shows/runs its own; pick a different kernel in one → the other
-  keeps its kernel, before and after runs)
+- **Tested:** no — the core repro (same-session cross-notebook contamination)
+  has not been retested yet. **Finding (user 2026-07-16):** closed Zed with
+  different kernels selected on two notebooks; on relaunch NEITHER showed a
+  kernel selected. Cross-session persistence flows through the notebook's own
+  kernelspec metadata, which is only written at LAUNCH and only persisted when
+  the notebook is SAVED — and with lazy start the indicator stays empty until
+  the first run even when a kernel IS remembered. So the on-launch blank
+  indicator may be expected; what matters is whether the first RUN uses the
+  remembered kernel without prompting, and whether a pick in one notebook
+  still leaks into the other within a session. Refreshed test recipe in
+  `awaiting_testing.md` covers both.
 
 ## 31. A stale (deleted) kernel is retried forever instead of re-prompting
 
@@ -334,46 +342,112 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   would have relaunched the very spec that just failed). An explicit pick
   replaces the broken selection; dismissing leaves the cells idle (bug #28
   behavior).
-- **Tested:** no — needs user confirmation (delete the kernel env while Zed is
-  running with the notebook closed; reopen + run → the launch fails ONCE, and
-  the NEXT run opens the kernel picker instead of erroring again)
+- **Tested:** no — test BLOCKED (user 2026-07-16): deleting the venv while Zed
+  was running failed with "Failed to delete 1 of 1 file" — the notebook's
+  kernel process keeps running after the notebook is closed and holds a lock
+  on the env's files (filed as bug #35). Retest this once #35 is fixed (or
+  work around by killing python.exe manually before deleting).
 
-## 33. Clearing outputs leaves the execution number and status marker
+## 34. The same notebook file can end up open in multiple tabs
 
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-14) Clearing outputs clears the output area but
-  the cell's `[N]` execution number and its ✓/✕ status stay; it should clear
-  everything back to a never-run look.
-- **Fix attempted (2026-07-14):** the user-facing clear paths (Clear All
-  Outputs, the `ClearCellOutputs` action, and the output "…" menu's Clear
-  Output) now call a new `clear_execution_record` that wipes outputs +
-  execution number + status marker + duration, returning the cell to a
-  never-run look. The internal `clear_outputs` used by `begin_running` keeps
-  status/timing (a starting run must not lose its spinner).
-- **Tested:** no — needs user confirmation (clear a ran cell's output → the
-  [N] number and ✓/✕ disappear too, for single-cell, selection, and
-  clear-all)
+- **Status:** open (not reproduced)
+- **Symptom:** (user 2026-07-16) `Untitled.ipynb` was somehow open in THREE
+  tabs at once (screenshot). Opening the file again correctly returned to one
+  of the already-open tabs, and after closing two of the three the bug could
+  not be recreated. Opening the same file must never create a second
+  independent view of it.
+- **Analysis:** unknown trigger. Workspace item dedup is per project-path, so
+  candidate holes: the "New Jupyter Notebook" flow creating `Untitled.ipynb`
+  and opening it without going through the dedup path (three "new notebook"
+  invocations before the first tab registered?), a race between two open
+  requests resolving the same path, or external-reload re-adding an item.
+  Likely interacts with phase 33 (truly-unsaved new notebooks), which will
+  rework the Untitled flow anyway. WATCH ITEM: if it recurs, note how each of
+  the duplicate tabs was opened (new-notebook command vs file open).
+- **Fix attempted:** none
+- **Tested:** n/a
 
-## 32. Notebook is dirty immediately upon opening
+## 35. Closing a notebook leaves its kernel process running
 
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-14) Notebooks show as dirty the moment they are
-  opened, before starting a kernel or running/editing anything. This also made
-  the "restart must not dirty" check unfalsifiable (dirty either way).
-- **Root cause (reproduced in a new regression test):** `CodeCell::new` created
-  the cell's buffer WITH the source text (`Buffer::local(source)`) and then
-  ALSO called `editor.set_text(source)` — a real edit that bumps the buffer
-  version past its saved version, so every code-cell buffer (and therefore
-  `has_content_changes`, and therefore the whole notebook) was born dirty.
-  Longstanding, not introduced by phase 25 — but phase 25's restart test is
-  what surfaced it.
-- **Fix attempted (2026-07-14):** removed the redundant `set_text`; the buffer
-  already contains the source. Added `test_opening_a_notebook_is_not_dirty`
-  (mixed markdown/code cells, outputs, collapse metadata) asserting a freshly
-  opened notebook reports no execution-state, structural, or content changes —
-  it failed before the fix and passes after.
-- **Tested:** no — needs user confirmation (open a notebook → no dirty dot, no
-  save prompt on close; then re-test: Restart Kernel on a never-started
-  notebook must NOT dirty; restart of a RUNNING kernel still dirties by design,
-  because it resets the cells' `[N]` execution numbers — the small bracketed
-  numbers in the gutter that count kernel executions — which is savable state)
+- **Status:** open
+- **Symptom:** (user 2026-07-16) After closing a notebook tab, the kernel
+  process is still alive: attempting to delete the notebook's venv fails with
+  "Failed to delete 1 of 1 file" because the running kernel holds a lock on
+  the env's files (python.exe in use on Windows). Only restarting Zed killed
+  the kernel. This also blocks testing bug #31.
+- **Analysis:** closing the notebook editor drops the UI but the
+  `RunningKernel` (owned via the session/store) is not shut down — nothing in
+  the notebook item's close/release path sends a shutdown request or kills the
+  child process. Expected: closing the last view of a notebook shuts its
+  kernel down (like Jupyter closing a session); at minimum the process must
+  die with the item so env files aren't locked.
+- **Fix attempted:** none
+- **Tested:** n/a
+
+## 36. Custom-location venv disappears from the kernel picker after restart
+
+- **Status:** open
+- **Symptom:** (user 2026-07-16) Created a venv at a custom location
+  (`~/Dev/venvs/test_venv`) via kernel picker → "Create Python Environment" →
+  "Choose Location…". It worked, ran notebooks, pip-installed fine. After
+  restarting Zed the venv no longer appears in the kernel picker (only the
+  workspace `.venv` and the global Pythons show).
+- **Analysis:** the created env is registered as a kernel spec for the CURRENT
+  session only (added to the store's spec list in memory). Discovery on a
+  fresh start only finds workspace-local envs (`.venv` etc. via toolchain
+  discovery) and installed jupyter kernelspecs — a venv outside the worktree
+  is invisible to both. Fix direction: persist created-env locations (e.g.
+  register a real jupyter kernelspec via `python -m ipykernel install --user
+  --name <name>` at creation time, or persist known env paths and re-add them
+  during discovery).
+- **Fix attempted:** none
+- **Tested:** n/a
+
+## 37. Table (DataFrame) outputs lack "Open in Buffer"; old menu Copy skips them
+
+- **Status:** open
+- **Symptom:** (user 2026-07-16) On DataFrame/table outputs the new hover
+  controls show Copy Output (works, nice markdown) but NOT "Open in Buffer";
+  plain text outputs show and support both. Also the output "…" menu's
+  long-standing Copy Output entry copies NOTHING for table outputs.
+- **Analysis:** the phase-29 controls derive their availability from the
+  output's clipboard/text representation; `TableView` implements the new
+  markdown copy for the hover button but evidently isn't wired into the
+  buffer-open path, and the older menu copy path uses a different
+  (text-only) accessor that returns nothing for tables. Give tables the same
+  markdown text representation on ALL paths: open-in-buffer opens the
+  markdown table, menu copy copies it.
+- **Fix attempted:** none
+- **Tested:** n/a
+
+## 38. Failed kernel launch marks the cell "Cancelled" instead of errored
+
+- **Status:** open
+- **Symptom:** (user 2026-07-16) With ipykernel removed from the env, running
+  a cell correctly reports the launch failure (kernel stderr shown: "No module
+  named ipykernel_launcher") but the cell's status shows "Cancelled" rather
+  than a failed/error state.
+- **Analysis:** when the launch fails, queued cells are cleared via the
+  cancelled path (same as picker-dismiss, bug #28) instead of an errored path.
+  `kernel_errored` should mark cells that were awaiting that launch as failed
+  (red ✕), reserving "Cancelled" for user-initiated dismissal/interrupt.
+- **Fix attempted:** none
+- **Tested:** n/a
+
+## 39. Last-executed timestamps don't interop with VS Code
+
+- **Status:** open
+- **Symptom:** (user 2026-07-16) Phase 28 timestamps round-trip within Zed,
+  but: (a) a notebook run in Zed shows NO execution times when opened in VS
+  Code; (b) running a cell in VS Code (while closed in Zed) and then opening
+  in Zed shows Zed's STALE old time (11:59:44) instead of VS Code's newer run
+  (12:02:49), surviving even a Zed restart.
+- **Analysis:** Zed writes/reads its own cell-metadata key; VS Code's Jupyter
+  extension stores its execution summary differently (and doesn't read ours).
+  Needs investigation of what VS Code actually persists per cell
+  (`metadata.execution` shell/iopub timestamps) and then: write both formats
+  on save, and prefer the NEWEST available record on load so an external run
+  updates the display. (b) is the more important half — showing a stale time
+  as if current is misleading.
+- **Fix attempted:** none
+- **Tested:** n/a
