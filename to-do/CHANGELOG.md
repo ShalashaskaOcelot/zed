@@ -92,6 +92,16 @@ entry rather than archiving it.
   goes through the save-as prompt, which attaches the notebook to its file
   (watcher, dedup, kernel memory) — file-browser-created notebooks unchanged.
   Untitled notebooks are not restored across restarts (v1).
+- Phase 43 — Release & distribution discovery: mapped Zed's Windows
+  packaging (Inno Setup 6 via `script/bundle-windows.ps1`; the installer is
+  ALREADY user-level — `PrivilegesRequired=lowest`, HKCU-only; unsigned
+  builds work with `CI` unset), auto-update (custom `{version,url}` feed at
+  `{server}/releases/{channel}/{version}/asset`; single choke point
+  `get_release_asset`; no integrity checks; `dev` channel never updates),
+  and fork divergence (111 commits / 37 files since 2026-07-08; dry-run
+  upstream merge clean; hotspots ranked). Full findings: `8f9a5d3dc5`.
+  Produced plan phases 44 (local installer build), 45 (Gitea-fed
+  auto-update), 46 (upstream-merge playbook), 47 (Drone pipeline).
 
 ## Fixed bugs (confirmed)
 

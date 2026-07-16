@@ -27,4 +27,16 @@ high → low within each group.
 - Kernel picker: show the env path under Jupyter-kernel entries the way
   Python Environment entries show theirs (user 2026-07-16) — registered
   venv kernelspecs currently give no clue which directory they point at.
+- Arch Linux distribution (user 2026-07-16, explicitly deferred — "long
+  finger"): proper pacman-managed install, i.e. a self-hosted pacman repo
+  the user's machines can pull from, or an AUR package (paru-manageable).
+  No AppImages. Needs the Linux bundle (`script/bundle-linux`) plus
+  PKGBUILD/repo tooling, and updates handed to pacman (build with
+  `ZED_UPDATE_EXPLANATION` so in-app auto-update stays off for the pacman
+  build). Windows (phases 44-47) comes first.
+- Upstream the fork's two generic changes as PRs to zed-industries/zed to
+  permanently shrink the merge-conflict surface (phase 43 discovery):
+  gpui `scroll_to_reveal_item_top_aligned` (`crates/gpui/src/elements/list.rs`)
+  and `util::process` `spawn_interruptible`/Windows interrupt plumbing
+  (`crates/util/src/process.rs`).
 
