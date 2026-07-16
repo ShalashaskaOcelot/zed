@@ -118,5 +118,22 @@ entry rather than archiving it.
   and post-pick startup). `db1173b`
 - #32 — Notebooks reported dirty immediately upon opening (redundant
   `set_text` bumped every cell buffer's version at load). `06d8d45`
+- #30 — An explicit kernel pick in one notebook changed other notebooks'
+  kernels; picks are now per-notebook. `d2e9c63`
+- #31 — A stale (deleted) kernel was retried forever; a failed launch now
+  re-prompts with the picker on the next run. `138bc0c`
+- #35 — Closing a notebook left its kernel process running (entity cycle
+  kept the editor alive; kernels now hold weak session handles). `74ec3fd`
+- #36 — Custom-location venvs vanished from the picker after restart; they
+  are now registered as per-user Jupyter kernelspecs at creation. `ffdde0e`
+- #37 — Table outputs lacked "Open in Buffer" and the output menu's copy
+  skipped them; both now use the table's markdown text. `f6bd2d6`
+- #38 — A failed kernel launch marked the cell "Cancelled" instead of the
+  red ✕ failed state. `fc5e84b`
+- #39 — CLOSED, not a Zed defect (investigated with on-disk JSON): Zed
+  writes/reads VS Code's exact dotted `metadata.execution` keys, but VS
+  Code itself does not persist execution times to the file (it displays
+  from internal workspace state), so times can't round-trip into VS Code,
+  and a VS Code run carries Zed's older timestamps forward unchanged.
 - #33 — Clearing outputs left the [N] execution number and ✓/✕ status; now
   the whole run record clears. `cbea20f`

@@ -309,17 +309,20 @@ impl Output {
         h_flex()
             .id("output-content")
             .w_full()
-            .when_else(
-                needs_horizontal_scroll,
-                |this| this.overflow_x_scroll(),
-                |this| this.overflow_x_hidden(),
-            )
+            .when(!needs_horizontal_scroll, |this| this.overflow_x_hidden())
             .items_start()
             .child(
                 div()
-                    .when(!needs_horizontal_scroll, |el| {
-                        el.flex_1().w_full().overflow_x_hidden()
-                    })
+                    .when_else(
+                        needs_horizontal_scroll,
+                        // A table scrolls horizontally INSIDE its own view;
+                        // the wrapper just claims the row's free width so the
+                        // table can fill it (phase 40 — without a width the
+                        // table shrank to its natural size and the controls
+                        // hugged it instead of sitting at the right edge).
+                        |el| el.flex_1().min_w_0(),
+                        |el| el.flex_1().w_full().overflow_x_hidden(),
+                    )
                     .when_some(max_width, |el, max_width| el.max_w(max_width))
                     .children(content),
             )

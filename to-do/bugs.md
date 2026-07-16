@@ -7,31 +7,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ---
 
-## 6. Native kernel launch is flaky on Windows (os error 10054)
-
-- **Status:** fix attempted - untested
-- **Symptom:** "Kernel Error: cell could not be executed — the kernel failed
-  to launch: handling failed for recv task: control recv: Codec Error: An
-  existing connection was forcibly closed by the remote host. (os error
-  10054)"
-- **Analysis:** Message chain fully traced: control-socket read failure
-  (`kernels/mod.rs:144-147`) → recv task bails → `kernel_errored`
-  (`mod.rs:190-197`) → `Kernel::ErroredLaunch` → error rendered by
-  `execute_cell`/`show_kernel_error`. Root cause: the native launch path
-  (`native_kernel.rs:112-255`) connects to the kernel's sockets immediately
-  after spawn with no readiness wait and no premature-exit check — the WSL
-  path (`wsl_kernel.rs:290-323`) does both (2s wait + `try_status()` +
-  stderr capture). Also aggravated by the restart races in bug #1.
-- **Fix attempted:** Native kernel launch now waits 500ms after spawning and
-  checks for premature process exit, reporting the kernel's stderr in the
-  error message (mirrors the WSL path). Connection files are unique per
-  launch so a dying old kernel can no longer delete the new kernel's file.
-  The stale-message-task fix under bug #1 also removes the main source of
-  spurious `ErroredLaunch` states after restarts. A fixed sleep is a partial
-  measure — a kernel_info/heartbeat readiness handshake is a possible
-  follow-up if 10054 persists (noted in backlog).
-- **Tested:** no — needs user confirmation on Windows
-
 ## 7. Restart does not clear per-execution state
 
 - **Status:** fix attempted - untested
@@ -290,64 +265,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 - **Fix attempted:** none
 - **Tested:** n/a
 
-## 30. Explicit kernel pick in one notebook changes other notebooks' kernels
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-14) "Selecting a different kernel in one notebook
-  still changes the kernel for other notebooks also." Expected: per-notebook.
-- **Analysis:** the adversarial-review fix made METADATA adoption per-notebook,
-  but an EXPLICIT pick still goes through `change_kernel` →
-  `ReplStore::set_active_kernelspec`, which is keyed BY WORKTREE — and
-  `remembered_kernel_spec` consults that store selection BEFORE the notebook's
-  own metadata. So a pick in notebook A wins over B's saved kernel.
-- **Fix attempted (2026-07-14):** explicit picks are per-notebook: the store
-  gains `selected_kernel_for_notebook` keyed by the notebook's absolute path;
-  `change_kernel` writes that (never the worktree entry), and
-  `remembered_kernel_spec` resolves own-spec → per-notebook memory → own
-  metadata. Cross-session persistence flows through the notebook's own
-  kernelspec metadata (written at launch). The kernel picker rendered from a
-  notebook now shows THAT notebook's kernel as selected (new
-  `KernelSelector::with_selected` override) instead of the worktree selection,
-  which now belongs solely to the inline `.py` REPL.
-- **Tested:** no — the core repro (same-session cross-notebook contamination)
-  has not been retested yet. **Finding (user 2026-07-16):** closed Zed with
-  different kernels selected on two notebooks; on relaunch NEITHER showed a
-  kernel selected. Cross-session persistence flows through the notebook's own
-  kernelspec metadata, which is only written at LAUNCH and only persisted when
-  the notebook is SAVED — and with lazy start the indicator stays empty until
-  the first run even when a kernel IS remembered. So the on-launch blank
-  indicator may be expected; what matters is whether the first RUN uses the
-  remembered kernel without prompting, and whether a pick in one notebook
-  still leaks into the other within a session. Refreshed test recipe in
-  `awaiting_testing.md` covers both.
-
-## 31. A stale (deleted) kernel is retried forever instead of re-prompting
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-14) Delete the kernel env while the notebook is
-  closed but Zed stays running; reopen the notebook and run → "Kernel error:
-  cell could not be executed" (launch failure), and every subsequent run
-  retries the same dead kernel. (Deleting the env with Zed CLOSED works —
-  fresh discovery doesn't list it and the picker correctly appears.)
-- **Analysis:** the deleted env's spec survives in the store's cached
-  discovery list for the session, so metadata matching adopts it. After the
-  launch fails (`Kernel::ErroredLaunch`), `execute_cell`'s disposition for
-  ErroredLaunch-with-remembered-kernel is `Queued { launch: true }` — an
-  endless retry loop with the same broken spec, and the picker (which would
-  offer alternatives and refresh discovery) is never shown.
-- **Fix attempted (2026-07-14):** after a failed launch the next run PROMPTS:
-  `Kernel::ErroredLaunch` is split out of the `Shutdown` disposition arm and
-  always yields `Prompt`, and the Prompt branch now opens the picker DIRECTLY
-  (previously it went through `launch_kernel`, whose remembered-spec fallback
-  would have relaunched the very spec that just failed). An explicit pick
-  replaces the broken selection; dismissing leaves the cells idle (bug #28
-  behavior).
-- **Tested:** no — test BLOCKED (user 2026-07-16): deleting the venv while Zed
-  was running failed with "Failed to delete 1 of 1 file" — the notebook's
-  kernel process keeps running after the notebook is closed and holds a lock
-  on the env's files (filed as bug #35). Retest this once #35 is fixed (or
-  work around by killing python.exe manually before deleting).
-
 ## 34. The same notebook file can end up open in multiple tabs
 
 - **Status:** fix attempted - untested (plausible cause found by inspection;
@@ -375,125 +292,29 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   Untitled notebooks); if the same file never opens twice again over a few
   sessions, call it fixed.
 
-## 35. Closing a notebook leaves its kernel process running
+
+## 40. Upward cell navigation sometimes scrolls an already-visible cell to the bottom edge
 
 - **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-16) After closing a notebook tab, the kernel
-  process is still alive: attempting to delete the notebook's venv fails with
-  "Failed to delete 1 of 1 file" because the running kernel holds a lock on
-  the env's files (python.exe in use on Windows). Only restarting Zed killed
-  the kernel. This also blocks testing bug #31.
-- **Analysis (root cause found):** an entity reference CYCLE, marked by an old
-  `// todo: convert to weak view` in `native_kernel.rs`. The kernel's message/
-  status tasks captured a STRONG `Entity<NotebookEditor>`; those tasks are
-  stored ON the kernel, which is owned BY the editor — so closing the tab
-  never dropped the editor, `NativeRunningKernel::Drop` (which kills the
-  process) never ran, and the python process kept the venv locked. The
-  standalone `.py` REPL `Session` had the identical cycle.
-- **Fix attempted (2026-07-16):** all kernel constructors
-  (`NativeRunningKernel`, `WslRunningKernel`, `SshRunningKernel`,
-  `RemoteRunningKernel`) and `start_kernel_tasks` now take
-  `WeakEntity<S>`; both callers pass a downgraded handle. Closing the tab
-  drops the editor → drops the kernel → kills the process (and on Windows the
-  job object also kills the tree if a launch is dropped midway).
-- **Tested:** no — needs user confirmation: run a notebook, close the tab,
-  check python.exe is gone from Task Manager (and the venv is deletable —
-  which then unblocks the bug #31 test).
-
-## 36. Custom-location venv disappears from the kernel picker after restart
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-16) Created a venv at a custom location
-  (`~/Dev/venvs/test_venv`) via kernel picker → "Create Python Environment" →
-  "Choose Location…". It worked, ran notebooks, pip-installed fine. After
-  restarting Zed the venv no longer appears in the kernel picker (only the
-  workspace `.venv` and the global Pythons show).
-- **Analysis:** the created env is registered as a kernel spec for the CURRENT
-  session only (added to the store's spec list in memory). Discovery on a
-  fresh start only finds workspace-local envs (`.venv` etc. via toolchain
-  discovery) and installed jupyter kernelspecs — a venv outside the worktree
-  is invisible to both. Fix direction: persist created-env locations (e.g.
-  register a real jupyter kernelspec via `python -m ipykernel install --user
-  --name <name>` at creation time, or persist known env paths and re-add them
-  during discovery).
-- **Fix attempted (2026-07-16):** when the created env lies OUTSIDE the
-  worktree, the create flow now also runs `<env python> -m ipykernel install
-  --user --name <name> --display-name "Python (<name>)"`, registering a real
-  per-user Jupyter kernelspec that discovery finds on every future start
-  (worktree `.venv`s skip this — toolchain discovery already finds them).
-  Registration failure is non-fatal but reported in the toast. Existing
-  already-created envs: run that command once by hand, or recreate via the
-  picker.
-- **Tested:** no — needs user confirmation: create an env at a custom
-  location, restart Zed → it appears in the picker (under the Jupyter
-  kernels group as "Python (<name>)") and runs cells.
-
-## 37. Table (DataFrame) outputs lack "Open in Buffer"; old menu Copy skips them
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-16) On DataFrame/table outputs the new hover
-  controls show Copy Output (works, nice markdown) but NOT "Open in Buffer";
-  plain text outputs show and support both. Also the output "…" menu's
-  long-standing Copy Output entry copies NOTHING for table outputs.
-- **Analysis:** the phase-29 controls derive their availability from the
-  output's clipboard/text representation; `TableView` implements the new
-  markdown copy for the hover button but evidently isn't wired into the
-  buffer-open path, and the older menu copy path uses a different
-  (text-only) accessor that returns nothing for tables. Give tables the same
-  markdown text representation on ALL paths: open-in-buffer opens the
-  markdown table, menu copy copies it.
-- **Fix attempted (2026-07-16):** `TableView` now implements
-  `buffer_content` (opens the table's markdown text in a read-only buffer,
-  same as the hover copy produces), so the "Open in Buffer" hover control
-  appears on tables. The output "…" menu's Copy Output (`outputs_as_text`)
-  now also includes rich outputs' text forms — tables as markdown, plus
-  markdown and JSON outputs — instead of only stdout/plain/tracebacks.
-- **Tested:** no — needs user confirmation: DataFrame output shows BOTH hover
-  controls (copy + open in buffer; the buffer holds the markdown table), and
-  the "…" menu → Copy Output copies the markdown too.
-
-## 38. Failed kernel launch marks the cell "Cancelled" instead of errored
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-16) With ipykernel removed from the env, running
-  a cell correctly reports the launch failure (kernel stderr shown: "No module
-  named ipykernel_launcher") but the cell's status shows "Cancelled" rather
-  than a failed/error state.
-- **Analysis:** when the launch fails, queued cells are cleared via the
-  cancelled path (same as picker-dismiss, bug #28) instead of an errored path.
-  `kernel_errored` should mark cells that were awaiting that launch as failed
-  (red ✕), reserving "Cancelled" for user-initiated dismissal/interrupt.
-- **Fix attempted (2026-07-16):** `show_kernel_error` (used by both
-  kernel-failure paths: launch failure with queued cells, and the Failed run
-  disposition) now sets `CellExecutionStatus::Failed` (red ✕, no time)
-  instead of `Cancelled`. Cancelled remains for interrupts / picker dismiss /
-  restarts only.
-- **Tested:** no — needs user confirmation: break the env (uninstall
-  ipykernel), run a cell → the status shows the red ✕ error state (not
-  "Cancelled") alongside the kernel's stderr output.
-
-## 39. Last-executed timestamps don't interop with VS Code
-
-- **Status:** open
-- **Symptom:** (user 2026-07-16) Phase 28 timestamps round-trip within Zed,
-  but: (a) a notebook run in Zed shows NO execution times when opened in VS
-  Code; (b) running a cell in VS Code (while closed in Zed) and then opening
-  in Zed shows Zed's STALE old time (11:59:44) instead of VS Code's newer run
-  (12:02:49), surviving even a Zed restart.
-- **Analysis (2026-07-16):** format mismatch RULED OUT — Zed reads/writes
-  `metadata.execution` with exactly VS Code's dotted keys
-  ("shell.execute_reply", "iopub.status.idle", …; verified against the
-  nbformat 1.2.0 serde definitions). So:
-  (a) VS Code not showing Zed's times is VS Code behavior — it displays
-  execution times from its internal per-workspace execution-summary store,
-  not from the file's metadata. Zed can't fix that side.
-  (b) Zed showing the stale time means the file's `metadata.execution` still
-  held Zed's old timestamps when Zed loaded it — either VS Code never wrote
-  its run into the file (didn't save? or the extension version doesn't
-  persist execution metadata), or it wrote a shape we don't parse. NEEDS ONE
-  USER CHECK: after running a cell in VS Code and SAVING, open the .ipynb in
-  a text editor and look at that cell's `"metadata": {"execution": …}` —
-  does it hold the new time, the old one, or something else entirely? That
-  answer decides the fix (none needed / parse their shape / prefer newest).
-- **Fix attempted:** none yet — blocked on the check above.
-- **Tested:** n/a
+- **Symptom:** (user 2026-07-16) In command mode, pressing up arrow onto a
+  cell that is ALREADY fully visible sometimes scrolls the whole viewport up
+  so the target cell sits at the viewport's bottom edge, pushing later cells
+  out of view. Intermittent — deleting/re-adding trailing cells toggled it.
+  Downward navigation behaves correctly (no scroll when the target is fully
+  visible), and the expected behaviour is the same for upward moves: only
+  scroll when the target is (partially) out of view.
+- **Root cause (found in gpui):** `ListState::scroll_to_reveal_item` decided
+  "already scrolled far enough" with an ITEM-INDEX comparison where a PIXEL
+  comparison was needed. When the bottom-aligned goal position landed inside
+  the same item currently at the top of the viewport (which depends on cell
+  heights — hence the intermittency), the guard passed and the list scrolled
+  UP, bottom-pinning the already-visible target.
+- **Fix attempted (2026-07-16):** the reveal now compares the goal scroll
+  offset against the CURRENT scroll offset in pixels and only ever scrolls
+  DOWN to reveal a bottom edge (upward scrolling still happens only for
+  targets above the viewport, via the existing top-align branch). Regression
+  test `test_reveal_already_visible_item_does_not_scroll` encodes the
+  reported geometry (tall top item, fully-visible target below it).
+- **Tested:** no — needs user confirmation: navigate up/down through cells
+  with the viewport mid-notebook; the viewport must only move when the
+  target cell is not already fully visible (in both directions).

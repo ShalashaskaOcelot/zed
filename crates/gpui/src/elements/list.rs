@@ -637,17 +637,23 @@ impl ListState {
             scroll_top.offset_in_item = px(0.);
         } else {
             let mut cursor = state.items.cursor::<ListItemSummary>(());
+            cursor.seek(&Count(scroll_top.item_ix), Bias::Right);
+            let current_top = cursor.start().height + scroll_top.offset_in_item;
+
             cursor.seek(&Count(ix + 1), Bias::Right);
             let bottom = cursor.start().height + padding.top;
             let goal_top = px(0.).max(bottom - height + padding.bottom);
 
-            cursor.seek(&Height(goal_top), Bias::Left);
-            let start_ix = cursor.start().count;
-            let start_item_top = cursor.start().height;
-
-            if start_ix >= scroll_top.item_ix {
-                scroll_top.item_ix = start_ix;
-                scroll_top.offset_in_item = goal_top - start_item_top;
+            // Only scroll DOWN to bring the item's bottom into view. If the
+            // goal is at or above the current position, the item is already
+            // fully visible — a minimal reveal must not move the list. (This
+            // must be a PIXEL comparison: comparing item indices let the list
+            // scroll up within the same top item, pinning an already-visible
+            // item to the bottom edge.)
+            if goal_top > current_top {
+                cursor.seek(&Height(goal_top), Bias::Left);
+                scroll_top.item_ix = cursor.start().count;
+                scroll_top.offset_in_item = goal_top - cursor.start().height;
             }
         }
 
@@ -1764,6 +1770,46 @@ mod test {
         );
         assert_eq!(scroll_top.item_ix, 0);
         assert_eq!(scroll_top.offset_in_item, px(10.));
+    }
+
+    #[gpui::test]
+    fn test_reveal_already_visible_item_does_not_scroll(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+
+        let state = ListState::new(10, crate::ListAlignment::Top, px(10.));
+        // 60px into the tall item 5 → pixel top 160 (items 0-4 are 20px each,
+        // item 5 is 100px).
+        state.scroll_to(gpui::ListOffset {
+            item_ix: 5,
+            offset_in_item: px(60.),
+        });
+
+        struct TestView(ListState);
+        impl Render for TestView {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                list(self.0.clone(), |ix, _, _| {
+                    let height = if ix == 5 { px(100.) } else { px(20.) };
+                    div().h(height).w_full().into_any()
+                })
+                .w_full()
+                .h_full()
+            }
+        }
+
+        cx.draw(point(px(0.), px(0.)), size(px(100.), px(80.)), |_, cx| {
+            cx.new(|_| TestView(state.clone())).into_any_element()
+        });
+
+        // The 80px viewport spans pixels 160-240; item 6 (200-220) is fully
+        // visible near the bottom. Revealing it must therefore not move the
+        // list — it used to scroll UP within the tall top item (an item-index
+        // guard where a pixel comparison was needed), pinning the already
+        // visible item to the viewport's bottom edge.
+        state.scroll_to_reveal_item(6);
+
+        let scroll_top = state.logical_scroll_top();
+        assert_eq!(scroll_top.item_ix, 5);
+        assert_eq!(scroll_top.offset_in_item, px(60.));
     }
 
     #[gpui::test]
