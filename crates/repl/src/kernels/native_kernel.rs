@@ -4,7 +4,7 @@ use futures::{
     channel::mpsc::{self},
     io::BufReader,
 };
-use gpui::{App, Entity, EntityId, Task, Window};
+use gpui::{App, EntityId, Task, WeakEntity, Window};
 use jupyter_protocol::{
     ExecutionState, JupyterKernelspec, JupyterMessage, KernelInfoReply,
     connection_info::{ConnectionInfo, Transport},
@@ -116,8 +116,7 @@ impl NativeRunningKernel {
         entity_id: EntityId,
         working_directory: PathBuf,
         fs: Arc<dyn Fs>,
-        // todo: convert to weak view
-        session: Entity<S>,
+        session: WeakEntity<S>,
         window: &mut Window,
         cx: &mut App,
     ) -> Task<Result<Box<dyn RunningKernel>>> {
@@ -323,10 +322,12 @@ impl NativeRunningKernel {
                     Ok(status) => {
                         if status.success() {
                             log::info!("kernel process exited successfully");
-                            session.update(cx, |session, cx| {
-                                session.kernel_exited(cx);
-                                cx.notify();
-                            });
+                            session
+                                .update(cx, |session, cx| {
+                                    session.kernel_exited(cx);
+                                    cx.notify();
+                                })
+                                .ok();
                             return;
                         }
 
@@ -348,11 +349,13 @@ impl NativeRunningKernel {
 
                 log::error!("{}", error_message);
 
-                session.update(cx, |session, cx| {
-                    session.kernel_errored(error_message, cx);
+                session
+                    .update(cx, |session, cx| {
+                        session.kernel_errored(error_message, cx);
 
-                    cx.notify();
-                });
+                        cx.notify();
+                    })
+                    .ok();
             });
 
             anyhow::Ok(Box::new(Self {

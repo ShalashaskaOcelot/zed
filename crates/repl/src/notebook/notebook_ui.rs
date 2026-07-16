@@ -1142,7 +1142,9 @@ impl NotebookEditor {
             .map(|worktree| worktree.read(cx).abs_path().to_path_buf())
             .unwrap_or_else(std::env::temp_dir);
         let fs = self.project.read(cx).fs().clone();
-        let view = cx.entity();
+        // Weak: the kernel's tasks must not keep this editor (and therefore
+        // the kernel process) alive after the tab closes (bug #35).
+        let view = cx.entity().downgrade();
 
         self.kernel_specification = Some(spec.clone());
 

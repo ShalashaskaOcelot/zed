@@ -1,5 +1,5 @@
 use futures::{SinkExt as _, channel::mpsc};
-use gpui::{App, AppContext as _, Entity, Task, Window};
+use gpui::{App, AppContext as _, Task, WeakEntity, Window};
 use http_client::{AsyncBody, HttpClient, Request};
 use jupyter_protocol::{ExecutionState, JupyterKernelspec, JupyterMessage, KernelInfoReply};
 
@@ -129,7 +129,7 @@ impl RemoteRunningKernel {
     pub fn new<S: KernelSession + 'static>(
         kernelspec: RemoteKernelSpecification,
         working_directory: std::path::PathBuf,
-        session: Entity<S>,
+        session: WeakEntity<S>,
         window: &mut Window,
         cx: &mut App,
     ) -> Task<Result<Box<dyn RunningKernel>>> {

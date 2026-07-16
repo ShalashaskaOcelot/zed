@@ -304,7 +304,7 @@ impl Session {
             repl_session_id = cx.entity_id().to_string(),
         );
 
-        let session_view = cx.entity();
+        let session_view = cx.entity().downgrade();
 
         let kernel = match self.kernel_specification.clone() {
             KernelSpecification::Jupyter(kernel_specification) => NativeRunningKernel::new(

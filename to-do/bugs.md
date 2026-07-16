@@ -369,20 +369,28 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ## 35. Closing a notebook leaves its kernel process running
 
-- **Status:** open
+- **Status:** fix attempted - untested
 - **Symptom:** (user 2026-07-16) After closing a notebook tab, the kernel
   process is still alive: attempting to delete the notebook's venv fails with
   "Failed to delete 1 of 1 file" because the running kernel holds a lock on
   the env's files (python.exe in use on Windows). Only restarting Zed killed
   the kernel. This also blocks testing bug #31.
-- **Analysis:** closing the notebook editor drops the UI but the
-  `RunningKernel` (owned via the session/store) is not shut down — nothing in
-  the notebook item's close/release path sends a shutdown request or kills the
-  child process. Expected: closing the last view of a notebook shuts its
-  kernel down (like Jupyter closing a session); at minimum the process must
-  die with the item so env files aren't locked.
-- **Fix attempted:** none
-- **Tested:** n/a
+- **Analysis (root cause found):** an entity reference CYCLE, marked by an old
+  `// todo: convert to weak view` in `native_kernel.rs`. The kernel's message/
+  status tasks captured a STRONG `Entity<NotebookEditor>`; those tasks are
+  stored ON the kernel, which is owned BY the editor — so closing the tab
+  never dropped the editor, `NativeRunningKernel::Drop` (which kills the
+  process) never ran, and the python process kept the venv locked. The
+  standalone `.py` REPL `Session` had the identical cycle.
+- **Fix attempted (2026-07-16):** all kernel constructors
+  (`NativeRunningKernel`, `WslRunningKernel`, `SshRunningKernel`,
+  `RemoteRunningKernel`) and `start_kernel_tasks` now take
+  `WeakEntity<S>`; both callers pass a downgraded handle. Closing the tab
+  drops the editor → drops the kernel → kills the process (and on Windows the
+  job object also kills the tree if a launch is dropped midway).
+- **Tested:** no — needs user confirmation: run a notebook, close the tab,
+  check python.exe is gone from Task Manager (and the venv is deletable —
+  which then unblocks the bug #31 test).
 
 ## 36. Custom-location venv disappears from the kernel picker after restart
 

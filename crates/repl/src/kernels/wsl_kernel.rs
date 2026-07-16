@@ -8,7 +8,7 @@ use futures::{
     channel::mpsc::{self},
     io::BufReader,
 };
-use gpui::{App, BackgroundExecutor, Entity, EntityId, Task, Window};
+use gpui::{App, BackgroundExecutor, EntityId, Task, WeakEntity, Window};
 use jupyter_protocol::{
     ExecutionState, JupyterMessage, KernelInfoReply,
     connection_info::{ConnectionInfo, Transport},
@@ -74,7 +74,7 @@ impl WslRunningKernel {
         entity_id: EntityId,
         working_directory: PathBuf,
         fs: Arc<dyn Fs>,
-        session: Entity<S>,
+        session: WeakEntity<S>,
         window: &mut Window,
         cx: &mut App,
     ) -> Task<Result<Box<dyn RunningKernel>>> {
@@ -393,10 +393,12 @@ impl WslRunningKernel {
                 let error_message = match status.await {
                     Ok(status) => {
                         if status.success() {
-                            session.update(cx, |session, cx| {
-                                session.kernel_exited(cx);
-                                cx.notify();
-                            });
+                            session
+                                .update(cx, |session, cx| {
+                                    session.kernel_exited(cx);
+                                    cx.notify();
+                                })
+                                .ok();
                             return;
                         }
 
@@ -407,11 +409,13 @@ impl WslRunningKernel {
                     }
                 };
 
-                session.update(cx, |session, cx| {
-                    session.kernel_errored(error_message, cx);
+                session
+                    .update(cx, |session, cx| {
+                        session.kernel_errored(error_message, cx);
 
-                    cx.notify();
-                });
+                        cx.notify();
+                    })
+                    .ok();
             });
 
             anyhow::Ok(Box::new(Self {

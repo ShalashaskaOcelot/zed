@@ -2,7 +2,7 @@ mod native_kernel;
 use std::{fmt::Debug, future::Future, path::PathBuf};
 
 use futures::{channel::mpsc, future::Shared};
-use gpui::{App, Entity, Task, Window};
+use gpui::{App, Entity, Task, WeakEntity, Window};
 use language::LanguageName;
 use log;
 pub use native_kernel::*;
@@ -87,8 +87,12 @@ pub(crate) fn build_python_discovery_shell_script() -> String {
     )
 }
 
+// `session` must be WEAK: these tasks are owned by the running kernel, which
+// is owned by the session entity itself — a strong handle here is a reference
+// cycle that keeps the session (and therefore the kernel process) alive
+// forever after its tab is closed.
 pub fn start_kernel_tasks<S: KernelSession + 'static>(
-    session: Entity<S>,
+    session: WeakEntity<S>,
     iopub_socket: ClientIoPubConnection,
     shell_socket: ClientShellConnection,
     control_socket: ClientControlConnection,
@@ -194,10 +198,15 @@ pub fn start_kernel_tasks<S: KernelSession + 'static>(
 
             while let Some((name, result)) = tasks.next().await {
                 if let Err(err) = result {
-                    session.update(cx, |session, cx| {
-                        session.kernel_errored(format!("handling failed for {name}: {err}"), cx);
-                        cx.notify();
-                    });
+                    session
+                        .update(cx, |session, cx| {
+                            session.kernel_errored(
+                                format!("handling failed for {name}: {err}"),
+                                cx,
+                            );
+                            cx.notify();
+                        })
+                        .ok();
                 }
             }
         }

@@ -7,7 +7,7 @@ use futures::{
     channel::mpsc::{self},
     io::BufReader,
 };
-use gpui::{App, Entity, Task, Window};
+use gpui::{App, Entity, Task, WeakEntity, Window};
 use project::Project;
 use runtimelib::{ExecutionState, JupyterMessage, KernelInfoReply};
 use std::path::PathBuf;
@@ -33,7 +33,7 @@ impl SshRunningKernel {
         kernel_spec: SshRemoteKernelSpecification,
         working_directory: PathBuf,
         project: Entity<Project>,
-        session: Entity<S>,
+        session: WeakEntity<S>,
         window: &mut Window,
         cx: &mut App,
     ) -> Task<Result<Box<dyn RunningKernel>>> {

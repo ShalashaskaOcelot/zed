@@ -19,6 +19,10 @@ here, add a one-line entry to `CHANGELOG.md`, and delete the bug's `bugs.md`
 entry. If a fix failed, leave the bug open with the new finding and keep it
 listed here.
 
+- [ ] Bug #35 — run a notebook cell, CLOSE the notebook tab → the kernel
+      process (python.exe) disappears from Task Manager and the venv can be
+      deleted without "file in use". (Also check the standalone `.py` REPL:
+      close the editor → its kernel dies too.)
 - [ ] Bug #31 — BLOCKED by bug #35 (closing a notebook leaves the kernel
       running, so the env can't be deleted while Zed is up). Once #35 is
       fixed: delete the kernel env while Zed stays running (notebook closed);
