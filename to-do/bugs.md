@@ -439,7 +439,7 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ## 38. Failed kernel launch marks the cell "Cancelled" instead of errored
 
-- **Status:** open
+- **Status:** fix attempted - untested
 - **Symptom:** (user 2026-07-16) With ipykernel removed from the env, running
   a cell correctly reports the launch failure (kernel stderr shown: "No module
   named ipykernel_launcher") but the cell's status shows "Cancelled" rather
@@ -448,8 +448,14 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   cancelled path (same as picker-dismiss, bug #28) instead of an errored path.
   `kernel_errored` should mark cells that were awaiting that launch as failed
   (red ✕), reserving "Cancelled" for user-initiated dismissal/interrupt.
-- **Fix attempted:** none
-- **Tested:** n/a
+- **Fix attempted (2026-07-16):** `show_kernel_error` (used by both
+  kernel-failure paths: launch failure with queued cells, and the Failed run
+  disposition) now sets `CellExecutionStatus::Failed` (red ✕, no time)
+  instead of `Cancelled`. Cancelled remains for interrupts / picker dismiss /
+  restarts only.
+- **Tested:** no — needs user confirmation: break the env (uninstall
+  ipykernel), run a cell → the status shows the red ✕ error state (not
+  "Cancelled") alongside the kernel's stderr output.
 
 ## 39. Last-executed timestamps don't interop with VS Code
 

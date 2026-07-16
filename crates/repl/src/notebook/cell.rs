@@ -1267,8 +1267,10 @@ impl CodeCell {
         }));
         self.execution_start_time = None;
         self.submitted_at = None;
-        // The cell never ran — no completed tick, no time.
-        self.execution_status = CellExecutionStatus::Cancelled;
+        // A kernel failure is an ERROR, not a user cancellation (bug #38):
+        // red ✕, matching the error output below it. No time — it never ran.
+        self.execution_status = CellExecutionStatus::Failed;
+        self.execution_duration = None;
         cx.notify();
     }
 

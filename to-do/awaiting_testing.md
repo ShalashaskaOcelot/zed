@@ -29,6 +29,9 @@ listed here.
       created before the fix — recreate it via the picker, or run
       `<env>\Scripts\python.exe -m ipykernel install --user --name test_venv`
       once by hand.)
+- [ ] Bug #38 — remove ipykernel from the env, run a cell → the cell status
+      is the red ✕ failed state (not "Cancelled"), with the kernel stderr in
+      the error output.
 - [ ] Bug #31 — BLOCKED by bug #35 (closing a notebook leaves the kernel
       running, so the env can't be deleted while Zed is up). Once #35 is
       fixed: delete the kernel env while Zed stays running (notebook closed);
