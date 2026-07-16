@@ -350,22 +350,30 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ## 34. The same notebook file can end up open in multiple tabs
 
-- **Status:** open (not reproduced)
+- **Status:** fix attempted - untested (plausible cause found by inspection;
+  original trigger was never reproduced)
 - **Symptom:** (user 2026-07-16) `Untitled.ipynb` was somehow open in THREE
   tabs at once (screenshot). Opening the file again correctly returned to one
   of the already-open tabs, and after closing two of the three the bug could
   not be recreated. Opening the same file must never create a second
   independent view of it.
-- **Analysis:** unknown trigger. Workspace item dedup is per project-path, so
-  candidate holes: the "New Jupyter Notebook" flow creating `Untitled.ipynb`
-  and opening it without going through the dedup path (three "new notebook"
-  invocations before the first tab registered?), a race between two open
-  requests resolving the same path, or external-reload re-adding an item.
-  Likely interacts with phase 33 (truly-unsaved new notebooks), which will
-  rework the Untitled flow anyway. WATCH ITEM: if it recurs, note how each of
-  the duplicate tabs was opened (new-notebook command vs file open).
-- **Fix attempted:** none
-- **Tested:** n/a
+- **Analysis (code inspection):** the pane's already-open dedup compares the
+  incoming path's CURRENT `ProjectEntryId` against the ids each open tab
+  advertises. `NotebookItem` captured its entry id ONCE at open and never
+  refreshed it — but notebook save rewrites the .ipynb via `fs.atomic_write`
+  (temp file + rename), which can replace the worktree entry under a NEW id.
+  After such a save the open tab advertises a stale id, the next open of the
+  same path resolves the new id, nothing matches, and a duplicate tab opens
+  (each further save/open can repeat this → 3 tabs). Also explains why
+  opening "again" dedups fine most of the time (no id churn between opens).
+- **Fix attempted (2026-07-16):** `NotebookItem::entry_id` now resolves the
+  entry id LIVE from the project by path (falling back to the cached id if
+  the project/entry is gone), so the dedup comparison always sees the current
+  id. The original trigger was never reproduced, so this is a
+  best-explanation fix — treat a recurrence as this fix having failed.
+- **Tested:** no — can only be soak-tested: work normally (create/save/reopen
+  Untitled notebooks); if the same file never opens twice again over a few
+  sessions, call it fixed.
 
 ## 35. Closing a notebook leaves its kernel process running
 

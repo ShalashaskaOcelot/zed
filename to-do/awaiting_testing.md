@@ -19,6 +19,10 @@ here, add a one-line entry to `CHANGELOG.md`, and delete the bug's `bugs.md`
 entry. If a fix failed, leave the bug open with the new finding and keep it
 listed here.
 
+- [ ] Bug #34 — soak test (no direct repro known): create/save/reopen
+      notebooks normally over a few sessions; the same file should never
+      end up open in two tabs again. (Cause found by inspection: stale
+      entry id after save defeated the already-open dedup.)
 - [ ] Bug #35 — run a notebook cell, CLOSE the notebook tab → the kernel
       process (python.exe) disappears from Task Manager and the venv can be
       deleted without "file in use". (Also check the standalone `.py` REPL:

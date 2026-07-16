@@ -10,7 +10,7 @@ use futures::FutureExt;
 use futures::future::Shared;
 use gpui::{
     AnyElement, App, ClipboardItem, Entity, EventEmitter, FocusHandle, Focusable, KeyContext,
-    ListState, Point, PromptLevel, Task, TaskExt, list, prelude::*,
+    ListState, Point, PromptLevel, Task, TaskExt, WeakEntity, list, prelude::*,
 };
 use language::{Buffer, Language, LanguageRegistry};
 use log;
@@ -3844,8 +3844,13 @@ pub struct NotebookItem {
     languages: Arc<LanguageRegistry>,
     // Raw notebook data
     notebook: nbformat::v4::Notebook,
-    // Store our version of the notebook in memory (cell_order, cell_map)
+    // The entry id observed at open time. Only a FALLBACK for `entry_id` —
+    // saving rewrites the file via a temp-file rename, which can replace the
+    // worktree entry under a new id; advertising the stale id would defeat
+    // the pane's already-open dedup and let the same notebook open in
+    // multiple tabs (bug #34).
     id: ProjectEntryId,
+    project: WeakEntity<Project>,
     // The underlying project buffer for the .ipynb file. Retained so the
     // project keeps watching the file and emits `Reloaded` on external change.
     buffer: Entity<Buffer>,
@@ -3886,6 +3891,7 @@ impl project::ProjectItem for NotebookItem {
                     languages,
                     notebook,
                     id,
+                    project: project.downgrade(),
                     buffer,
                 }))
             }))
@@ -3894,8 +3900,12 @@ impl project::ProjectItem for NotebookItem {
         }
     }
 
-    fn entry_id(&self, _: &App) -> Option<ProjectEntryId> {
-        Some(self.id)
+    fn entry_id(&self, cx: &App) -> Option<ProjectEntryId> {
+        self.project
+            .upgrade()
+            .and_then(|project| project.read(cx).entry_for_path(&self.project_path, cx))
+            .map(|entry| entry.id)
+            .or(Some(self.id))
     }
 
     fn project_path(&self, _: &App) -> Option<ProjectPath> {
