@@ -80,6 +80,9 @@ entry rather than archiving it.
   commented-out NotebookControls block); OpenNotebook now opens the
   workspace file picker instead of println!; Item::pixel_position_of_cursor
   implemented (delegates to the selected cell's editor).
+- Phase 40 — UI polish (2026-07-16 round): notebook output blocks span the
+  cell's full width (`max_columns` now only sizes the inline REPL); slimmer
+  notebook top strip.
 
 ## Fixed bugs (confirmed)
 

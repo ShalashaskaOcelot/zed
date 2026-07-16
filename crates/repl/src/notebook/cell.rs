@@ -21,7 +21,7 @@ use zed_actions::notebook::{
 
 use crate::{
     notebook::{CELL_HOVER_GROUP, CODE_BLOCK_INSET, GUTTER_WIDTH},
-    outputs::{Output, OutputContent as _, plain, plain::TerminalOutput, user_error::ErrorView},
+    outputs::{Output, OutputContent as _, plain::TerminalOutput, user_error::ErrorView},
     repl_settings::ReplSettings,
 };
 
@@ -1812,8 +1812,6 @@ impl Render for CodeCell {
         } else {
             None
         };
-        let output_max_width =
-            plain::max_width_for_columns(ReplSettings::get_global(cx).max_columns, window, cx);
         // get the language from the editor's buffer
         let language_name = self
             .editor
@@ -1986,9 +1984,7 @@ impl Render for CodeCell {
                                                         "output-scroll",
                                                     ))
                                                     .w_full()
-                                                    .when_some(output_max_width, |div, max_width| {
-                                                        div.max_w(max_width).overflow_x_scroll()
-                                                    })
+                                                    .overflow_x_scroll()
                                                     .when_some(
                                                         output_max_height,
                                                         |div, max_height| {
@@ -2005,6 +2001,7 @@ impl Render for CodeCell {
                                                             Some(workspace) => div()
                                                                 .child(output.render(
                                                                     workspace.downgrade(),
+                                                                    false,
                                                                     window,
                                                                     cx,
                                                                 ))

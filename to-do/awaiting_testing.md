@@ -64,6 +64,18 @@ listed here.
       answer determines whether there's anything to fix on Zed's side (see
       bugs.md #39).
 
+## Phase 40 — UI polish from the 2026-07-16 testing round
+
+Kind: change to existing behaviour — if either change didn't take effect,
+say so and it gets fixed in place (not archived-and-refiled).
+
+- [ ] Output blocks now span the CELL'S FULL WIDTH (the `max_columns`
+      setting no longer caps the notebook output box — it only sizes the
+      inline `.py` REPL). A wide DataFrame gets the whole editor width
+      before falling back to horizontal scroll inside the block.
+- [ ] The top kernel strip is slimmer (reduced padding); the kernel
+      cluster still sits top-right and everything still works.
+
 ## Phase 24 — Cell operations polish
 
 - [x] Paste Cell Above: the COMMAND works (confirmed via the palette,

@@ -291,11 +291,17 @@ impl Output {
     pub fn render(
         &self,
         workspace: WeakEntity<Workspace>,
+        constrain_to_columns: bool,
         window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement + use<> {
-        let max_width =
-            plain::max_width_for_columns(ReplSettings::get_global(cx).max_columns, window, cx);
+        // The `max_columns` cap sizes the INLINE REPL's output block; notebook
+        // outputs span their cell's full width instead (phase 40).
+        let max_width = if constrain_to_columns {
+            plain::max_width_for_columns(ReplSettings::get_global(cx).max_columns, window, cx)
+        } else {
+            None
+        };
         let content = self.content(window, cx);
 
         let needs_horizontal_scroll = matches!(self, Self::Table { .. });
@@ -871,7 +877,7 @@ impl Render for ExecutionView {
             .children(
                 self.outputs
                     .iter()
-                    .map(|output| output.render(self.workspace.clone(), window, cx)),
+                    .map(|output| output.render(self.workspace.clone(), true, window, cx)),
             )
             .children(pending_input_element)
             .children(match self.status {
