@@ -313,12 +313,18 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   `notebook_ui.rs:3607`) does `view.update(cx, ...)` on the same
   `NotebookEditor` — a re-entrant update while the outer lease is still held →
   double-lease panic.
-- **Fix attempted (2026-07-16):** defer the picker open with
-  `cx.defer_in(window, |this, window, cx| this.kernel_picker_handle.show(...))`
-  so `on_open`'s re-entrant update runs after `execute_cell`'s update
-  completes, breaking the nesting. (The inline stale-selection discard earlier
-  in `execute_cell` already covers this path, so the deferred re-validation is
-  harmless.)
+- **Fix attempt 1 (2026-07-16) — FAILED:** deferred the picker open with
+  `cx.defer_in`. Still panicked (same double-lease, now from inside the
+  deferred closure): `cx.defer_in` re-wraps its closure in a
+  `NotebookEditor.update`, so `show`'s synchronous `on_open` re-entered that
+  new update — the exact nesting we were trying to avoid.
+- **Fix attempt 2 (2026-07-16):** defer via `window.defer(cx, move |window,
+  cx| kernel_picker_handle.show(window, cx))` with a cloned
+  `PopoverMenuHandle`. `window.defer` runs the closure with `&mut Window,
+  &mut App` and does NOT establish an entity lease, so `on_open`'s
+  `view.update` has no outer lease to collide with. (The inline
+  stale-selection discard earlier in `execute_cell` already covers this path,
+  so the deferred re-validation is harmless.)
 - **Tested:** no — needs user confirmation on Linux: with no kernel selected
   (or after a kernel shutdown/errored launch), run a cell — the kernel picker
   should open without crashing, and picking a kernel should run the cell.

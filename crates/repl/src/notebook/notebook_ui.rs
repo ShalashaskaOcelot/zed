@@ -1592,9 +1592,13 @@ impl NotebookEditor {
             // fires the picker's `on_open` callback, which re-enters
             // `NotebookEditor.update` (re-validating envs). Calling it inline
             // would nest an update inside this one (execute_cell already holds
-            // the entity lease) and panic with a double-lease (bug #48).
-            cx.defer_in(window, |this, window, cx| {
-                this.kernel_picker_handle.show(window, cx);
+            // the entity lease) and panic with a double-lease (bug #48). Use
+            // `window.defer` — NOT `cx.defer_in`, which re-wraps the closure in
+            // a `NotebookEditor` update and reintroduces the same nesting —
+            // so `show` runs with no entity lease held.
+            let kernel_picker_handle = self.kernel_picker_handle.clone();
+            window.defer(cx, move |window, cx| {
+                kernel_picker_handle.show(window, cx);
             });
             return;
         }
