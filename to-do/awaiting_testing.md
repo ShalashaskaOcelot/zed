@@ -51,6 +51,15 @@ listed here.
       indicator may stay grey until you run, but the first run should use the
       saved kernel WITHOUT prompting.
 
+## Bug #39 — one investigation check (not a fix confirmation)
+
+- [ ] Run a cell in VS Code, SAVE there, then open the .ipynb in a TEXT
+      editor: does that cell's `"metadata": { "execution": { … } }` contain
+      the new run's timestamps ("shell.execute_reply" etc.), the old ones, or
+      nothing? Zed's format already matches VS Code's exactly, so this
+      answer determines whether there's anything to fix on Zed's side (see
+      bugs.md #39).
+
 ## Phase 24 — Cell operations polish
 
 - [x] Paste Cell Above: the COMMAND works (confirmed via the palette,

@@ -472,12 +472,20 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   Code; (b) running a cell in VS Code (while closed in Zed) and then opening
   in Zed shows Zed's STALE old time (11:59:44) instead of VS Code's newer run
   (12:02:49), surviving even a Zed restart.
-- **Analysis:** Zed writes/reads its own cell-metadata key; VS Code's Jupyter
-  extension stores its execution summary differently (and doesn't read ours).
-  Needs investigation of what VS Code actually persists per cell
-  (`metadata.execution` shell/iopub timestamps) and then: write both formats
-  on save, and prefer the NEWEST available record on load so an external run
-  updates the display. (b) is the more important half — showing a stale time
-  as if current is misleading.
-- **Fix attempted:** none
+- **Analysis (2026-07-16):** format mismatch RULED OUT — Zed reads/writes
+  `metadata.execution` with exactly VS Code's dotted keys
+  ("shell.execute_reply", "iopub.status.idle", …; verified against the
+  nbformat 1.2.0 serde definitions). So:
+  (a) VS Code not showing Zed's times is VS Code behavior — it displays
+  execution times from its internal per-workspace execution-summary store,
+  not from the file's metadata. Zed can't fix that side.
+  (b) Zed showing the stale time means the file's `metadata.execution` still
+  held Zed's old timestamps when Zed loaded it — either VS Code never wrote
+  its run into the file (didn't save? or the extension version doesn't
+  persist execution metadata), or it wrote a shape we don't parse. NEEDS ONE
+  USER CHECK: after running a cell in VS Code and SAVING, open the .ipynb in
+  a text editor and look at that cell's `"metadata": {"execution": …}` —
+  does it hold the new time, the old one, or something else entirely? That
+  answer decides the fix (none needed / parse their shape / prefer newest).
+- **Fix attempted:** none yet — blocked on the check above.
 - **Tested:** n/a
