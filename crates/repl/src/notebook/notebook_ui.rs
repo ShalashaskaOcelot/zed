@@ -1588,7 +1588,14 @@ impl NotebookEditor {
             if !self.cells_awaiting_kernel_choice.contains(&cell_id) {
                 self.cells_awaiting_kernel_choice.push(cell_id);
             }
-            self.kernel_picker_handle.show(window, cx);
+            // Defer the picker open: `PopoverMenuHandle::show` synchronously
+            // fires the picker's `on_open` callback, which re-enters
+            // `NotebookEditor.update` (re-validating envs). Calling it inline
+            // would nest an update inside this one (execute_cell already holds
+            // the entity lease) and panic with a double-lease (bug #48).
+            cx.defer_in(window, |this, window, cx| {
+                this.kernel_picker_handle.show(window, cx);
+            });
             return;
         }
 

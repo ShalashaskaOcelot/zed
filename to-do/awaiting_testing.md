@@ -19,6 +19,10 @@ here, add a one-line entry to `CHANGELOG.md`, and delete the bug's `bugs.md`
 entry. If a fix failed, leave the bug open with the new finding and keep it
 listed here.
 
+- [ ] Bug #48 — on Linux with NO kernel selected (or after a kernel
+      shutdown/errored launch), run a cell (shift-enter): the kernel picker
+      should OPEN without crashing the app, and picking a kernel should run
+      the cell. (Was a double-lease panic; picker open is now deferred.)
 - [ ] Bug #40 — command-mode up/down with the viewport mid-notebook: the
       viewport must only move when the target cell is not already fully
       visible, in BOTH directions (upward moves used to bottom-pin an

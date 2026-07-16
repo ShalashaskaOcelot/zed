@@ -293,6 +293,36 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   sessions, call it fixed.
 
 
+## 48. Executing a cell crashes the app when the kernel needs prompting (Linux)
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-07-16) On Linux, running a cell (RunAndAdvice /
+  shift-enter) crashes the whole app with a GPUI double-lease panic
+  (`cannot update NotebookEditor while it is already being updated`,
+  `entity_map.rs:142`) instead of the cell failing in-cell. Only happens when
+  no live/remembered kernel is selected (kernel shutdown or errored-launch),
+  so `execute_cell` prompts for a kernel; a cell with a running kernel just
+  executes. Doesn't reproduce on Windows because a kernel is already attached
+  there, so the prompt path isn't hit.
+- **Root cause:** `execute_cell` runs inside a `NotebookEditor` update (it's
+  reached via the `RunAndAdvance` action listener, which leases the entity).
+  On the `Disposition::Prompt` branch it called
+  `self.kernel_picker_handle.show(window, cx)` INLINE. `PopoverMenuHandle::show`
+  → `show_menu` (`popover_menu.rs:314`) fires the picker's `on_open` callback
+  synchronously, and that callback (phase-42 env re-validation,
+  `notebook_ui.rs:3607`) does `view.update(cx, ...)` on the same
+  `NotebookEditor` — a re-entrant update while the outer lease is still held →
+  double-lease panic.
+- **Fix attempted (2026-07-16):** defer the picker open with
+  `cx.defer_in(window, |this, window, cx| this.kernel_picker_handle.show(...))`
+  so `on_open`'s re-entrant update runs after `execute_cell`'s update
+  completes, breaking the nesting. (The inline stale-selection discard earlier
+  in `execute_cell` already covers this path, so the deferred re-validation is
+  harmless.)
+- **Tested:** no — needs user confirmation on Linux: with no kernel selected
+  (or after a kernel shutdown/errored launch), run a cell — the kernel picker
+  should open without crashing, and picking a kernel should run the cell.
+
 ## 40. Upward cell navigation sometimes scrolls an already-visible cell to the bottom edge
 
 - **Status:** fix attempted - untested
