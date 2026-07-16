@@ -21,7 +21,7 @@ use zed_actions::notebook::{
 
 use crate::{
     notebook::{CELL_HOVER_GROUP, CODE_BLOCK_INSET, GUTTER_WIDTH},
-    outputs::{Output, plain, plain::TerminalOutput, user_error::ErrorView},
+    outputs::{Output, OutputContent as _, plain, plain::TerminalOutput, user_error::ErrorView},
     repl_settings::ReplSettings,
 };
 
@@ -1085,19 +1085,35 @@ impl CodeCell {
         self.execution_status = CellExecutionStatus::Idle;
     }
 
-    /// Concatenated plain text of the cell's text-bearing outputs (stdout/plain
-    /// results and error tracebacks), for the "Copy Output" menu action.
-    fn outputs_as_text(&self, cx: &App) -> String {
+    /// Concatenated text of the cell's copyable outputs (stdout/plain results,
+    /// error tracebacks, and rich outputs' text forms — e.g. a table as
+    /// markdown), for the "Copy Output" menu action (bug #37).
+    fn outputs_as_text(&self, window: &Window, cx: &App) -> String {
         let mut parts = Vec::new();
         for output in &self.outputs {
-            match output {
+            let text = match output {
                 Output::Plain { content, .. } | Output::Stream { content } => {
-                    parts.push(content.read(cx).full_text(cx));
+                    Some(content.read(cx).full_text(cx))
                 }
                 Output::ErrorOutput(error_view) => {
-                    parts.push(error_view.traceback.read(cx).full_text(cx));
+                    Some(error_view.traceback.read(cx).full_text(cx))
                 }
-                _ => {}
+                Output::Table { content, .. } => content
+                    .read(cx)
+                    .clipboard_content(window, cx)
+                    .and_then(|item| item.text()),
+                Output::Markdown { content, .. } => content
+                    .read(cx)
+                    .clipboard_content(window, cx)
+                    .and_then(|item| item.text()),
+                Output::Json { content, .. } => content
+                    .read(cx)
+                    .clipboard_content(window, cx)
+                    .and_then(|item| item.text()),
+                _ => None,
+            };
+            if let Some(text) = text {
+                parts.push(text);
             }
         }
         parts.join("\n")
@@ -1586,7 +1602,7 @@ impl CodeCell {
                                 .menu({
                                     let cell = cx.entity();
                                     move |window, cx| {
-                                        let text = cell.read(cx).outputs_as_text(cx);
+                                        let text = cell.read(cx).outputs_as_text(window, cx);
                                         let collapsed = cell.read(cx).outputs_collapsed;
                                         let cell = cell.clone();
                                         Some(ContextMenu::build(window, cx, move |menu, _, _| {

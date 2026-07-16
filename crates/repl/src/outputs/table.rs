@@ -54,7 +54,8 @@
 //! # Display the DataFrame
 //! display(df)
 //! ```
-use gpui::{AnyElement, ClipboardItem, FontWeight, TextRun};
+use gpui::{AnyElement, ClipboardItem, Entity, FontWeight, TextRun};
+use language::Buffer;
 use runtimelib::datatable::{FieldType, TableSchema, TableSchemaField};
 use runtimelib::media::datatable::TabularDataResource;
 use serde_json::Value;
@@ -470,6 +471,21 @@ impl OutputContent for TableView {
 
     fn has_clipboard_content(&self, _window: &Window, _cx: &App) -> bool {
         true
+    }
+
+    fn has_buffer_content(&self, _window: &Window, _cx: &App) -> bool {
+        true
+    }
+
+    fn buffer_content(&mut self, _: &mut Window, cx: &mut App) -> Option<Entity<Buffer>> {
+        let markdown_table = self.cached_clipboard_content.text()?;
+        let buffer = cx.new(|cx| {
+            let mut buffer = Buffer::local(markdown_table, cx)
+                .with_language(language::PLAIN_TEXT.clone(), cx);
+            buffer.set_capability(language::Capability::ReadOnly, cx);
+            buffer
+        });
+        Some(buffer)
     }
 }
 

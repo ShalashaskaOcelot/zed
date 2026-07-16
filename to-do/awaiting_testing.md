@@ -32,6 +32,10 @@ listed here.
 - [ ] Bug #38 — remove ipykernel from the env, run a cell → the cell status
       is the red ✕ failed state (not "Cancelled"), with the kernel stderr in
       the error output.
+- [ ] Bug #37 — a DataFrame output now shows BOTH hover controls: Copy Output
+      and Open in Buffer (read-only buffer with the markdown table); and the
+      output "…" menu → Copy Output now copies table output (as markdown)
+      instead of nothing.
 - [ ] Bug #31 — BLOCKED by bug #35 (closing a notebook leaves the kernel
       running, so the env can't be deleted while Zed is up). Once #35 is
       fixed: delete the kernel env while Zed stays running (notebook closed);

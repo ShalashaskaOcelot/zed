@@ -422,7 +422,7 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ## 37. Table (DataFrame) outputs lack "Open in Buffer"; old menu Copy skips them
 
-- **Status:** open
+- **Status:** fix attempted - untested
 - **Symptom:** (user 2026-07-16) On DataFrame/table outputs the new hover
   controls show Copy Output (works, nice markdown) but NOT "Open in Buffer";
   plain text outputs show and support both. Also the output "…" menu's
@@ -434,8 +434,15 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   (text-only) accessor that returns nothing for tables. Give tables the same
   markdown text representation on ALL paths: open-in-buffer opens the
   markdown table, menu copy copies it.
-- **Fix attempted:** none
-- **Tested:** n/a
+- **Fix attempted (2026-07-16):** `TableView` now implements
+  `buffer_content` (opens the table's markdown text in a read-only buffer,
+  same as the hover copy produces), so the "Open in Buffer" hover control
+  appears on tables. The output "…" menu's Copy Output (`outputs_as_text`)
+  now also includes rich outputs' text forms — tables as markdown, plus
+  markdown and JSON outputs — instead of only stdout/plain/tracebacks.
+- **Tested:** no — needs user confirmation: DataFrame output shows BOTH hover
+  controls (copy + open in buffer; the buffer holds the markdown table), and
+  the "…" menu → Copy Output copies the markdown too.
 
 ## 38. Failed kernel launch marks the cell "Cancelled" instead of errored
 
