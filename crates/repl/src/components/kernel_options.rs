@@ -11,6 +11,7 @@ use ui::{ListItem, ListItemSpacing, PopoverMenu, PopoverMenuHandle, PopoverTrigg
 type OnSelect = Box<dyn Fn(KernelSpecification, &mut Window, &mut App)>;
 type OnDismiss = Box<dyn Fn(&mut Window, &mut App)>;
 type OnCreateEnv = std::rc::Rc<dyn Fn(&mut Window, &mut App)>;
+type OnOpen = std::rc::Rc<dyn Fn(&mut Window, &mut App)>;
 
 #[derive(Clone)]
 pub enum KernelPickerEntry {
@@ -148,6 +149,7 @@ where
     /// + Recommended override) instead of the store's worktree-level
     /// selection. Notebooks pass their own per-notebook kernel here (bug #30).
     selected_override: Option<Option<KernelSpecification>>,
+    on_open: Option<OnOpen>,
 }
 
 pub struct KernelPickerDelegate {
@@ -176,7 +178,16 @@ where
             info_text: None,
             worktree_id,
             selected_override: None,
+            on_open: None,
         }
+    }
+
+    /// Called every time the picker menu is opened — used to kick extra
+    /// re-discovery (e.g. python env refresh, which needs the project) so the
+    /// list is validated on open (phase 42).
+    pub fn with_on_open(mut self, on_open: OnOpen) -> Self {
+        self.on_open = Some(on_open);
+        self
     }
 
     /// Show `selected` as the picker's current selection instead of the
@@ -570,8 +581,21 @@ where
                 .popover()
         });
 
+        let on_open = self.on_open;
         PopoverMenu::new("kernel-switcher")
-            .menu(move |_window, _cx| Some(picker_view.clone()))
+            .menu(move |window, cx| {
+                // Opening the picker re-validates the kernel lists (phase
+                // 42): the refresh prunes registered kernelspecs whose env
+                // vanished and picks up newly-created ones; entries stream
+                // into the open picker via the store observer above.
+                ReplStore::global(cx).update(cx, |store, cx| {
+                    store.refresh_kernelspecs(cx).detach_and_log_err(cx);
+                });
+                if let Some(on_open) = &on_open {
+                    on_open(window, cx);
+                }
+                Some(picker_view.clone())
+            })
             .trigger_with_tooltip(self.trigger, self.tooltip)
             .attach(gpui::Anchor::BottomLeft)
             .when_some(self.handle, |menu, handle| menu.with_handle(handle))

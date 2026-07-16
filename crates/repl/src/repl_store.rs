@@ -267,6 +267,18 @@ impl ReplStore {
             let mut all_specs = local_kernel_specifications
                 .await?
                 .into_iter()
+                // A registered kernelspec can outlive its environment — the
+                // kernel.json survives deleting the venv it points at. Drop
+                // specs whose absolute interpreter path no longer exists so
+                // the picker doesn't offer ghost envs (phase 42).
+                .filter(|spec| {
+                    spec.kernelspec
+                        .argv
+                        .first()
+                        .map(std::path::Path::new)
+                        .filter(|interpreter| interpreter.is_absolute())
+                        .is_none_or(|interpreter| interpreter.exists())
+                })
                 .map(KernelSpecification::Jupyter)
                 .collect::<Vec<_>>();
 
@@ -331,6 +343,12 @@ impl ReplStore {
 
     pub fn notebook_kernelspec(&self, notebook_path: &Path) -> Option<&KernelSpecification> {
         self.selected_kernel_for_notebook.get(notebook_path)
+    }
+
+    /// Forget a notebook's remembered kernel pick — used when the picked
+    /// environment no longer exists on disk (phase 42).
+    pub fn clear_notebook_kernelspec(&mut self, notebook_path: &Path) {
+        self.selected_kernel_for_notebook.remove(notebook_path);
     }
 
     pub fn is_recommended_kernel(

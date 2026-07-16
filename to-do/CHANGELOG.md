@@ -83,6 +83,10 @@ entry rather than archiving it.
 - Phase 40 — UI polish (2026-07-16 round): notebook output blocks span the
   cell's full width (`max_columns` now only sizes the inline REPL); slimmer
   notebook top strip.
+- Phase 42 — Kernel environment validation: a remembered kernel whose
+  interpreter vanished is never launched — the run drops the stale selection
+  and prompts; opening the picker re-runs discovery and prunes registered
+  kernelspecs pointing at deleted envs; the indicator stops showing ghosts.
 - Phase 33 — Truly unsaved "New Jupyter Notebook": the command now opens an
   untitled, in-memory notebook (no `Untitled-N.ipynb` on disk); first save
   goes through the save-as prompt, which attaches the notebook to its file

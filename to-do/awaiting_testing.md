@@ -29,6 +29,26 @@ listed here.
       end up open in two tabs again. (Cause found by inspection: stale
       entry id after save defeated the already-open dedup.)
 
+## Phase 42 — Kernel environment validation (stale-env handling)
+
+Kind: change to existing behaviour — if a check misses, say so and it gets
+fixed in place.
+
+- [ ] Delete the selected venv while Zed runs (notebook closed so the kernel
+      is dead): reopening + running does NOT attempt a launch/error — the
+      stale selection is dropped (top-right shows "Select Kernel") and the
+      kernel picker opens.
+- [ ] The picker shows NO ghost entry for the deleted env (registered
+      kernelspecs whose interpreter vanished are pruned on open; deleted
+      workspace .venvs disappear after the re-discovery lands).
+- [ ] Recreate the same `.venv` (same name/place) → select/run works on the
+      FIRST try (discovery hands back the new interpreter, not the cached
+      dead one).
+- [ ] Clean bug #30-persistence retest (the 2026-07-16 attempt was confounded
+      by the deleted env): two notebooks, different kernels, RUN + SAVE both,
+      restart Zed → each notebook's first run uses its own saved kernel
+      without prompting.
+
 ## Phase 40 — UI polish from the 2026-07-16 testing round
 
 Kind: change to existing behaviour — if either change didn't take effect,

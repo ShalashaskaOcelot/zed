@@ -537,6 +537,16 @@ impl NotebookEditor {
     /// does NOT fall back to the "recommended"/global kernel — an unremembered
     /// notebook should prompt rather than silently start the wrong interpreter.
     fn remembered_kernel_spec(&self, cx: &App) -> Option<KernelSpecification> {
+        // A remembered env that vanished from disk (deleted mid-session) must
+        // never be silently launched or adopted — resolution treats it as
+        // "nothing remembered" so every consumer prompts instead (phase 42).
+        self.remembered_kernel_spec_any(cx)
+            .filter(|spec| !Self::spec_interpreter_missing(spec))
+    }
+
+    /// The raw remembered-kernel resolution, WITHOUT the existence check —
+    /// only for detecting a stale selection that needs discarding.
+    fn remembered_kernel_spec_any(&self, cx: &App) -> Option<KernelSpecification> {
         if let Some(spec) = &self.kernel_specification {
             return Some(spec.clone());
         }
@@ -548,6 +558,42 @@ impl NotebookEditor {
             return Some(spec.clone());
         }
         self.metadata_matched_kernel_spec(cx)
+    }
+
+    /// Whether a locally-launched spec's interpreter has vanished (its env
+    /// was deleted). A cheap stat at resolution time — no polling. Remote /
+    /// WSL / SSH specs are never checked. Jupyter kernelspecs with a relative
+    /// argv (e.g. plain "python") are trusted; registered venv kernelspecs
+    /// use absolute paths, which are the ones that go stale.
+    fn spec_interpreter_missing(spec: &KernelSpecification) -> bool {
+        let interpreter = match spec {
+            KernelSpecification::PythonEnv(env) => Some(env.path.clone()),
+            KernelSpecification::Jupyter(local) => local
+                .kernelspec
+                .argv
+                .first()
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute()),
+            _ => None,
+        };
+        interpreter.is_some_and(|path| !path.exists())
+    }
+
+    /// Drop a kernel selection whose environment no longer exists, and kick a
+    /// re-discovery so the picker/indicator stop pointing at a ghost env and
+    /// a recreated same-name env resolves to its NEW interpreter (phase 42).
+    fn discard_stale_kernel_selection(&mut self, cx: &mut Context<Self>) {
+        self.kernel_specification = None;
+        if let Some(path) = self.notebook_item.read(cx).path.clone() {
+            ReplStore::global(cx).update(cx, |store, _| {
+                store.clear_notebook_kernelspec(&path);
+            });
+        }
+        self.refresh_kernelspecs(cx);
+        ReplStore::global(cx).update(cx, |store, cx| {
+            store.refresh_kernelspecs(cx).detach_and_log_err(cx);
+        });
+        cx.notify();
     }
 
     /// The discovered kernel matching the notebook's saved
@@ -1522,6 +1568,17 @@ impl NotebookEditor {
         };
 
         if let Disposition::Prompt = disposition {
+            // If we are prompting because the remembered env VANISHED (the
+            // validated resolution returned None while the raw one still has
+            // a spec), drop the ghost selection and refresh discovery before
+            // the picker opens (phase 42).
+            if !has_remembered_kernel
+                && self
+                    .remembered_kernel_spec_any(cx)
+                    .is_some_and(|spec| Self::spec_interpreter_missing(&spec))
+            {
+                self.discard_stale_kernel_selection(cx);
+            }
             // Hold the cell (no spinner) and open the picker directly — NOT
             // via launch_kernel, whose remembered-spec fallback would relaunch
             // the very spec that just failed (bug #31). Both Prompt producers
@@ -3491,6 +3548,7 @@ impl NotebookEditor {
         let view = cx.entity().downgrade();
         let view_for_dismiss = view.clone();
         let view_for_create = view.clone();
+        let view_for_open = view.clone();
 
         // No background band: the strip reads as dead space at the top of the
         // notebook with just the kernel cluster in the corner (user 2026-07-14).
@@ -3539,6 +3597,25 @@ impl NotebookEditor {
                     if let Some(view) = view_for_create.upgrade() {
                         view.update(cx, |this, cx| {
                             this.create_python_environment(window, cx);
+                        });
+                    }
+                }))
+                // Opening the picker re-validates the environments (phase
+                // 42): python envs are re-discovered, and a selection whose
+                // env vanished is dropped so the checkmark/indicator don't
+                // point at a ghost.
+                .with_on_open(std::rc::Rc::new(move |_window, cx| {
+                    if let Some(view) = view_for_open.upgrade() {
+                        view.update(cx, |this, cx| {
+                            if this
+                                .kernel_specification
+                                .as_ref()
+                                .is_some_and(|spec| Self::spec_interpreter_missing(spec))
+                            {
+                                this.discard_stale_kernel_selection(cx);
+                            } else {
+                                this.refresh_kernelspecs(cx);
+                            }
                         });
                     }
                 }))
@@ -4385,11 +4462,12 @@ mod tests {
         ]
     }"#;
 
-    /// When the configured interpreter doesn't exist (e.g. Python isn't installed),
-    /// running a cell must not leave it stuck in the executing state. It should
-    /// instead surface the kernel launch error as an error output on the cell.
+    /// When the remembered kernel's interpreter no longer exists (deleted
+    /// env / Python uninstalled), running a cell must not launch it or leave
+    /// the cell stuck executing: the stale selection is dropped and the cell
+    /// is held for a kernel prompt instead (phase 42).
     #[gpui::test]
-    async fn test_run_cell_with_missing_interpreter_shows_error(cx: &mut TestAppContext) {
+    async fn test_run_cell_with_missing_interpreter_prompts(cx: &mut TestAppContext) {
         cx.update(|cx| {
             let settings_store = SettingsStore::test(cx);
             cx.set_global(settings_store);
@@ -4482,46 +4560,44 @@ mod tests {
             );
         });
 
-        // Run the (only) cell via the production action handler. This launches
-        // the remembered (broken) kernel and queues the execution.
+        // Run the (only) cell via the production action handler. Since phase
+        // 42, a remembered kernel whose interpreter no longer exists is NOT
+        // launched — the run validates the env first, drops the stale
+        // selection, and prompts for a kernel instead of erroring.
         editor.update_in(cx, |editor, window, cx| {
             editor.run_current_cell(&Run, window, cx);
         });
 
-        // Wait for the launch task, which fails because the interpreter cannot
-        // be spawned.
-        let pending_kernel = editor.read_with(cx, |editor, _| match &editor.kernel {
-            Kernel::StartingKernel(task) => task.clone(),
-            _ => panic!("running a cell should launch the remembered kernel"),
-        });
-        pending_kernel.await;
-
         editor.read_with(cx, |editor, cx| {
+            assert!(
+                matches!(editor.kernel, Kernel::Shutdown),
+                "a vanished env must not be launched; kernel is: {}",
+                editor.kernel.status().to_string()
+            );
+            assert!(
+                editor.kernel_specification.is_none(),
+                "the stale selection must be dropped"
+            );
+            assert!(
+                ReplStore::global(cx)
+                    .read(cx)
+                    .notebook_kernelspec(std::path::Path::new(path!("/notebooks/test.ipynb")))
+                    .is_none(),
+                "the notebook's remembered pick must be forgotten"
+            );
+
             let cell_id = editor.cell_order.first().expect("notebook has one cell");
+            assert!(
+                editor.cells_awaiting_kernel_choice.contains(cell_id),
+                "the cell should be held awaiting a kernel choice (picker prompt)"
+            );
             let Some(Cell::Code(cell)) = editor.cell_map.get(cell_id) else {
                 panic!("expected a code cell");
             };
-            let cell = cell.read(cx);
-
             assert!(
-                !cell.is_executing(),
+                !cell.read(cx).is_executing(),
                 "cell must not be stuck in the executing state when the kernel is not running"
             );
-
-            let nbformat::v4::Cell::Code { outputs, .. } = cell.to_nbformat_cell(cx) else {
-                panic!("expected a code cell");
-            };
-            match outputs.as_slice() {
-                [nbformat::v4::Output::Error(error)] => {
-                    assert_eq!(error.ename, "Kernel Error");
-                    let traceback = error.traceback.join("\n");
-                    assert!(
-                        traceback.contains("the kernel failed to launch"),
-                        "error output should explain why the cell could not run, got: {traceback}"
-                    );
-                }
-                other => panic!("expected a single error output, got: {other:?}"),
-            }
         });
     }
 
