@@ -22,11 +22,33 @@ high → low within each group.
   filter to something sensible (not "all files") and make sure the `.ipynb`
   extension is applied/autofilled rather than left off.
 
+## Medium priority (cont.)
+
+- Newly-created kernel should be selected immediately, before it's ready
+  (user 2026-07-16). When you "Create Python/Conda Environment" while a
+  DIFFERENT kernel is already selected, there's a gap during creation where
+  the notebook falls back to the old kernel — running a cell then starts the
+  OLD kernel, and the new one auto-switches in only once it finishes building.
+  Desired: on choosing create, immediately show the new env as this
+  notebook's selected kernel (rendered greyed/disabled in the picker like a
+  no-ipykernel entry until ready), and queue any run as Pending until the new
+  kernel is built, then start it and run — i.e. the exact behaviour that
+  already happens when creating from the "Select Kernel" (no-kernel) state.
+  Implementation: seed a placeholder/selected spec + treat the create task
+  like a pending-launch, reusing the `cells_awaiting_kernel_choice` /
+  `promote_awaiting_cells` path. (Confirmed working from the no-kernel start
+  state; only the switch-from-another-kernel case regresses to the old one.)
+
 ## Low priority
 
 - Kernel picker: show the env path under Jupyter-kernel entries the way
   Python Environment entries show theirs (user 2026-07-16) — registered
   venv kernelspecs currently give no clue which directory they point at.
+- Clicking an output body could also select its cell (user 2026-07-16) —
+  currently only the cell gutter/border selects the cell; clicking on an
+  output's content doesn't (a plain click there should select the cell, while
+  a drag still selects output text). Minor nicety; unclear it ever selected
+  from the output body, so not filed as a regression.
 - Arch Linux distribution (user 2026-07-16, explicitly deferred — "long
   finger"): proper pacman-managed install, i.e. a self-hosted pacman repo
   the user's machines can pull from, or an AUR package (paru-manageable).

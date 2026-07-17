@@ -293,28 +293,79 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   sessions, call it fixed.
 
 
-## 40. Upward cell navigation sometimes scrolls an already-visible cell to the bottom edge
+## 41. Text/table output doesn't use the output block's full width
 
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-16) In command mode, pressing up arrow onto a
-  cell that is ALREADY fully visible sometimes scrolls the whole viewport up
-  so the target cell sits at the viewport's bottom edge, pushing later cells
-  out of view. Intermittent — deleting/re-adding trailing cells toggled it.
-  Downward navigation behaves correctly (no scroll when the target is fully
-  visible), and the expected behaviour is the same for upward moves: only
-  scroll when the target is (partially) out of view.
-- **Root cause (found in gpui):** `ListState::scroll_to_reveal_item` decided
-  "already scrolled far enough" with an ITEM-INDEX comparison where a PIXEL
-  comparison was needed. When the bottom-aligned goal position landed inside
-  the same item currently at the top of the viewport (which depends on cell
-  heights — hence the intermittency), the guard passed and the list scrolled
-  UP, bottom-pinning the already-visible target.
-- **Fix attempted (2026-07-16):** the reveal now compares the goal scroll
-  offset against the CURRENT scroll offset in pixels and only ever scrolls
-  DOWN to reveal a bottom edge (upward scrolling still happens only for
-  targets above the viewport, via the existing top-align branch). Regression
-  test `test_reveal_already_visible_item_does_not_scroll` encodes the
-  reported geometry (tall top item, fully-visible target below it).
-- **Tested:** no — needs user confirmation: navigate up/down through cells
-  with the viewport mid-notebook; the viewport must only move when the
-  target cell is not already fully visible (in both directions).
+- **Status:** open (pre-existing; NOT a regression — never fully solved.
+  Confirmed by user 2026-07-16.)
+- **Symptom:** (user 2026-07-16, phase 40 round 2) The output block is now the
+  cell's full width (copy/open-in-buffer controls sit at the right edge), but
+  the CONTENT only reaches roughly the middle: text output "ends in the
+  middle", and DataFrame/table output shows stretched columns whose cell text
+  is truncated. So the box is full width but the content isn't.
+- **Analysis (code inspection, 2026-07-16):** two distinct causes.
+  1. TEXT (stream/plain/error → `TerminalOutput`): the display-only terminal
+     grid is a FIXED size — `terminal_size()` builds it at
+     `max_columns` (default 128) × `max_lines` (32); content beyond scrolls
+     into history. `with_renderable_cells` reads that fixed-width grid, so the
+     painted text can never exceed 128 columns regardless of how wide the box
+     is (on a wide monitor 128 cols ≈ half). Phase 40 widened the CONTAINER
+     (`outputs.rs` dropped the `max_width` cap for notebooks) but not the grid.
+     Fix direction: size the terminal grid's COLUMN count to the output box's
+     pixel width (keep rows at `max_lines` so the vertical-scroll cap is
+     unchanged), resizing in the canvas prepaint where the real bounds are
+     known and re-rendering once when the column count changes. Risk: alacritty
+     reflow interacts with the fixed 32-row screen + scrollback; needs GUI
+     iteration (can't be verified headless).
+  2. TABLE (rich HTML → `TableView`, `outputs/table.rs`): columns stretch to
+     fill the full width but cell text is truncated instead of shown/scrolled.
+     Separate component; likely a column-measurement/`text_ellipsis` issue.
+- **Fix attempted:** none yet (deliberately not a 3rd blind attempt — this is
+  GUI-dependent and phase 40 already failed twice on it). Needs a focused,
+  build-and-test pass with the user.
+- **Tested:** n/a
+
+## 42. Output text selection isn't cleared when clicking into another cell to edit
+
+- **Status:** open (phase 37 follow-up; minor)
+- **Symptom:** (user 2026-07-16) After drag-selecting output text, clicking
+  another cell in COMMAND mode (its gutter/border) or empty space DOES clear
+  the highlight, but clicking directly into another cell to enter EDIT mode
+  leaves the previous output's selection highlighted.
+- **Analysis:** the deselect is driven by a window-level mousedown handler on
+  each output (`outputs/plain.rs`): a click outside the output's bounds while
+  it has a selection clears it. Clicking into another cell's editor is outside
+  those bounds, so it should hit that branch — but the editor likely consumes
+  the mousedown (capture/stop-propagation) before the global bubble handler
+  runs, or the ensuing focus/edit-mode re-render drops the handler first.
+  Needs GUI debugging to confirm which. Cosmetic only (copy/cut still correct;
+  the stale highlight clears on the next click).
+- **Fix attempted:** none
+- **Tested:** n/a
+
+## 43. Embedded (non-notebook) terminal text is too large
+
+- **Status:** open (needs the user to pin when it changed)
+- **Symptom:** (user 2026-07-16) The built-in Zed terminal (e.g. the pwsh
+  panel, screenshot) started rendering with very large text "a few commits
+  ago". User prefers small terminal text. This is the EMBEDDED terminal, not
+  notebook output.
+- **Analysis (code inspection, 2026-07-16):** unrelated to the REPL's
+  `terminal_size` (that only sizes notebook/inline-REPL output, in
+  `crates/repl/`). The embedded terminal's font comes from
+  `TerminalElement::rem_size` = `ThemeSettings::buffer_font_size * 1.125`
+  (a fixed UI-scale factor, `terminal_view/src/terminal_element.rs:839-857`),
+  unless overridden by the `terminal.font_size` setting
+  (`terminal/src/terminal_settings.rs`). NOTE: the fork's own history since
+  the 2026-07-08 fork point does NOT touch `crates/terminal_view`, terminal
+  font handling, or the font-settings defaults (`git log 950ec7943f..HEAD`
+  over those paths shows only phase 37's unrelated `clear_selection`), so
+  this most likely arrived via an upstream sync or a `buffer_font_size` /
+  theme / zoom change rather than fork work.
+- **Workaround (shared with user):** set an explicit size in settings.json,
+  e.g. `"terminal": { "font_size": 12 }`, or lower `buffer_font_size`
+  (the terminal scales off it when `terminal.font_size` is unset).
+- **Next step:** have the user note the rough commit/date it changed (or
+  whether it followed an upstream merge / settings edit) so the cause can be
+  bisected; confirm whether `terminal.font_size` is set in their config.
+- **Fix attempted:** none
+- **Tested:** n/a

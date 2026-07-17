@@ -183,3 +183,7 @@ entry rather than archiving it.
   app with a GPUI double-lease panic; the kernel picker open is now deferred
   via `window.defer` so `on_open`'s re-entrant update holds no outer lease.
   `ff16a00`
+- #40 — Upward command-mode navigation onto an already-visible cell sometimes
+  bottom-pinned it (a gpui `ListState::scroll_to_reveal_item` index-vs-pixel
+  guard); the reveal now compares pixel offsets and only scrolls to reveal an
+  off-screen edge. Confirmed 2026-07-16.
