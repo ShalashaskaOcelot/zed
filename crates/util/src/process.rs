@@ -207,9 +207,10 @@ impl Child {
     /// Sends an interrupt to the child without killing it. On Unix this is
     /// SIGINT to the child's process group (the child starts a new session at
     /// spawn, so its process-group id equals its pid). On Windows the child
-    /// must have been spawned with [`Child::spawn_interruptible`]; the
-    /// associated interrupt event is signaled. Jupyter kernels turn this into
-    /// a `KeyboardInterrupt`.
+    /// must have been spawned with [`Child::spawn_interruptible`]; a real
+    /// CTRL_C console event is delivered to the child's console when
+    /// possible, with the interrupt event as fallback. Jupyter kernels turn
+    /// either into a `KeyboardInterrupt`.
     #[cfg(not(windows))]
     pub fn interrupt(&self) -> Result<()> {
         let pid = self.process.id();
@@ -223,21 +224,103 @@ impl Child {
 
     #[cfg(windows)]
     pub fn interrupt(&self) -> Result<()> {
+        // Prefer a real CTRL_C console event: CPython sets the hidden event
+        // that wakes main-thread C blockers (`time.sleep`, `input()`) only in
+        // its OS-level signal handler (`signal_handler` in
+        // Modules/signalmodule.c), which runs for real console events. The
+        // JPY interrupt event merely makes ipykernel's poller call
+        // `_thread.interrupt_main()`, which trips the between-bytecodes flag
+        // without setting that event — pure-Python loops stop, blocking C
+        // calls do not. The console path fails harmlessly when this process
+        // already owns a console or the child has none; the event then
+        // covers those cases (at bytecode-boundary promptness).
+        let console_error = match windows_interrupt::send_ctrl_c(self.process.id()) {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
         match &self.interrupt_event {
-            Some(event) => event.signal(),
-            None => anyhow::bail!("process was not spawned with interrupt support"),
+            Some(event) => {
+                log::debug!(
+                    "console CTRL_C failed ({console_error:#}); \
+                     falling back to the interrupt event"
+                );
+                event.signal()
+            }
+            None => Err(console_error.context("process was not spawned with interrupt support")),
         }
     }
 }
 
 #[cfg(windows)]
 mod windows_interrupt {
+    use crate::ResultExt as _;
     use anyhow::{Context as _, Result};
     use windows::Win32::{
         Foundation::{CloseHandle, HANDLE},
         Security::SECURITY_ATTRIBUTES,
+        System::Console::{
+            AttachConsole, CTRL_C_EVENT, FreeConsole, GenerateConsoleCtrlEvent,
+            SetConsoleCtrlHandler,
+        },
         System::Threading::{CreateEventW, SetEvent},
     };
+
+    /// Delivers a real CTRL_C console event to the console of the process
+    /// `pid`. Zed spawns children with `CREATE_NO_WINDOW`, so each gets its
+    /// own hidden console shared only with its descendants — attaching to it
+    /// and broadcasting CTRL_C reaches exactly that process tree, mirroring
+    /// Unix `killpg(SIGINT)`.
+    ///
+    /// `GenerateConsoleCtrlEvent` can only signal the CALLER's console, and a
+    /// process can be attached to at most one console, so this must
+    /// temporarily attach to the child's console. `AttachConsole` fails if
+    /// this process already owns a console (never freeing a console we did
+    /// not create) or if the child has none — callers fall back to the
+    /// interrupt event in those cases.
+    pub(crate) fn send_ctrl_c(pid: u32) -> Result<()> {
+        // Console attachment is process-global state; concurrent interrupts
+        // of different children must not interleave attach/detach.
+        static CONSOLE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = CONSOLE_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        // While attached, this process receives the CTRL_C too, and the
+        // DEFAULT console handler exits the process. Permanently ignoring
+        // CTRL_C is safe for a GUI process and avoids a window where the
+        // event could be delivered after a handler reset.
+        static IGNORE_CTRL_C: std::sync::OnceLock<Result<(), windows::core::Error>> =
+            std::sync::OnceLock::new();
+        IGNORE_CTRL_C
+            .get_or_init(|| unsafe { SetConsoleCtrlHandler(None, true) })
+            .as_ref()
+            .map_err(|error| anyhow::anyhow!("failed to ignore CTRL_C in this process: {error}"))?;
+
+        unsafe {
+            AttachConsole(pid).context("failed to attach to the child's console")?;
+            let result = GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)
+                .context("failed to send CTRL_C_EVENT to the child's console");
+            FreeConsole().log_err();
+            result
+        }
+    }
+
+    /// Test-only variant: the test harness process owns a console (so
+    /// `AttachConsole` would fail); detach from it first and re-attach to the
+    /// parent's console afterwards.
+    #[cfg(test)]
+    pub(crate) fn send_ctrl_c_detaching_own_console(pid: u32) -> Result<()> {
+        use windows::Win32::System::Console::ATTACH_PARENT_PROCESS;
+
+        unsafe {
+            FreeConsole().log_err();
+        }
+        let result = send_ctrl_c(pid);
+        unsafe {
+            AttachConsole(ATTACH_PARENT_PROCESS).log_err();
+        }
+        result
+    }
 
     /// A Win32 auto-reset event used to interrupt a locally-spawned Jupyter
     /// kernel. The handle is created inheritable and its numeric value is
@@ -425,6 +508,27 @@ mod windows_tests {
             assert!(Instant::now() < deadline, "{message} (pid {pid})");
             std::thread::sleep(Duration::from_millis(100));
         }
+    }
+
+    #[test]
+    fn test_console_ctrl_c_interrupts_child() {
+        // ping.exe knows nothing about the JPY interrupt event, so it only
+        // stops if the real CTRL_C console event lands; this exercises the
+        // console path end-to-end. Spawn via `new_std_command` to get
+        // CREATE_NO_WINDOW like production kernels — ping gets its own hidden
+        // console, so the CTRL_C cannot reach the test runner's console.
+        let mut command = crate::command::new_std_command("ping.exe");
+        command.args(["-n", "60", "127.0.0.1"]);
+        let child = Child::spawn_interruptible(command, Stdio::null(), Stdio::null(), Stdio::null())
+            .expect("failed to spawn ping");
+        let pid = child.id();
+        assert!(process_is_alive(pid), "ping should be alive after spawning");
+
+        windows_interrupt::send_ctrl_c_detaching_own_console(pid)
+            .expect("failed to send console CTRL_C");
+
+        assert_process_exits(pid, "ping should exit after a console CTRL_C");
+        drop(child);
     }
 
     #[test]

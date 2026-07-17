@@ -100,6 +100,7 @@ pub struct NativeRunningKernel {
     pub stdin_tx: mpsc::Sender<JupyterMessage>,
     pub execution_state: ExecutionState,
     pub kernel_info: Option<KernelInfoReply>,
+    interrupt_mode: Option<String>,
 }
 
 impl Debug for NativeRunningKernel {
@@ -149,6 +150,7 @@ impl NativeRunningKernel {
             let content = serde_json::to_string(&connection_info)?;
             fs.atomic_write(connection_path.clone(), content).await?;
 
+            let interrupt_mode = kernel_specification.kernelspec.interrupt_mode.clone();
             let mut cmd = kernel_specification.command(&connection_path)?;
             cmd.current_dir(&working_directory);
 
@@ -368,6 +370,7 @@ impl NativeRunningKernel {
                 connection_path,
                 execution_state: ExecutionState::Idle,
                 kernel_info: None,
+                interrupt_mode,
             }) as Box<dyn RunningKernel>)
         })
     }
@@ -416,6 +419,17 @@ impl RunningKernel for NativeRunningKernel {
     }
 
     fn interrupt(&self) {
+        // Kernels that declare `interrupt_mode: "message"` in their kernelspec
+        // ask for a control-channel interrupt_request INSTEAD of an OS-level
+        // signal (Jupyter spec); sending a console event to such a kernel
+        // could kill it outright if it installed no handler.
+        if self.interrupt_mode.as_deref() == Some("message") {
+            let message: JupyterMessage = runtimelib::InterruptRequest {}.into();
+            if let Err(error) = self.request_tx().try_send(message) {
+                log::error!("failed to send interrupt request: {error}");
+            }
+            return;
+        }
         if let Err(error) = self.process.interrupt() {
             log::warn!(
                 "failed to interrupt kernel via OS signal ({error:#}); \
