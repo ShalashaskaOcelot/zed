@@ -29,6 +29,27 @@ listed here.
       end up open in two tabs again. (Cause found by inspection: stale
       entry id after save defeated the already-open dedup.)
 
+## Phase 37 — In-place selectable output text
+
+Kind: new feature — once confirmed present and basically working, refinements
+and defects become new backlog/bug items. Implemented via the terminal's own
+selection machinery on the output canvas (stream/plain/error outputs — the
+terminal-rendered ones; tables/markdown/images unchanged).
+
+- [ ] Drag-select part of a text output (also an ANSI-colored error
+      traceback): the highlight follows the drag, and ctrl/cmd-c copies
+      exactly the selected text. Double-click selects a word.
+- [ ] Click-away (another cell, the editor, empty space) clears the
+      highlight; ctrl-c afterwards copies the CELL again (command mode), and
+      ctrl-x always cuts the cell even while output text is selected.
+- [ ] Nothing regressed around output clicks: clicking an output still
+      selects its cell, the output-strip buttons (copy / open-in-buffer)
+      still work, and cell drag/multi-select behaves as before.
+- [ ] Known v1 limits (just confirm they're acceptable): in the inline REPL
+      the same drag-selection works visually but ctrl-c still does the
+      editor's copy (use the output menu there); selection is per-output and
+      can't span multiple outputs/cells.
+
 ## Phase 35 — Prompt interrupt of C-blocking calls on Windows
 
 Kind: change to existing behaviour — if a test fails, say so and it gets

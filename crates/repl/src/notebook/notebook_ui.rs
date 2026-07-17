@@ -2529,6 +2529,19 @@ impl NotebookEditor {
     }
 
     fn copy_cell(&mut self, _: &CopyCell, _window: &mut Window, cx: &mut Context<Self>) {
+        // An active mouse selection inside an output wins over cell copy, so
+        // drag-selecting output text and hitting the copy shortcut copies that
+        // text. Click-away clears output selections, so at most one exists.
+        if let Some(text) = self.output_selection_text(cx) {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+            return;
+        }
+        self.copy_cells_to_clipboard(cx);
+    }
+
+    /// Serializes the selected cell(s) to the clipboard — the cell-level copy
+    /// used by both copy (when no output text is selected) and cut.
+    fn copy_cells_to_clipboard(&mut self, cx: &mut Context<Self>) {
         let cells: Vec<nbformat::v4::Cell> = self
             .effective_selection()
             .into_iter()
@@ -2552,8 +2565,21 @@ impl NotebookEditor {
         }
     }
 
+    /// Text of the active in-place output selection anywhere in the notebook,
+    /// if one exists.
+    fn output_selection_text(&self, cx: &App) -> Option<String> {
+        self.cell_map.values().find_map(|cell| match cell {
+            Cell::Code(code_cell) => code_cell
+                .read(cx)
+                .outputs()
+                .iter()
+                .find_map(|output| output.selection_text(cx)),
+            _ => None,
+        })
+    }
+
     fn cut_cell(&mut self, _: &CutCell, window: &mut Window, cx: &mut Context<Self>) {
-        self.copy_cell(&CopyCell, window, cx);
+        self.copy_cells_to_clipboard(cx);
         self.delete_cell(&DeleteCell, window, cx);
     }
 

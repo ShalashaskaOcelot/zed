@@ -1884,6 +1884,11 @@ impl Terminal {
         self.events.push_back(InternalEvent::Copy(keep_selection));
     }
 
+    /// Clears the current selection, if any, without touching the clipboard.
+    pub fn clear_selection(&mut self) {
+        self.set_selection(None);
+    }
+
     pub fn clear(&mut self) {
         self.events.push_back(InternalEvent::Clear)
     }

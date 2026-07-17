@@ -15,7 +15,12 @@
 //! - Error tracebacks
 //!
 
-use gpui::{Bounds, ClipboardItem, Entity, FontStyle, Pixels, TextStyle, WhiteSpace, canvas, size};
+use editor::{HighlightedRange, HighlightedRangeLine};
+use gpui::{
+    Bounds, ClipboardItem, CursorStyle, DispatchPhase, Entity, FontStyle, HitboxBehavior,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, TextStyle, WhiteSpace,
+    canvas, size,
+};
 use language::Buffer;
 use settings::Settings as _;
 use terminal::{Terminal, TerminalBuilder, terminal_settings::TerminalSettings};
@@ -43,6 +48,12 @@ use crate::repl_settings::ReplSettings;
 pub struct TerminalOutput {
     full_buffer: Option<Entity<Buffer>>,
     terminal: Entity<Terminal>,
+    /// A left-button drag that began inside this output is in progress; mouse
+    /// moves keep extending the terminal selection until the button releases.
+    selecting: bool,
+    /// Window-space bounds adopted by the terminal at the last sync, so idle
+    /// outputs (no selection activity, unmoved) skip the per-frame sync.
+    last_synced_bounds: Option<Bounds<Pixels>>,
 }
 
 /// Returns the default text style for the terminal output.
@@ -148,6 +159,8 @@ impl TerminalOutput {
         Self {
             terminal: cx.new(|cx| terminal_builder.subscribe(cx)),
             full_buffer: None,
+            selecting: false,
+            last_synced_bounds: None,
         }
     }
 
@@ -212,6 +225,19 @@ impl TerminalOutput {
         Self::sanitize_terminal_text(self.terminal.read(cx).get_content())
     }
 
+    /// Text of the active in-place mouse selection, if any. Reflects the last
+    /// frame's terminal sync, which is fresh by the time a copy shortcut
+    /// dispatched after the selection gesture can run.
+    pub fn selection_text(&self, cx: &App) -> Option<String> {
+        let text = self
+            .terminal
+            .read(cx)
+            .last_content
+            .selection_text
+            .clone()?;
+        if text.is_empty() { None } else { Some(text) }
+    }
+
     fn sanitize_terminal_text(text: String) -> String {
         fn sanitize(mut line: String) -> Option<String> {
             line.retain(|ch| ch != '\u{0}' && ch != '\r');
@@ -250,6 +276,83 @@ mod tests {
             theme_settings::init(theme::LoadThemes::JustBase, cx);
         });
         cx.add_empty_window()
+    }
+
+    #[test]
+    fn test_selection_highlight_lines_geometry() {
+        use gpui::{Point as GpuiPoint, px};
+        use terminal::{Point, Range};
+
+        let cell_width = px(10.);
+        let line_height = px(20.);
+        let origin = GpuiPoint::new(px(0.), px(0.));
+
+        // Single-line selection: line 0, columns 2..=4 → one span [2cw, 5cw).
+        let (start_y, lines) = selection_highlight_lines(
+            &Range::new(Point::new(0, 2), Point::new(0, 4)),
+            0,
+            3,
+            80,
+            cell_width,
+            line_height,
+            origin,
+        )
+        .expect("selection is within the viewport");
+        assert_eq!(start_y, px(0.));
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].start_x, px(20.));
+        assert_eq!(lines[0].end_x, px(50.));
+
+        // Multi-line: (0,3)..(2,1) → first line from col 3 to the right edge,
+        // middle line full width, last line up to col 1 inclusive.
+        let (start_y, lines) = selection_highlight_lines(
+            &Range::new(Point::new(0, 3), Point::new(2, 1)),
+            0,
+            3,
+            80,
+            cell_width,
+            line_height,
+            origin,
+        )
+        .expect("selection is within the viewport");
+        assert_eq!(start_y, px(0.));
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0].start_x, px(30.));
+        assert_eq!(lines[0].end_x, px(800.));
+        assert_eq!(lines[1].start_x, px(0.));
+        assert_eq!(lines[1].end_x, px(800.));
+        assert_eq!(lines[2].start_x, px(0.));
+        assert_eq!(lines[2].end_x, px(20.));
+
+        // Entirely below the rendered lines → no highlight.
+        assert!(
+            selection_highlight_lines(
+                &Range::new(Point::new(5, 0), Point::new(6, 0)),
+                0,
+                3,
+                80,
+                cell_width,
+                line_height,
+                origin,
+            )
+            .is_none()
+        );
+
+        // A scrollback selection (negative line) maps into the viewport via
+        // the display offset.
+        let (start_y, lines) = selection_highlight_lines(
+            &Range::new(Point::new(-1, 0), Point::new(-1, 1)),
+            1,
+            3,
+            80,
+            cell_width,
+            line_height,
+            origin,
+        )
+        .expect("offset selection is within the viewport");
+        assert_eq!(start_y, px(0.));
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].end_x, px(20.));
     }
 
     #[gpui::test]
@@ -357,8 +460,11 @@ impl Render for TerminalOutput {
     /// Converts the current terminal state into a renderable GPUI element. It handles
     /// the layout of the terminal grid, calculates the dimensions of the output, and
     /// creates a canvas element that paints the terminal cells and background rectangles.
+    /// Mouse events are routed to the terminal's selection machinery so output
+    /// text can be selected in place and copied.
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let terminal = self.terminal.clone();
+        let this = cx.entity();
 
         let text_style = text_style(window, cx);
         let minimum_contrast = TerminalSettings::get_global(cx).minimum_contrast;
@@ -385,11 +491,67 @@ impl Render for TerminalOutput {
             .map(|advance| advance.width)
             .unwrap_or(Pixels::ZERO);
 
+        let num_columns = ReplSettings::get_global(cx).max_columns;
+        let selection_color = cx.theme().players().local().selection;
+        let corner_radius = 0.15 * text_line_height;
+
         canvas(
-            // prepaint
-            move |_bounds, _, _| {},
+            // prepaint: adopt the element's window-space bounds (the terminal's
+            // mouse math subtracts its recorded origin from event positions),
+            // pump queued selection events through sync, and lay out the
+            // selection highlight for paint.
+            {
+                let terminal = terminal.clone();
+                let this = this.clone();
+                move |bounds, window, cx| {
+                    // Syncing locks the terminal and rebuilds its content
+                    // snapshot, so idle outputs (nothing selected, bounds
+                    // unchanged) skip it and stay as cheap as before selection
+                    // support existed.
+                    let needs_sync = this.read(cx).selecting
+                        || this.read(cx).last_synced_bounds != Some(bounds)
+                        || terminal.read(cx).last_content.selection.is_some();
+                    if needs_sync {
+                        let mut terminal_bounds = terminal_size(window, cx);
+                        terminal_bounds.bounds.origin = bounds.origin;
+                        terminal.update(cx, |terminal, cx| {
+                            terminal.set_size(terminal_bounds);
+                            terminal.sync(window, cx);
+                        });
+                        this.update(cx, |this, _| this.last_synced_bounds = Some(bounds));
+                    }
+
+                    let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+                    let content = &terminal.read(cx).last_content;
+                    let highlight = content.selection.as_ref().and_then(|selection| {
+                        selection_highlight_lines(
+                            &selection.point_range(),
+                            content.display_offset,
+                            num_lines as usize,
+                            num_columns,
+                            cell_width,
+                            text_line_height,
+                            bounds.origin,
+                        )
+                    });
+                    (hitbox, highlight)
+                }
+            },
             // paint
-            move |bounds, _, window, cx| {
+            move |bounds, (hitbox, highlight), window, cx| {
+                window.set_cursor_style(CursorStyle::IBeam, &hitbox);
+
+                if let Some((start_y, lines)) = highlight {
+                    HighlightedRange {
+                        start_y,
+                        line_height: text_line_height,
+                        lines,
+                        color: selection_color,
+                        corner_radius,
+                    }
+                    .paint(true, bounds, window);
+                }
+
                 for rect in rects {
                     rect.paint(
                         bounds.origin,
@@ -414,12 +576,111 @@ impl Render for TerminalOutput {
                         cx,
                     );
                 }
+
+                // Window-level handlers so a drag keeps tracking after the
+                // pointer leaves this output's bounds; they are re-registered
+                // each frame.
+                window.on_mouse_event({
+                    let terminal = terminal.clone();
+                    let this = this.clone();
+                    move |event: &MouseDownEvent, phase, _window, cx| {
+                        if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+                            return;
+                        }
+                        if bounds.contains(&event.position) {
+                            terminal.update(cx, |terminal, cx| terminal.mouse_down(event, cx));
+                            this.update(cx, |this, cx| {
+                                this.selecting = true;
+                                cx.notify();
+                            });
+                        } else if terminal.read(cx).last_content.selection.is_some() {
+                            // Click-away deselects, like an editor selection.
+                            terminal.update(cx, |terminal, _| terminal.clear_selection());
+                            this.update(cx, |_, cx| cx.notify());
+                        }
+                    }
+                });
+                window.on_mouse_event({
+                    let terminal = terminal.clone();
+                    let this = this.clone();
+                    move |event: &MouseMoveEvent, phase, _window, cx| {
+                        if phase != DispatchPhase::Bubble
+                            || event.pressed_button != Some(MouseButton::Left)
+                            || !this.read(cx).selecting
+                        {
+                            return;
+                        }
+                        terminal.update(cx, |terminal, cx| {
+                            terminal.mouse_drag(event, bounds, cx)
+                        });
+                        this.update(cx, |_, cx| cx.notify());
+                    }
+                });
+                window.on_mouse_event({
+                    let terminal = terminal.clone();
+                    move |event: &MouseUpEvent, phase, _window, cx| {
+                        if phase != DispatchPhase::Bubble
+                            || event.button != MouseButton::Left
+                            || !this.read(cx).selecting
+                        {
+                            return;
+                        }
+                        terminal.update(cx, |terminal, cx| terminal.mouse_up(event, cx));
+                        this.update(cx, |this, cx| {
+                            this.selecting = false;
+                            cx.notify();
+                        });
+                    }
+                });
             },
         )
         // We must set the height explicitly for the editor block to size itself correctly
         .h(height)
         .into_any_element()
     }
+}
+
+/// Converts the terminal's selection range into per-line highlight spans,
+/// clamped to the rendered viewport. Adapted from terminal_element's
+/// `to_highlighted_range_lines` for the display-only output canvas.
+fn selection_highlight_lines(
+    range: &terminal::Range,
+    display_offset: usize,
+    num_lines: usize,
+    num_columns: usize,
+    cell_width: Pixels,
+    line_height: Pixels,
+    origin: gpui::Point<Pixels>,
+) -> Option<(Pixels, Vec<HighlightedRangeLine>)> {
+    let display_offset = i32::try_from(display_offset).unwrap_or(i32::MAX);
+    let unclamped_start_line = range.start().line.saturating_add(display_offset);
+    let unclamped_end_line = range.end().line.saturating_add(display_offset);
+
+    if unclamped_end_line < 0 || unclamped_start_line >= num_lines as i32 {
+        return None;
+    }
+
+    let clamped_start_line = unclamped_start_line.max(0) as usize;
+    let clamped_end_line = (unclamped_end_line as usize).min(num_lines.saturating_sub(1));
+    let start_y = origin.y + clamped_start_line as f32 * line_height;
+
+    let mut lines = Vec::new();
+    for line in clamped_start_line..=clamped_end_line {
+        let mut line_start = 0;
+        let mut line_end = num_columns;
+        if line == clamped_start_line && unclamped_start_line >= 0 {
+            line_start = range.start().column;
+        }
+        if line == clamped_end_line && unclamped_end_line < num_lines as i32 {
+            line_end = range.end().column + 1; // +1 for inclusive
+        }
+        lines.push(HighlightedRangeLine {
+            start_x: origin.x + line_start as f32 * cell_width,
+            end_x: origin.x + line_end as f32 * cell_width,
+        });
+    }
+
+    Some((start_y, lines))
 }
 
 impl OutputContent for TerminalOutput {

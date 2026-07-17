@@ -99,6 +99,13 @@ entry rather than archiving it.
   event as fallback; `interrupt_mode: "message"` kernelspecs get a
   control-channel interrupt_request instead. The planned CTRL_BREAK approach
   was researched and rejected (kills handler-less kernels). `9acd68c254`
+- Phase 37 — In-place selectable output text: stream/plain/error outputs
+  (the terminal-rendered ones) support mouse selection directly in the
+  notebook — drag/double-click on the output canvas drives the terminal's
+  own selection machinery, highlight painted like the terminal's, ctrl/cmd-c
+  copies the selected text (cell copy when nothing is selected; cut is
+  always cell-level), click-away deselects. Idle outputs skip the terminal
+  sync so unselected notebooks render as cheaply as before.
 - Phase 43 — Release & distribution discovery: mapped Zed's Windows
   packaging (Inno Setup 6 via `script/bundle-windows.ps1`; the installer is
   ALREADY user-level — `PrivilegesRequired=lowest`, HKCU-only; unsigned

@@ -151,6 +151,19 @@ pub enum Output {
 }
 
 impl Output {
+    /// Text of an active in-place mouse selection on this output, if any.
+    /// Only the terminal-rendered outputs (stream/plain/error) support
+    /// selection.
+    pub fn selection_text(&self, cx: &App) -> Option<String> {
+        match self {
+            Output::Plain { content, .. } | Output::Stream { content } => {
+                content.read(cx).selection_text(cx)
+            }
+            Output::ErrorOutput(error_view) => error_view.traceback.read(cx).selection_text(cx),
+            _ => None,
+        }
+    }
+
     pub fn to_nbformat(&self, cx: &App) -> Option<nbformat::v4::Output> {
         match self {
             Output::Stream { content } => {
