@@ -92,6 +92,13 @@ entry rather than archiving it.
   goes through the save-as prompt, which attaches the notebook to its file
   (watcher, dedup, kernel memory) — file-browser-created notebooks unchanged.
   Untitled notebooks are not restored across restarts (v1).
+- Phase 35 — Prompt interrupt of C-blocking calls on Windows: interrupts now
+  send a real console CTRL_C on the kernel's hidden console (CPython only
+  wakes main-thread C blockers like `time.sleep` for real signals — the JPY
+  event's `interrupt_main()` merely trips the bytecode flag), with the old
+  event as fallback; `interrupt_mode: "message"` kernelspecs get a
+  control-channel interrupt_request instead. The planned CTRL_BREAK approach
+  was researched and rejected (kills handler-less kernels). `9acd68c254`
 - Phase 43 — Release & distribution discovery: mapped Zed's Windows
   packaging (Inno Setup 6 via `script/bundle-windows.ps1`; the installer is
   ALREADY user-level — `PrivilegesRequired=lowest`, HKCU-only; unsigned

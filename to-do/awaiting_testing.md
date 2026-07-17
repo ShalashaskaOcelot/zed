@@ -33,6 +33,23 @@ listed here.
       end up open in two tabs again. (Cause found by inspection: stale
       entry id after save defeated the already-open dedup.)
 
+## Phase 35 — Prompt interrupt of C-blocking calls on Windows
+
+Kind: change to existing behaviour — if a test fails, say so and it gets
+fixed in place. Implemented in `9acd68c254`: interrupts now deliver a real
+console CTRL_C to the kernel's hidden console (falling back to the old
+interrupt event), and kernelspecs declaring `interrupt_mode: "message"` get
+a control-channel interrupt_request instead of any OS signal.
+
+- [ ] Windows: interrupt a `time.sleep(60)` cell — it stops IMMEDIATELY with
+      KeyboardInterrupt (not after the sleep finishes). Also worth a try:
+      `input()` and a pure-Python `while True: pass` loop (the loop already
+      worked and must keep working).
+- [ ] Windows: Zed itself is unaffected — interrupting repeatedly (also two
+      notebooks with different kernels back-to-back) never closes or hangs
+      Zed, and the kernel SURVIVES the interrupt (cell shows the red ✕
+      KeyboardInterrupt; the next cell runs fine without a kernel restart).
+
 ## Phase 42 — Kernel environment validation (stale-env handling)
 
 Kind: change to existing behaviour — if a check misses, say so and it gets
