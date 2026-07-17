@@ -195,6 +195,13 @@ pub struct NotebookEditor {
     /// (not spinning) while the kernel picker is open: promoted to
     /// `pending_executions` if a kernel is chosen, or cleared if it's dismissed.
     cells_awaiting_kernel_choice: Vec<CellId>,
+    /// Display name of an environment currently being created (venv/conda) that
+    /// will become this notebook's kernel once built (phase 48). While `Some`,
+    /// the top strip shows this as the selected kernel and runs are held in
+    /// `cells_awaiting_kernel_choice` instead of running on the previously
+    /// selected kernel. Cleared on build success (the real kernel is selected),
+    /// failure, or an explicit kernel pick.
+    creating_kernel_name: Option<String>,
     /// Remaining cells of a multi-cell run (Run All / Run Above / Run Below),
     /// submitted ONE at a time so a failure can stop the rest.
     run_queue: Vec<CellId>,
@@ -401,6 +408,7 @@ impl NotebookEditor {
             execution_requests: HashMap::default(),
             pending_executions: Vec::new(),
             cells_awaiting_kernel_choice: Vec::new(),
+            creating_kernel_name: None,
             run_queue: Vec::new(),
             active_run_cell: None,
             undo_stack: Vec::new(),
@@ -899,6 +907,10 @@ impl NotebookEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Make the env being built the notebook's pending selection so runs
+        // queue for it instead of the previously selected kernel (phase 48).
+        self.begin_creating_kernel(name.clone(), cx);
+
         struct CreateCondaEnv;
         let notification_id = NotificationId::unique::<CreateCondaEnv>();
         let workspace = Workspace::for_window(window, cx);
@@ -1042,6 +1054,10 @@ impl NotebookEditor {
             .worktree_for_id(self.worktree_id, cx)
             .map(|worktree| worktree.read(cx).abs_path().to_path_buf())
             .is_none_or(|root| !venv_dir.starts_with(&root));
+
+        // Make the env being built the notebook's pending selection so runs
+        // queue for it instead of the previously selected kernel (phase 48).
+        self.begin_creating_kernel(env_name.clone(), cx);
 
         struct CreatePythonEnv;
         let notification_id = NotificationId::unique::<CreatePythonEnv>();
@@ -1190,16 +1206,27 @@ impl NotebookEditor {
                             .ok();
                     }
                     this.update_in(cx, |this, window, cx| {
-                        let spec = KernelSpecification::PythonEnv(
-                            PythonEnvKernelSpecification::from_python_path(
-                                python_path,
-                                env_name.clone(),
-                                true,
-                                environment_kind.clone(),
-                            ),
-                        );
-                        this.change_kernel(spec, window, cx);
+                        // Only auto-select the built env if it's still the
+                        // pending "creating" selection — the user may have
+                        // picked a different kernel while it built (phase 48).
+                        let still_ours =
+                            this.creating_kernel_name.as_deref() == Some(env_name.as_str());
+                        this.creating_kernel_name = None;
                         this.refresh_kernelspecs(cx);
+                        if still_ours {
+                            let spec = KernelSpecification::PythonEnv(
+                                PythonEnvKernelSpecification::from_python_path(
+                                    python_path,
+                                    env_name.clone(),
+                                    true,
+                                    environment_kind.clone(),
+                                ),
+                            );
+                            // Promotes the cells held during the build onto the
+                            // new kernel (change_kernel → promote_awaiting_cells).
+                            this.change_kernel(spec, window, cx);
+                        }
+                        cx.notify();
                     })
                     .ok();
                 }
@@ -1218,10 +1245,30 @@ impl NotebookEditor {
                             })
                             .ok();
                     }
+                    // Drop the "creating" selection and release the cells held
+                    // for it back to Idle (unless the user already moved on to
+                    // another kernel, which cleared the flag).
+                    this.update_in(cx, |this, _window, cx| {
+                        if this.creating_kernel_name.as_deref() == Some(env_name.as_str()) {
+                            this.creating_kernel_name = None;
+                            this.clear_awaiting_cells(cx);
+                            cx.notify();
+                        }
+                    })
+                    .ok();
                 }
             }
         })
         .detach();
+    }
+
+    /// Enter the "creating a kernel" state (phase 48): the named env becomes
+    /// this notebook's pending selection, so the top strip shows it and
+    /// `execute_cell` holds runs until the build finishes (rather than running
+    /// on the previously selected kernel).
+    fn begin_creating_kernel(&mut self, name: String, cx: &mut Context<Self>) {
+        self.creating_kernel_name = Some(name);
+        cx.notify();
     }
 
     fn show_env_toast(
@@ -1642,6 +1689,11 @@ impl NotebookEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Selecting a real kernel supersedes any in-progress "creating" pending
+        // selection (phase 48): stop showing the creating env, and let the
+        // build's completion see it was superseded so it won't re-select.
+        self.creating_kernel_name = None;
+
         if let Kernel::RunningKernel(kernel) = &mut self.kernel {
             kernel.force_shutdown(window, cx).detach();
         }
@@ -1783,6 +1835,25 @@ impl NotebookEditor {
     }
 
     fn execute_cell(&mut self, cell_id: CellId, window: &mut Window, cx: &mut Context<Self>) {
+        // A kernel environment is being created (phase 48): hold the cell like
+        // the awaiting-kernel-choice path (Pending, no spinner) — but WITHOUT
+        // opening the picker — so it runs on the new kernel once built and
+        // never starts/uses the previously selected kernel. `change_kernel`
+        // (on build success) promotes these; `clear_awaiting_cells` (on build
+        // failure) returns them to Idle.
+        if self.creating_kernel_name.is_some() {
+            if !self.cells_awaiting_kernel_choice.contains(&cell_id) {
+                self.cells_awaiting_kernel_choice.push(cell_id.clone());
+            }
+            if let Some(Cell::Code(cell)) = self.cell_map.get(&cell_id) {
+                cell.update(cx, |cell, cx| {
+                    cell.mark_pending();
+                    cx.notify();
+                });
+            }
+            return;
+        }
+
         let code = if let Some(Cell::Code(cell)) = self.cell_map.get(&cell_id) {
             let editor = cell.read(cx).editor().clone();
             let buffer = editor.read(cx).buffer().read(cx);
@@ -4056,11 +4127,22 @@ impl NotebookEditor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let kernel_status = self.kernel.status();
+        // While an env is being created (phase 48) it is the pending selection:
+        // show its name with a Starting status, ahead of the old kernel's.
+        let creating = self.creating_kernel_name.is_some();
+        let kernel_status = if creating {
+            KernelStatus::Starting
+        } else {
+            self.kernel.status()
+        };
         let kernel_name = self
-            .kernel_specification
-            .as_ref()
-            .map(|spec| spec.name().to_string())
+            .creating_kernel_name
+            .clone()
+            .or_else(|| {
+                self.kernel_specification
+                    .as_ref()
+                    .map(|spec| spec.name().to_string())
+            })
             .unwrap_or_else(|| "Select Kernel".to_string());
 
         let (status_icon, status_color) = match &kernel_status {

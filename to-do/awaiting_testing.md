@@ -24,6 +24,25 @@ listed here.
       end up open in two tabs again. (Cause found by inspection: stale
       entry id after save defeated the already-open dedup.)
 
+## Phase 48 — Select a newly-created kernel immediately
+
+Kind: change to existing behaviour — if the new behaviour didn't take effect,
+say so and it gets fixed in place (not archived-and-refiled).
+
+- [ ] With kernel A already selected and running, Create Env (venv or conda):
+      the NEW env shows as the notebook's selected kernel immediately (top
+      strip, "Starting"), NOT kernel A. Run a cell during the build → it goes
+      Pending and kernel A does NOT start/run it; once the env is ready the
+      new kernel launches and the held cell(s) run on it. (This is the
+      behaviour that was missing — previously it fell back to A.)
+- [ ] Build FAILURE (e.g. a conda name that can't solve) → the selection
+      reverts (no longer shows the half-made env) and any cell held during the
+      build returns to Idle (not stuck Pending); the failure toast still shows.
+- [ ] Not regressed: creating from the "Select Kernel" (no-kernel) state still
+      works as before; and picking a DIFFERENT kernel from the picker WHILE an
+      env is building switches to that kernel (the building env no longer
+      auto-steals the selection when it finishes).
+
 ## Phase 39 — Conda environment creation from the kernel picker
 
 Kind: new feature — once confirmed present and basically working, refinements

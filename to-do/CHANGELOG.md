@@ -130,6 +130,14 @@ entry rather than archiving it.
   upstream merge clean; hotspots ranked). Full findings: `8f9a5d3dc5`.
   Produced plan phases 44 (local installer build), 45 (Gitea-fed
   auto-update), 46 (upstream-merge playbook), 47 (Drone pipeline).
+- Phase 48 — Select a newly-created kernel immediately: creating a venv/conda
+  env while another kernel is selected now makes the new env the notebook's
+  pending selection right away (top strip shows it, Starting) and HOLDS runs
+  (via the awaiting-kernel path) instead of running them on the old kernel;
+  on build success the new kernel launches and the held cells run on it, on
+  failure the selection reverts and the cells return to Idle. An explicit
+  kernel pick during the build supersedes it. Picker greyed-entry split to
+  phase 49.
 
 ## Fixed bugs (confirmed)
 
