@@ -99,6 +99,14 @@ entry rather than archiving it.
   event as fallback; `interrupt_mode: "message"` kernelspecs get a
   control-channel interrupt_request instead. The planned CTRL_BREAK approach
   was researched and rejected (kills handler-less kernels). `9acd68c254`
+- Phase 39 — Conda environment creation from the kernel picker: when a conda
+  frontend (conda/mamba/micromamba) is on PATH, the "Create Python
+  Environment" prompt offers "Create Conda Env…", which prompts for a name
+  (new `EnvNameModal`), runs `<frontend> create -y -n <name> python
+  ipykernel`, resolves the interpreter via the frontend itself (not a guessed
+  path), registers a kernelspec, and selects it. The venv fast path is
+  unchanged; the shared finalize/kernelspec-registration tail is factored
+  into `finalize_env_creation` + `sanitize_kernel_name`.
 - Phase 38 — Cell structure operations: split cell at the cursor
   (`ctrl-shift--` in edit mode; top half keeps id/metadata, bottom gets a
   fresh identity, execution records cleared, one undo group), join cells

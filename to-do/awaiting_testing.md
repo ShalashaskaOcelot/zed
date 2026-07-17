@@ -29,6 +29,26 @@ listed here.
       end up open in two tabs again. (Cause found by inspection: stale
       entry id after save defeated the already-open dedup.)
 
+## Phase 39 — Conda environment creation from the kernel picker
+
+Kind: new feature — once confirmed present and basically working, refinements
+and defects become new backlog/bug items.
+
+- [ ] On a machine WITH conda (or mamba/micromamba) on PATH: the kernel
+      picker's "Create Python Environment" prompt now shows a "Create Conda
+      Env…" button. Choosing it opens a name modal; entering a name creates
+      the env (`conda create -y -n <name> python ipykernel`), shows a
+      progress toast, then selects it and runs the queued cell. The kernel
+      persists across a restart (registered kernelspec).
+- [ ] The venv fast path is unchanged: Enter still creates the workspace
+      `.venv`; "Choose Location…" still works.
+- [ ] On a machine WITHOUT conda on PATH: no "Create Conda Env…" button
+      appears (only the venv options).
+- [ ] Error surfacing: give the name of an env that can't solve, or a bad
+      name — the failure toast shows conda's error rather than failing
+      silently. (Also: no project folder open + conda present → the conda
+      option still appears and works.)
+
 ## Phase 38 — Cell structure operations
 
 Kind: new feature — once confirmed present and basically working, refinements

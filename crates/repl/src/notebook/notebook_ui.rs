@@ -7,6 +7,7 @@ use anyhow::{Context as _, Result};
 use collections::HashMap;
 use feature_flags::{FeatureFlagAppExt as _, NotebookFeatureFlag};
 use futures::FutureExt;
+use futures::channel::oneshot;
 use futures::future::Shared;
 use gpui::{
     AnyElement, App, ClipboardItem, Entity, EventEmitter, FocusHandle, Focusable, KeyContext,
@@ -38,6 +39,7 @@ use crate::kernels::{
     WslRunningKernel,
 };
 use crate::notebook::MovementDirection;
+use crate::notebook::env_name_modal::EnvNameModal;
 use crate::repl_settings::ReplSettings;
 use crate::repl_store::ReplStore;
 
@@ -59,6 +61,40 @@ use zed_actions::notebook::{
     RunCellAndBelow, RunCellsAbove, SelectAllCells, SelectFirstCell, SelectLastCell, SplitCell,
     UndoCellOp,
 };
+
+/// Probe PATH for a conda-compatible frontend, preferring the most standard.
+/// Returns the executable name to drive env creation with, or `None` when
+/// none is installed. Running `--version` mirrors how the venv flow probes
+/// `python`/`python3` (rather than depending on a `which`-style lookup).
+async fn detect_conda_frontend() -> Option<&'static str> {
+    for frontend in ["conda", "mamba", "micromamba"] {
+        if let Ok(output) = util::command::new_command(frontend)
+            .arg("--version")
+            .output()
+            .await
+            && output.status.success()
+        {
+            return Some(frontend);
+        }
+    }
+    None
+}
+
+/// Turn a display name into a Jupyter kernelspec name: lowercased, with any
+/// character outside `[a-z0-9._-]` replaced by `-` (kernelspec names become
+/// directory names, so they must be filesystem-safe).
+fn sanitize_kernel_name(name: &str) -> String {
+    name.to_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
 
 /// A structural cell operation, stored so it can be undone/redone. Restored
 /// cells are rebuilt from the serialized nbformat form (not resurrected
@@ -676,47 +712,96 @@ impl NotebookEditor {
         }
     }
 
-    /// Create a `.venv` in the worktree root, install ipykernel into it, and
-    /// select it — the "Create Python Environment" flow from the kernel picker.
+    /// The "Create Python Environment" flow from the kernel picker. Offers a
+    /// workspace `.venv`, a venv at a chosen location, and — when a conda
+    /// frontend is on PATH — a named conda environment. Conda detection is
+    /// async, so the whole flow (detect → prompt → act) runs in one task.
     fn create_python_environment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.kernel_picker_handle.hide(cx);
 
-        let Some(worktree_root) = self
+        let worktree_root = self
             .project
             .read(cx)
             .worktree_for_id(self.worktree_id, cx)
-            .map(|worktree| worktree.read(cx).abs_path().to_path_buf())
-        else {
-            Self::show_env_toast(
-                window,
-                cx,
-                "Cannot create a Python environment: no project folder is open.".to_string(),
-                false,
-            );
-            return;
-        };
+            .map(|worktree| worktree.read(cx).abs_path().to_path_buf());
 
-        // The fast path stays one keypress — Enter creates the workspace
-        // `.venv` as before. "Choose Location…" opens a directory picker for
-        // user-central environments (phase 34): the SELECTED folder becomes
-        // the environment directory (create a fresh folder in the dialog for
-        // a new named env, e.g. ~/venvs/myproject).
-        let answer = window.prompt(
-            PromptLevel::Info,
-            "Create a Python environment?",
-            Some(
-                "\"Create .venv\" creates it in the project root. \
-                 \"Choose Location…\" makes the selected folder the environment.",
-            ),
-            &["Create .venv", "Choose Location…", "Cancel"],
-            cx,
-        );
         cx.spawn_in(window, async move |this, cx| {
-            match answer.await {
-                Ok(0) => {
+            let conda = detect_conda_frontend().await;
+
+            if worktree_root.is_none() && conda.is_none() {
+                this.update_in(cx, |_this, window, cx| {
+                    Self::show_env_toast(
+                        window,
+                        cx,
+                        "Cannot create a Python environment: no project folder is open, and \
+                         no conda/mamba/micromamba was found on PATH."
+                            .to_string(),
+                        false,
+                    );
+                })
+                .ok();
+                return anyhow::Ok(());
+            }
+
+            // The fast path stays one keypress — the first button (Enter)
+            // creates the workspace `.venv`. Options only appear when they can
+            // work: the venv options need a project folder; the conda option
+            // needs a conda frontend.
+            #[derive(Clone, Copy)]
+            enum EnvChoice {
+                Venv,
+                ChooseLocation,
+                Conda,
+            }
+            let mut labels: Vec<&str> = Vec::new();
+            let mut choices: Vec<EnvChoice> = Vec::new();
+            if worktree_root.is_some() {
+                labels.push("Create .venv");
+                choices.push(EnvChoice::Venv);
+                labels.push("Choose Location…");
+                choices.push(EnvChoice::ChooseLocation);
+            }
+            if conda.is_some() {
+                labels.push("Create Conda Env…");
+                choices.push(EnvChoice::Conda);
+            }
+            labels.push("Cancel");
+
+            let detail = match (worktree_root.is_some(), conda.is_some()) {
+                (true, true) => {
+                    "\"Create .venv\" creates it in the project root. \
+                     \"Choose Location…\" makes the selected folder the environment. \
+                     \"Create Conda Env…\" creates a named conda environment."
+                }
+                (true, false) => {
+                    "\"Create .venv\" creates it in the project root. \
+                     \"Choose Location…\" makes the selected folder the environment."
+                }
+                _ => "\"Create Conda Env…\" creates a named conda environment.",
+            };
+
+            let answer = this.update_in(cx, |_this, window, cx| {
+                window.prompt(
+                    PromptLevel::Info,
+                    "Create a Python environment?",
+                    Some(detail),
+                    &labels,
+                    cx,
+                )
+            })?;
+            let index = answer.await?;
+            let Some(choice) = choices.get(index).copied() else {
+                return anyhow::Ok(());
+            };
+
+            match choice {
+                EnvChoice::Venv => {
+                    let Some(root) = worktree_root.clone() else {
+                        return anyhow::Ok(());
+                    };
                     this.update_in(cx, |this, window, cx| {
                         this.create_python_environment_at(
-                            worktree_root.join(".venv"),
+                            root.join(".venv"),
                             ".venv".to_string(),
                             window,
                             cx,
@@ -724,7 +809,7 @@ impl NotebookEditor {
                     })
                     .ok();
                 }
-                Ok(1) => {
+                EnvChoice::ChooseLocation => {
                     let paths = cx.update(|_, cx| {
                         cx.prompt_for_paths(gpui::PathPromptOptions {
                             files: false,
@@ -746,11 +831,188 @@ impl NotebookEditor {
                         .ok();
                     }
                 }
-                _ => {}
+                EnvChoice::Conda => {
+                    let Some(frontend) = conda else {
+                        return anyhow::Ok(());
+                    };
+                    this.update_in(cx, |this, window, cx| {
+                        this.create_conda_environment(frontend, window, cx);
+                    })
+                    .ok();
+                }
             }
             anyhow::Ok(())
         })
         .detach_and_log_err(cx);
+    }
+
+    /// Prompt for a conda environment name (modal), then create it.
+    fn create_conda_environment(
+        &mut self,
+        frontend: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace) = Workspace::for_window(window, cx) else {
+            Self::show_env_toast(
+                window,
+                cx,
+                "Cannot create a conda environment: no workspace is open.".to_string(),
+                false,
+            );
+            return;
+        };
+
+        let (tx, rx) = oneshot::channel::<String>();
+        workspace.update(cx, |workspace, cx| {
+            workspace.toggle_modal(window, cx, |window, cx| {
+                EnvNameModal::new(
+                    "New Conda Environment",
+                    "Creates a conda environment with Python and ipykernel, then selects it.",
+                    "environment name",
+                    tx,
+                    window,
+                    cx,
+                )
+            });
+        });
+
+        cx.spawn_in(window, async move |this, cx| {
+            if let Ok(name) = rx.await {
+                this.update_in(cx, |this, window, cx| {
+                    this.create_conda_environment_named(frontend, name, window, cx);
+                })
+                .ok();
+            }
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
+    }
+
+    /// Create a named conda environment (`<frontend> create -y -n <name>
+    /// python ipykernel`), resolve its interpreter via the frontend itself,
+    /// register a kernelspec, and select it.
+    fn create_conda_environment_named(
+        &mut self,
+        frontend: &'static str,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        struct CreateCondaEnv;
+        let notification_id = NotificationId::unique::<CreateCondaEnv>();
+        let workspace = Workspace::for_window(window, cx);
+        if let Some(workspace) = &workspace {
+            workspace.update(cx, |workspace, cx| {
+                workspace.show_toast(
+                    workspace::Toast::new(
+                        notification_id.clone(),
+                        format!(
+                            "Creating conda environment {name} \
+                             (installing Python + ipykernel; this can take a while)…"
+                        ),
+                    ),
+                    cx,
+                );
+            });
+        }
+        let weak_workspace = workspace.map(|workspace| workspace.downgrade());
+
+        let create_task = cx.background_spawn({
+            let name = name.clone();
+            async move {
+                // `conda create` is a solver + download; failures (solver
+                // conflicts, no channel) come back on stderr.
+                let mut command = util::command::new_command(frontend);
+                command.args(["create", "-y", "-n", &name, "python", "ipykernel"]);
+                // micromamba ships with no default channels, so it needs one
+                // to resolve `python`; conda/mamba use the user's configured
+                // channels.
+                if frontend == "micromamba" {
+                    command.args(["-c", "conda-forge"]);
+                }
+                let output = command
+                    .output()
+                    .await
+                    .with_context(|| format!("failed to run {frontend} create"))?;
+                anyhow::ensure!(
+                    output.status.success(),
+                    "{frontend} create failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                        .lines()
+                        .last()
+                        .unwrap_or("unknown error")
+                );
+
+                // Resolve the interpreter through the frontend rather than
+                // guessing the per-platform layout (`envs/<name>/bin/python`
+                // vs `envs\<name>\python.exe`).
+                let python_output = util::command::new_command(frontend)
+                    .args([
+                        "run",
+                        "-n",
+                        &name,
+                        "python",
+                        "-c",
+                        "import sys; print(sys.executable)",
+                    ])
+                    .output()
+                    .await
+                    .with_context(|| format!("failed to resolve the {name} interpreter"))?;
+                anyhow::ensure!(
+                    python_output.status.success(),
+                    "could not resolve the {name} interpreter: {}",
+                    String::from_utf8_lossy(&python_output.stderr)
+                        .lines()
+                        .last()
+                        .unwrap_or("unknown error")
+                );
+                let python_path = PathBuf::from(
+                    String::from_utf8_lossy(&python_output.stdout)
+                        .trim()
+                        .to_string(),
+                );
+                anyhow::ensure!(
+                    !python_path.as_os_str().is_empty(),
+                    "conda returned an empty interpreter path for {name}"
+                );
+
+                // Conda envs live outside the worktree, so register a
+                // kernelspec for discovery next session (as the venv flow does
+                // for out-of-worktree envs). Non-fatal on failure.
+                let kernel_name = sanitize_kernel_name(&name);
+                let result = util::command::new_command(python_path.to_string_lossy().as_ref())
+                    .args(["-m", "ipykernel", "install", "--user", "--name"])
+                    .arg(&kernel_name)
+                    .arg("--display-name")
+                    .arg(format!("Python ({name})"))
+                    .output()
+                    .await;
+                let registration_warning = match result {
+                    Ok(output) if output.status.success() => None,
+                    Ok(output) => Some(
+                        String::from_utf8_lossy(&output.stderr)
+                            .lines()
+                            .last()
+                            .unwrap_or("unknown error")
+                            .to_string(),
+                    ),
+                    Err(error) => Some(error.to_string()),
+                };
+
+                anyhow::Ok((python_path, registration_warning))
+            }
+        });
+
+        self.finalize_env_creation(
+            create_task,
+            name,
+            Some("Conda".to_string()),
+            notification_id,
+            weak_workspace,
+            window,
+            cx,
+        );
     }
 
     /// Create (or reuse) a Python venv at `venv_dir`, install ipykernel into
@@ -851,19 +1113,7 @@ impl NotebookEditor {
             // start.
             let mut registration_warning = None;
             if register_kernelspec {
-                let kernel_name: String = env_name
-                    .to_lowercase()
-                    .chars()
-                    .map(|character| {
-                        if character.is_ascii_alphanumeric()
-                            || matches!(character, '.' | '_' | '-')
-                        {
-                            character
-                        } else {
-                            '-'
-                        }
-                    })
-                    .collect();
+                let kernel_name = sanitize_kernel_name(&env_name);
                 let result = util::command::new_command(venv_python.to_string_lossy().as_ref())
                     .args(["-m", "ipykernel", "install", "--user", "--name"])
                     .arg(&kernel_name)
@@ -887,10 +1137,35 @@ impl NotebookEditor {
             anyhow::Ok((venv_python, registration_warning))
         }});
 
+        self.finalize_env_creation(
+            create_task,
+            env_name,
+            Some("venv".to_string()),
+            notification_id,
+            weak_workspace,
+            window,
+            cx,
+        );
+    }
+
+    /// Shared tail of the env-creation flows (venv and conda): await the
+    /// background create task, surface success/failure toasts, then build the
+    /// kernel spec from the resolved interpreter, select it, and refresh the
+    /// kernelspec list. `create_task` yields `(interpreter_path,
+    /// registration_warning)`.
+    fn finalize_env_creation(
+        &mut self,
+        create_task: Task<Result<(PathBuf, Option<String>)>>,
+        env_name: String,
+        environment_kind: Option<String>,
+        notification_id: NotificationId,
+        weak_workspace: Option<WeakEntity<Workspace>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         cx.spawn_in(window, async move |this, cx| {
-            let result = create_task.await;
-            match result {
-                Ok((venv_python, registration_warning)) => {
+            match create_task.await {
+                Ok((python_path, registration_warning)) => {
                     if let Some(weak_workspace) = &weak_workspace {
                         weak_workspace
                             .update(cx, |workspace, cx| {
@@ -917,10 +1192,10 @@ impl NotebookEditor {
                     this.update_in(cx, |this, window, cx| {
                         let spec = KernelSpecification::PythonEnv(
                             PythonEnvKernelSpecification::from_python_path(
-                                venv_python,
+                                python_path,
                                 env_name.clone(),
                                 true,
-                                Some("venv".to_string()),
+                                environment_kind.clone(),
                             ),
                         );
                         this.change_kernel(spec, window, cx);
@@ -936,7 +1211,7 @@ impl NotebookEditor {
                                 workspace.show_toast(
                                     workspace::Toast::new(
                                         notification_id.clone(),
-                                        format!("Failed to create Python environment: {error}"),
+                                        format!("Failed to create {env_name}: {error}"),
                                     ),
                                     cx,
                                 );
