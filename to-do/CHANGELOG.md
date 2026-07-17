@@ -99,6 +99,12 @@ entry rather than archiving it.
   event as fallback; `interrupt_mode: "message"` kernelspecs get a
   control-channel interrupt_request instead. The planned CTRL_BREAK approach
   was researched and rejected (kills handler-less kernels). `9acd68c254`
+- Phase 38 — Cell structure operations: split cell at the cursor
+  (`ctrl-shift--` in edit mode; top half keeps id/metadata, bottom gets a
+  fresh identity, execution records cleared, one undo group), join cells
+  (`shift-m`: selected+below or a contiguous multi-selection, same-type
+  only, sources joined with a blank line, outputs cleared, one undo group),
+  and sidebar "Run cells above" / "Run cell and below" buttons.
 - Phase 37 — In-place selectable output text: stream/plain/error outputs
   (the terminal-rendered ones) support mouse selection directly in the
   notebook — drag/double-click on the output canvas drives the terminal's

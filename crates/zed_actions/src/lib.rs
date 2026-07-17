@@ -992,6 +992,10 @@ pub mod notebook {
             EnterEditMode,
             /// Exits the cell editor and returns to cell command mode.
             EnterCommandMode,
+            /// Splits the current cell at the cursor into two cells.
+            SplitCell,
+            /// Joins the selected cells (or the current cell with the one below) into one cell.
+            JoinCells,
         ]
     );
 }

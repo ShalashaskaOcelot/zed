@@ -29,6 +29,22 @@ listed here.
       end up open in two tabs again. (Cause found by inspection: stale
       entry id after save defeated the already-open dedup.)
 
+## Phase 38 — Cell structure operations
+
+Kind: new feature — once confirmed present and basically working, refinements
+and defects become new backlog/bug items.
+
+- [ ] Split (edit mode, `ctrl-shift--` or "Split Cell" in the More menu): the
+      cell splits at the cursor into two same-type cells — top keeps the
+      cell's collapse state, both halves' execution records clear, editing
+      continues in the bottom half. One `ctrl-z` (command mode) re-joins.
+- [ ] Join (`shift-m` in command mode): with no multi-selection, merges the
+      selected cell with the one below; with a contiguous multi-selection,
+      merges the whole block — sources joined by a blank line, outputs
+      cleared, one undo step. Mixed cell types → toast, no change.
+- [ ] The right sidebar has two new buttons under Run All (diagonal up/down
+      arrows): "Run cells above" / "Run cell and below" — both work.
+
 ## Phase 37 — In-place selectable output text
 
 Kind: new feature — once confirmed present and basically working, refinements

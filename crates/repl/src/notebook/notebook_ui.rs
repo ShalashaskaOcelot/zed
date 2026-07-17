@@ -54,9 +54,10 @@ use zed_actions::notebook::{
     ConvertToCode, ConvertToMarkdown, CopyCell, CutCell, DeleteCell, DuplicateCell,
     EnterCommandMode, EnterEditMode, ExtendSelectionDown, ExtendSelectionToEnd,
     ExtendSelectionToStart, ExtendSelectionUp, InterruptKernel, MoveCellDown, MoveCellUp,
-    NewNotebook, NotebookMoveDown, NotebookMoveUp, OpenNotebook, PasteCell, PasteCellAbove,
-    RedoCellOp, ReloadNotebook, RestartKernel, Run, RunAll, RunAndAdvance, RunCellAndBelow,
-    RunCellsAbove, SelectAllCells, SelectFirstCell, SelectLastCell, UndoCellOp,
+    JoinCells, NewNotebook, NotebookMoveDown, NotebookMoveUp, OpenNotebook, PasteCell,
+    PasteCellAbove, RedoCellOp, ReloadNotebook, RestartKernel, Run, RunAll, RunAndAdvance,
+    RunCellAndBelow, RunCellsAbove, SelectAllCells, SelectFirstCell, SelectLastCell, SplitCell,
+    UndoCellOp,
 };
 
 /// A structural cell operation, stored so it can be undone/redone. Restored
@@ -2583,6 +2584,193 @@ impl NotebookEditor {
         self.delete_cell(&DeleteCell, window, cx);
     }
 
+    /// A copy of `cell` with `source` replaced and any execution record
+    /// (count + outputs) cleared; id and metadata are preserved.
+    fn nbformat_cell_with_source(cell: &nbformat::v4::Cell, text: &str) -> nbformat::v4::Cell {
+        let source: Vec<String> = text.lines().map(|line| format!("{line}\n")).collect();
+        match cell {
+            nbformat::v4::Cell::Code { id, metadata, .. } => nbformat::v4::Cell::Code {
+                id: id.clone(),
+                metadata: metadata.clone(),
+                execution_count: None,
+                source,
+                outputs: Vec::new(),
+            },
+            nbformat::v4::Cell::Markdown {
+                id,
+                metadata,
+                attachments,
+                ..
+            } => nbformat::v4::Cell::Markdown {
+                id: id.clone(),
+                metadata: metadata.clone(),
+                source,
+                attachments: attachments.clone(),
+            },
+            nbformat::v4::Cell::Raw { id, metadata, .. } => nbformat::v4::Cell::Raw {
+                id: id.clone(),
+                metadata: metadata.clone(),
+                source,
+            },
+        }
+    }
+
+    /// Split the selected cell at the cursor into two cells of the same type
+    /// (Jupyter's ctrl-shift-minus), as one undo group. The top half keeps the
+    /// cell's id and metadata (collapse state); the bottom half gets a fresh
+    /// identity; the execution record is cleared on both.
+    fn split_cell(&mut self, _: &SplitCell, window: &mut Window, cx: &mut Context<Self>) {
+        if self.notebook_mode != NotebookMode::Edit {
+            return;
+        }
+        let index = self.selected_cell_index;
+        let Some(cell_id) = self.cell_order.get(index) else {
+            return;
+        };
+        let Some(cell) = self.cell_map.get(cell_id) else {
+            return;
+        };
+        let Some(editor) = cell.editor(cx).cloned() else {
+            return;
+        };
+        let original = cell.to_nbformat_cell(cx);
+
+        let (text, offset) = editor.update(cx, |editor, cx| {
+            let snapshot = editor.display_snapshot(cx);
+            let offset = editor
+                .selections
+                .newest::<multi_buffer::MultiBufferOffset>(&snapshot)
+                .head()
+                .0;
+            (editor.text(cx), offset)
+        });
+        // Splitting at a line boundary should not leave a stray blank line on
+        // either half, so one newline at the split point is absorbed.
+        let top_text = text[..offset].strip_suffix('\n').unwrap_or(&text[..offset]);
+        let bottom_text = text[offset..].strip_prefix('\n').unwrap_or(&text[offset..]);
+
+        let top = Self::nbformat_cell_with_source(&original, top_text);
+        let mut bottom = Self::nbformat_cell_with_source(&original, bottom_text);
+        match &mut bottom {
+            nbformat::v4::Cell::Code { id, metadata, .. }
+            | nbformat::v4::Cell::Raw { id, metadata, .. } => {
+                *id = Uuid::new_v4().into();
+                *metadata = Self::empty_cell_metadata();
+            }
+            nbformat::v4::Cell::Markdown {
+                id,
+                metadata,
+                attachments,
+                ..
+            } => {
+                *id = Uuid::new_v4().into();
+                *metadata = Self::empty_cell_metadata();
+                *attachments = None;
+            }
+        }
+
+        self.raw_replace_cell(index, top.clone(), window, cx);
+        self.raw_insert_cell(index + 1, bottom.clone(), window, cx);
+        self.record_edit(CellEdit::Group(vec![
+            CellEdit::Converted {
+                index,
+                before: original,
+                after: top,
+            },
+            CellEdit::Inserted {
+                index: index + 1,
+                cell: bottom,
+            },
+        ]));
+
+        // Continue editing in the bottom half, cursor at its start (Jupyter
+        // behavior). `raw_insert_cell` already selected it.
+        self.enter_edit_mode(&EnterEditMode, window, cx);
+        self.cell_list.scroll_to_reveal_item(self.selected_cell_index);
+        cx.notify();
+    }
+
+    /// Join the contiguous multi-selection (or the selected cell with the one
+    /// below) into one cell: sources concatenated, outputs cleared, one undo
+    /// group. Restricted to cells of the same type.
+    fn join_cells(&mut self, _: &JoinCells, window: &mut Window, cx: &mut Context<Self>) {
+        let selection = self.effective_selection();
+        let indices: Vec<usize> = if selection.len() > 1 {
+            if !selection.windows(2).all(|pair| pair[1] == pair[0] + 1) {
+                Self::show_env_toast(
+                    window,
+                    cx,
+                    "Join Cells needs a contiguous selection".to_string(),
+                    true,
+                );
+                return;
+            }
+            selection
+        } else {
+            let index = self.selected_cell_index;
+            if index + 1 >= self.cell_order.len() {
+                return;
+            }
+            vec![index, index + 1]
+        };
+
+        let snapshots: Vec<nbformat::v4::Cell> = indices
+            .iter()
+            .filter_map(|index| self.cell_order.get(*index))
+            .filter_map(|cell_id| self.cell_map.get(cell_id))
+            .map(|cell| cell.to_nbformat_cell(cx))
+            .collect();
+        if snapshots.len() != indices.len() {
+            return;
+        }
+        let first_discriminant = std::mem::discriminant(&snapshots[0]);
+        if snapshots
+            .iter()
+            .any(|cell| std::mem::discriminant(cell) != first_discriminant)
+        {
+            Self::show_env_toast(
+                window,
+                cx,
+                "Only cells of the same type can be joined".to_string(),
+                true,
+            );
+            return;
+        }
+
+        let merged_text = snapshots
+            .iter()
+            .map(|cell| cell.source().concat().trim_end_matches('\n').to_string())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let merged = Self::nbformat_cell_with_source(&snapshots[0], &merged_text);
+
+        let first_index = indices[0];
+        self.raw_replace_cell(first_index, merged.clone(), window, cx);
+        let mut edits = vec![CellEdit::Converted {
+            index: first_index,
+            before: snapshots[0].clone(),
+            after: merged,
+        }];
+        // Each removal happens at the same index because the remaining cells
+        // shift up; the recorded order replays correctly forward (redo) and
+        // reversed (undo).
+        for snapshot in &snapshots[1..] {
+            self.raw_remove_cell(first_index + 1, cx);
+            edits.push(CellEdit::Deleted {
+                index: first_index + 1,
+                cell: snapshot.clone(),
+            });
+        }
+        self.record_edit(CellEdit::Group(edits));
+
+        self.selected_cell_index = first_index;
+        self.collapse_selection();
+        self.notebook_mode = NotebookMode::Command;
+        self.focus_handle.focus(window, cx);
+        self.cell_list.scroll_to_reveal_item(first_index);
+        cx.notify();
+    }
+
     /// Parse nbformat cell(s) from clipboard text, if present: either a single
     /// cell object or an array of cells (multi-selection copy).
     fn clipboard_cells(cx: &mut Context<Self>) -> Vec<nbformat::v4::Cell> {
@@ -3366,6 +3554,34 @@ impl NotebookEditor {
                             )
                             .child(
                                 Self::render_notebook_control(
+                                    "run-cells-above",
+                                    IconName::ArrowUpRight,
+                                    window,
+                                    cx,
+                                )
+                                .tooltip(move |_window, cx| {
+                                    Tooltip::for_action("Run cells above", &RunCellsAbove, cx)
+                                })
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(Box::new(RunCellsAbove), cx);
+                                }),
+                            )
+                            .child(
+                                Self::render_notebook_control(
+                                    "run-cell-and-below",
+                                    IconName::ArrowDownRight,
+                                    window,
+                                    cx,
+                                )
+                                .tooltip(move |_window, cx| {
+                                    Tooltip::for_action("Run cell and below", &RunCellAndBelow, cx)
+                                })
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(Box::new(RunCellAndBelow), cx);
+                                }),
+                            )
+                            .child(
+                                Self::render_notebook_control(
                                     "clear-all-outputs",
                                     IconName::ListX,
                                     window,
@@ -3470,6 +3686,8 @@ impl NotebookEditor {
                                         .separator()
                                         .action("Convert to Code", Box::new(ConvertToCode))
                                         .action("Convert to Markdown", Box::new(ConvertToMarkdown))
+                                        .action("Split Cell", Box::new(SplitCell))
+                                        .action("Join Cells", Box::new(JoinCells))
                                         .separator()
                                         .action("Copy Cell", Box::new(CopyCell))
                                         .action("Cut Cell", Box::new(CutCell))
@@ -3765,6 +3983,8 @@ impl Render for NotebookEditor {
                 cx.listener(|this, action, window, cx| this.add_cell_below(action, window, cx)),
             )
             .on_action(cx.listener(|this, action, window, cx| this.delete_cell(action, window, cx)))
+            .on_action(cx.listener(|this, action, window, cx| this.split_cell(action, window, cx)))
+            .on_action(cx.listener(|this, action, window, cx| this.join_cells(action, window, cx)))
             .on_action(cx.listener(|this, action, window, cx| this.copy_cell(action, window, cx)))
             .on_action(cx.listener(|this, action, window, cx| this.cut_cell(action, window, cx)))
             .on_action(cx.listener(|this, action, window, cx| this.paste_cell(action, window, cx)))
