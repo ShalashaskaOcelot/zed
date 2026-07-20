@@ -369,3 +369,33 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   bisected; confirm whether `terminal.font_size` is set in their config.
 - **Fix attempted:** none
 - **Tested:** n/a
+
+## 44. Rust (evcxr) kernel stuck Busy on a second "Run All" — all cells left Pending
+
+- **Status:** open (needs a rust kernel + runtime instrumentation to confirm)
+- **Symptom:** (user 2026-07-16, seen on TWO devices) Using the evcxr Rust
+  kernel (NOT python): run the whole notebook to completion, then — without
+  restarting the kernel — hit Run All again. The kernel goes/stays "Busy" and
+  every cell just sits Pending; nothing executes. Restarting the Rust kernel
+  fixes it, but that wipes all kernel state. Not reported with ipykernel.
+- **Analysis (hypothesis, code inspection):** the batch runner
+  (`advance_run_queue`, `notebook_ui.rs`) submits the next cell only once the
+  current cell's `ExecuteReply` arrives and `active_run_cell` is cleared (in
+  `route`); `advance_run_queue` early-returns while `active_run_cell.is_some()`.
+  If evcxr's status/reply messages differ from ipykernel's — e.g. the last
+  cell of the first batch never yields a clean `ExecuteReply` / `status: idle`
+  that Zed recognises — then after the first Run All completes, `active_run_cell`
+  (and/or the kernel's `execution_state`, which drives the "Busy" indicator)
+  is left stuck. The second Run All then queues everything but
+  `advance_run_queue` never advances (active cell still "set"), so all cells
+  stay Pending and the strip shows Busy. evcxr is known to diverge from the
+  ipykernel status/heartbeat conventions, which fits the rust-only report.
+- **Investigation needed:** with a rust kernel, log the shell `ExecuteReply`
+  and iopub `status` (busy/idle) `parent_header.msg_id`s across a full Run All,
+  and check `active_run_cell` / `execution_state` after it "completes". Confirm
+  whether evcxr sends idle/reply for the final cell and whether Zed clears
+  `active_run_cell`. Likely fix: make batch/kernel-idle detection robust to a
+  missing/late final reply (e.g. clear `active_run_cell` on `status: idle` as a
+  fallback, or reconcile the queue when the kernel returns to idle).
+- **Fix attempted:** none
+- **Tested:** n/a

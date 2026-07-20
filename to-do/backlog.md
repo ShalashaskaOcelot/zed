@@ -24,20 +24,50 @@ high → low within each group.
 
 ## Medium priority (cont.)
 
-- Newly-created kernel should be selected immediately, before it's ready
-  (user 2026-07-16). When you "Create Python/Conda Environment" while a
-  DIFFERENT kernel is already selected, there's a gap during creation where
-  the notebook falls back to the old kernel — running a cell then starts the
-  OLD kernel, and the new one auto-switches in only once it finishes building.
-  Desired: on choosing create, immediately show the new env as this
-  notebook's selected kernel (rendered greyed/disabled in the picker like a
-  no-ipykernel entry until ready), and queue any run as Pending until the new
-  kernel is built, then start it and run — i.e. the exact behaviour that
-  already happens when creating from the "Select Kernel" (no-kernel) state.
-  Implementation: seed a placeholder/selected spec + treat the create task
-  like a pending-launch, reusing the `cells_awaiting_kernel_choice` /
-  `promote_awaiting_cells` path. (Confirmed working from the no-kernel start
-  state; only the switch-from-another-kernel case regresses to the old one.)
+- In-notebook search (Ctrl-F) (user 2026-07-16): searching within a notebook
+  does nothing today. Root cause (research 2026-07-16): `NotebookEditor::as_searchable`
+  returns `None` (`crates/repl/src/notebook/notebook_ui.rs`); the rest of the
+  Ctrl-F pipeline is generic and works once an item is a `SearchableItem`.
+  A notebook is N independent cell editors (not a multibuffer), so this is the
+  first fan-out `SearchableItem`: `NotebookEditor` implements the
+  `SearchableItem` trait (`crates/workspace/src/searchable.rs`) delegating each
+  primitive to the per-cell `Entity<Editor>` (Match = (CellId, Range<Anchor>));
+  `activate_match` selects the cell + `scroll_to_reveal_item_top_aligned` +
+  focuses + delegates. Phase 1 = find/highlight/Next-Prev across cells (no
+  replace); Phase 2 = replace + options. Est. medium (~1.5–3 days), all in
+  `crates/repl/src/notebook/`.
+- Global-search result opens raw JSON, not the notebook (user 2026-07-16,
+  DEFECT): Ctrl-Shift-F does include notebook content, but clicking a notebook
+  result opens the `.ipynb` as raw JSON text instead of the `NotebookEditor`.
+  Root cause (research 2026-07-16): clicking a project-search excerpt goes
+  through `Editor::open_buffers_in_workspace` →
+  `workspace.open_project_item::<Editor>` (`crates/editor/src/editor.rs:10111`),
+  which uses the TYPE registry (hardcoded to text `Editor`) and bypasses the
+  PATH registry that maps `.ipynb` → `NotebookEditor` (used by the file tree
+  via `open_path`). Quick-win fix: when the buffer's file has a non-`Editor`
+  path opener registered, route the open through `workspace.open_path` (opens
+  the real notebook; loses the intra-file match jump — acceptable first cut).
+  Must be done generically (editor can't depend on repl). Bigger follow-ups
+  (separate items): jump to the matching cell; make search preview show cell
+  content instead of raw JSON.
+- Go to running cell (user 2026-07-16): a "Go to running cell" action that
+  reveals + selects + focuses the currently-executing cell, in the command
+  palette AND as a right-sidebar button under Run All (greyed/disabled when
+  nothing is running). Research 2026-07-16: small (~1–1.5 hr). Find the cell
+  whose `is_executing()` is true (`cell.rs`) → `set_selected_index(index,
+  true, …)` + `enter_command_mode`; add `notebook::GoToRunningCell` action
+  (auto-appears in palette), sidebar button via `render_notebook_control` with
+  `.disabled(running_cell_index(cx).is_none())` (mirrors the Interrupt
+  button). Per-cell running spinner (also mentioned) ALREADY exists
+  (phases 18/21) — no work there.
+- Global kernel busy/idle indicator (user 2026-07-16): a single indicator,
+  visible regardless of scroll position, showing whether the kernel is idle or
+  actively working — NOT the per-cell spinner (that exists). The top kernel
+  strip already shows a status icon (`render_kernel_strip`, Idle=Circle/Success,
+  Busy=ArrowCircle/Warning, Starting=Muted) — so this is about making that
+  busy/idle state clear and prominent enough to read at a glance from anywhere
+  (e.g. an animated spinner + label while Busy), since the strip is pinned at
+  the top above the cells. Small; enhances the existing indicator.
 
 ## Low priority
 
