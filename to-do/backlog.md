@@ -21,6 +21,21 @@ high → low within each group.
 - Save-as dialog for notebooks (user 2026-07-16): default the file-type
   filter to something sensible (not "all files") and make sure the `.ipynb`
   extension is applied/autofilled rather than left off.
+- Rust kernel (evcxr_jupyter) treats all stderr as errors (user 2026-07-20):
+  evcxr writes EVERYTHING to stderr — compile progress, `Compiling {crate}`
+  lines, warnings — not just real errors, so running any Rust cell floods the
+  output with spurious `ERROR:` entries ("ERROR: compiling {crate}" etc.).
+  The convention evcxr follows is that stdout is reserved for actual program
+  output while stderr carries compilation/diagnostic logs. Goal: distinguish
+  normal Rust build/log chatter on stderr from genuine errors so the noise can
+  be filtered out of (or de-emphasised in) the error output. Investigate:
+  where the notebook maps a Jupyter `stream` message with `name: "stderr"`
+  onto an error-styled output (`crates/repl/src/outputs/`, `cell.rs` output
+  handling) — evcxr sends compile logs as `stream`/stderr, and real Rust
+  errors come through as `error`/`execute_reply` with `status: "error"`, so
+  gating the error styling on the actual message TYPE (not the stream name),
+  and/or a kernel-language-aware filter for known-benign evcxr stderr
+  patterns, may be enough. Confirm evcxr's actual message shapes first.
 
 ## Medium priority (cont.)
 
