@@ -399,3 +399,35 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   fallback, or reconcile the queue when the kernel returns to idle).
 - **Fix attempted:** none
 - **Tested:** n/a
+
+## 45. Home/End (command mode) doesn't reach the true top/bottom of a large notebook until scrolled there
+
+- **Status:** open
+- **Symptom:** (user 2026-07-16, large cloned notebooks) Open a big notebook,
+  select the first cell in command mode, press End (SelectLastCell): instead
+  of jumping to the last cell it only jumps DOWN a bit and the newly-focused
+  cell isn't even in view. Repeatedly pressing End keeps hopping further down
+  until it finally reaches the real end. AFTER the end has been reached once,
+  Home/End both jump correctly to top/bottom. "Almost like it doesn't know
+  where the notebook ends until the end is found."
+- **Analysis (code inspection):** the notebook cell list is a VIRTUALIZED
+  gpui `ListState::new(count, ListAlignment::Top, px(1000.))` (`notebook_ui.rs:391`,
+  rebuilt at `:1427`). `select_last`/`select_first` set `selected_cell_index`
+  then `cell_list.scroll_to_reveal_item_top_aligned(index)` (`:3789`, `:3819`).
+  In a virtualized list, off-screen items have only an ESTIMATED height until
+  they're actually laid out, so the scroll offset computed for a far-away
+  target is based on wrong heights and lands short of the true position (and
+  the target isn't rendered/visible). Each keypress scrolls a bit, which
+  measures more intervening items, so the estimate converges and repeated
+  presses eventually reach the real end — after which all heights are known and
+  Home/End are exact. Same widget family as bug #40 (also a
+  `ListState::scroll_to_reveal_item*` estimation issue), but a distinct case:
+  revealing a FAR item across unmeasured rows, not the already-visible guard.
+- **Fix direction (needs gpui-level work):** either make the reveal robust to
+  unmeasured rows (iteratively scroll → let it lay out → re-scroll until the
+  target is actually at the top, within the same frame or across a couple of
+  frames), improve the list's height estimate, or (costly for huge notebooks)
+  measure all items. Confirm against gpui `crates/gpui/src/elements/list.rs`
+  (where bug #40's fix already lives) before choosing.
+- **Fix attempted:** none
+- **Tested:** n/a

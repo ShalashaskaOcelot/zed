@@ -60,6 +60,19 @@ high → low within each group.
   `.disabled(running_cell_index(cx).is_none())` (mirrors the Interrupt
   button). Per-cell running spinner (also mentioned) ALREADY exists
   (phases 18/21) — no work there.
+- "Follow running cell" toggle (user 2026-07-16): a TOGGLE button in the
+  right sidebar, directly under the "Go to running cell" button (above), that
+  when ON auto-scrolls the viewport to the currently-running cell every time
+  it changes. So a Run All visibly "walks" down with execution and, on
+  failure, leaves you parked on the errored cell. Implementation: persist a
+  bool on `NotebookEditor` (toggled by the button, IconButton with
+  `.toggle_state(...)`); wherever the running cell changes (`begin_running` /
+  batch `advance_run_queue` — where the go-to logic reveals a cell), if the
+  toggle is on, `scroll_to_reveal_item(index)` the newly-running cell WITHOUT
+  stealing edit focus (viewport only, don't force command mode, so it doesn't
+  fight the user). Depends on the "Go to running cell" item (shares the
+  running-cell lookup). Should not scroll once the batch ends / errors beyond
+  the last executed cell.
 - Notebook scrollbar missing / hidden behind the right bar (user 2026-07-16):
   the notebook cell list has no visible scrollbar. Either there isn't one, or
   one is drawn but sits UNDER the right-hand control sidebar
@@ -78,6 +91,33 @@ high → low within each group.
   busy/idle state clear and prominent enough to read at a glance from anywhere
   (e.g. an animated spinner + label while Busy), since the strip is pinned at
   the top above the cells. Small; enhances the existing indicator.
+- Notebook runtime timer(s) in the top-right kernel strip (user 2026-07-16):
+  settings-gated timer(s) shown next to the kernel name/status in the TOP-RIGHT
+  strip (`render_kernel_strip`), NOT the right sidebar. Two options, could be
+  distinct or one dependent on the other:
+  1. **Show total execution time** — a running tally of cell runtimes: counts
+     UP only while a cell is running, PAUSED between cells (so idle time while
+     you write a new cell isn't counted). Design caveats the user flagged
+     against the naive "sum every cell's recorded duration" approach:
+     (a) on run #2 the already-completed cells still carry their previous
+     durations, so a plain sum shows a big number immediately — gating on cell
+     status (only count Running/just-finished this session) helps for Run All,
+     but running cells one-by-one still leaves earlier cells "completed" (not
+     pending), so status alone doesn't cleanly bound "this run". Likely needs a
+     session/run-scoped accumulator: reset on kernel start (or on a Run All?),
+     add each cell's measured duration as it FINISHES this session, and show
+     the live in-progress cell's elapsed added on top. Decide the reset
+     semantics at implementation. (b) user had a second downside in mind but
+     couldn't recall it — revisit.
+  2. **Show total kernel lifetime** — wall-clock since kernel startup, running
+     until the kernel is stopped/restarted. On stop, the final time stays in
+     the corner until the kernel starts again (then resets); a restart resets
+     immediately. (Use case admittedly unclear, but low-cost.)
+  Formatting (match the in-cell timer, phases 18/21): ms → seconds to 2 dp
+  (`1.83s`) → `Xm SS.ss` (minutes no decimals, seconds 2 dp) → `Xh Ym SS.ss`
+  (e.g. `2h 32m 43.36s`). Reuse/extract the cell timer's duration formatter so
+  both stay consistent. Add setting(s) under the REPL/Notebooks settings page
+  (phase 34) — one or two booleans.
 
 ## Low priority
 
