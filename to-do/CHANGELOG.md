@@ -145,6 +145,16 @@ entry rather than archiving it.
   refresh doesn't drop it, and it's replaced by the real selectable kernel
   entry once the build completes. New `KernelPickerEntry::Creating` variant +
   `KernelSelector::with_creating`.
+- Phase 44 — Local Windows installer build: made `script/bundle-windows.ps1`
+  work off GitHub Actions — guard the `>> $env:GITHUB_ENV` append (unset on a
+  plain machine/Drone runner, where the redirect aborted the script after a
+  successful compile), fix the stale `-Install` launch path to the real
+  `target/Zed-<arch>.exe`, and discover the VS 2022 install via `vswhere`
+  (with a Community/Professional/Enterprise/BuildTools filesystem fallback)
+  instead of hardcoding the Community edition. Added
+  `docs/fork/windows-installer-build.md` documenting the reproducible
+  user-level unsigned build. Windows-machine verification tracked in
+  `awaiting_testing.md`.
 
 ## Fixed bugs (confirmed)
 

@@ -24,6 +24,23 @@ listed here.
       end up open in two tabs again. (Cause found by inspection: stale
       entry id after save defeated the already-open dedup.)
 
+## Phase 44 — Build the user-level Windows installer locally
+
+Kind: new feature (fork release engineering). Implementation (the three
+`script/bundle-windows.ps1` fixes + `docs/fork/windows-installer-build.md`)
+is done; these tests need the user's Windows machine. If a build step fails,
+file it in `bugs.md`, annotate the failing line, and tick it here.
+
+- [ ] Follow `docs/fork/windows-installer-build.md` from scratch: the bundle
+      completes and produces `target/Zed-x86_64.exe`. Note wall-clock time and
+      disk used (feeds phase 47's runner sizing).
+- [ ] Run the installer WITHOUT admin rights: no UAC prompt; installs under
+      `%LOCALAPPDATA%\Programs\Zed Dev`; Start-menu entry, optional desktop
+      icon, and `zed` on the user PATH all work; SmartScreen's unsigned-installer
+      warning is the expected cost (note what it looks like).
+- [ ] The installed fork build opens and runs a Jupyter notebook end-to-end;
+      uninstall from per-user Apps & Features cleans up.
+
 ## Phase 49 — Creating kernel shown as a greyed entry in the picker
 
 Kind: new feature (finishes phase 48's picker side) — once confirmed present

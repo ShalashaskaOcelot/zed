@@ -39,8 +39,27 @@ function Get-VSArch {
     }
 }
 
+# Locate the VS 2022 install rather than hardcoding the Community edition, so a
+# Professional / Enterprise / Build-Tools-only machine (the likely Drone runner
+# shape) works unmodified. vswhere ships at a fixed path with every VS install;
+# `-products *` is required for it to report Build Tools installs.
 Push-Location
-& "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Launch-VsDevShell.ps1" -Arch (Get-VSArch -Arch $Architecture) -HostArch (Get-VSArch -Arch $OSArchitecture)
+$vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$vsInstallPath = $null
+if (Test-Path $vsWhere) {
+    $vsInstallPath = & $vsWhere -latest -products * -property installationPath
+}
+if (-not $vsInstallPath) {
+    foreach ($edition in @("Community", "Professional", "Enterprise", "BuildTools")) {
+        $candidate = "C:\Program Files\Microsoft Visual Studio\2022\$edition"
+        if (Test-Path $candidate) { $vsInstallPath = $candidate; break }
+    }
+}
+if (-not $vsInstallPath) {
+    Write-Error "Could not locate a Visual Studio 2022 installation (Community / Professional / Enterprise / Build Tools). Install the MSVC x64 build tools with the Spectre-mitigated libraries."
+    exit 1
+}
+& "$vsInstallPath\Common7\Tools\Launch-VsDevShell.ps1" -Arch (Get-VSArch -Arch $Architecture) -HostArch (Get-VSArch -Arch $OSArchitecture)
 Pop-Location
 
 $target = "$Architecture-pc-windows-msvc"
@@ -351,7 +370,13 @@ function BuildInstaller {
 
     if ($process.ExitCode -eq 0) {
         Write-Host "✅ Inno Setup successfully compiled the installer"
-        Write-Output "SETUP_PATH=target/$appSetupName.exe" >> $env:GITHUB_ENV
+        # Only append to GITHUB_ENV under GitHub Actions; on a plain machine or a
+        # Drone runner the variable is unset and the redirect targets an empty
+        # path, which (with $ErrorActionPreference = 'Stop') aborts the script
+        # AFTER a successful compile.
+        if ($env:GITHUB_ENV) {
+            Write-Output "SETUP_PATH=target/$appSetupName.exe" >> $env:GITHUB_ENV
+        }
         $script:buildSuccess = $true
     }
     else {
@@ -386,7 +411,10 @@ if ($buildSuccess) {
     Write-Output "Build successful"
     if ($Install) {
         Write-Output "Installing Zed..."
-        Start-Process -FilePath "$env:ZED_WORKSPACE/target/ZedEditorUserSetup-x64-$env:RELEASE_VERSION.exe"
+        # The installer is emitted as target/Zed-<arch>.exe (see $appSetupName in
+        # BuildInstaller); the old ZedEditorUserSetup-x64-<version>.exe name no
+        # longer matches anything the build produces.
+        Start-Process -FilePath "$env:ZED_WORKSPACE/target/Zed-$Architecture.exe"
     }
     exit 0
 }

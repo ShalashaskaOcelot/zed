@@ -50,29 +50,6 @@ high → low within each group.
   Must be done generically (editor can't depend on repl). Bigger follow-ups
   (separate items): jump to the matching cell; make search preview show cell
   content instead of raw JSON.
-- Go to running cell (user 2026-07-16): a "Go to running cell" action that
-  reveals + selects + focuses the currently-executing cell, in the command
-  palette AND as a right-sidebar button under Run All (greyed/disabled when
-  nothing is running). Research 2026-07-16: small (~1–1.5 hr). Find the cell
-  whose `is_executing()` is true (`cell.rs`) → `set_selected_index(index,
-  true, …)` + `enter_command_mode`; add `notebook::GoToRunningCell` action
-  (auto-appears in palette), sidebar button via `render_notebook_control` with
-  `.disabled(running_cell_index(cx).is_none())` (mirrors the Interrupt
-  button). Per-cell running spinner (also mentioned) ALREADY exists
-  (phases 18/21) — no work there.
-- "Follow running cell" toggle (user 2026-07-16): a TOGGLE button in the
-  right sidebar, directly under the "Go to running cell" button (above), that
-  when ON auto-scrolls the viewport to the currently-running cell every time
-  it changes. So a Run All visibly "walks" down with execution and, on
-  failure, leaves you parked on the errored cell. Implementation: persist a
-  bool on `NotebookEditor` (toggled by the button, IconButton with
-  `.toggle_state(...)`); wherever the running cell changes (`begin_running` /
-  batch `advance_run_queue` — where the go-to logic reveals a cell), if the
-  toggle is on, `scroll_to_reveal_item(index)` the newly-running cell WITHOUT
-  stealing edit focus (viewport only, don't force command mode, so it doesn't
-  fight the user). Depends on the "Go to running cell" item (shares the
-  running-cell lookup). Should not scroll once the batch ends / errors beyond
-  the last executed cell.
 - Notebook scrollbar missing / hidden behind the right bar (user 2026-07-16):
   the notebook cell list has no visible scrollbar. Either there isn't one, or
   one is drawn but sits UNDER the right-hand control sidebar
