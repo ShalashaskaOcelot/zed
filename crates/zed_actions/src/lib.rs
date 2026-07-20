@@ -996,6 +996,10 @@ pub mod notebook {
             SplitCell,
             /// Joins the selected cells (or the current cell with the one below) into one cell.
             JoinCells,
+            /// Reveals, selects, and focuses the currently-executing cell.
+            GoToRunningCell,
+            /// Toggles auto-scrolling the viewport to the running cell as execution advances.
+            ToggleFollowRunningCell,
         ]
     );
 }

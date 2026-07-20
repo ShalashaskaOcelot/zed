@@ -55,11 +55,11 @@ use zed_actions::notebook::{
     AddCellAbove, AddCellBelow, AddCodeBlock, AddMarkdownBlock, ClearCellOutputs, ClearOutputs,
     ConvertToCode, ConvertToMarkdown, CopyCell, CutCell, DeleteCell, DuplicateCell,
     EnterCommandMode, EnterEditMode, ExtendSelectionDown, ExtendSelectionToEnd,
-    ExtendSelectionToStart, ExtendSelectionUp, InterruptKernel, MoveCellDown, MoveCellUp,
-    JoinCells, NewNotebook, NotebookMoveDown, NotebookMoveUp, OpenNotebook, PasteCell,
+    ExtendSelectionToStart, ExtendSelectionUp, GoToRunningCell, InterruptKernel, MoveCellDown,
+    MoveCellUp, JoinCells, NewNotebook, NotebookMoveDown, NotebookMoveUp, OpenNotebook, PasteCell,
     PasteCellAbove, RedoCellOp, ReloadNotebook, RestartKernel, Run, RunAll, RunAndAdvance,
     RunCellAndBelow, RunCellsAbove, SelectAllCells, SelectFirstCell, SelectLastCell, SplitCell,
-    UndoCellOp,
+    ToggleFollowRunningCell, UndoCellOp,
 };
 
 /// Probe PATH for a conda-compatible frontend, preferring the most standard.
@@ -232,6 +232,11 @@ pub struct NotebookEditor {
     /// submitting the new queue. Submitting during the kernel's "aborting"
     /// state would get the new requests aborted too.
     resume_run_queue_on_idle: bool,
+    /// When on, the viewport auto-scrolls to follow the running cell as a batch
+    /// run (Run All / Above / Below) advances, so execution visibly "walks"
+    /// down the notebook. Viewport-only: it never changes the selection or
+    /// edit/command mode, so it doesn't fight a user editing a later cell.
+    follow_running_cell: bool,
     /// Multi-selection: every selected index INCLUDING the primary
     /// (`selected_cell_index`). Empty when only a single cell is selected.
     /// Index-based, so any structural change collapses the selection.
@@ -411,6 +416,7 @@ impl NotebookEditor {
             creating_kernel_name: None,
             run_queue: Vec::new(),
             active_run_cell: None,
+            follow_running_cell: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             kernel_picker_handle: PopoverMenuHandle::default(),
@@ -2151,11 +2157,66 @@ impl NotebookEditor {
             let cell_id = self.run_queue.remove(0);
             if matches!(self.cell_map.get(&cell_id), Some(Cell::Code(_))) {
                 self.active_run_cell = Some(cell_id.clone());
+                // Follow mode: reveal the cell about to run WITHOUT touching the
+                // selection or edit/command mode, so a Run All walks down the
+                // notebook while a user editing elsewhere isn't yanked away.
+                if self.follow_running_cell
+                    && let Some(index) = self.cell_order.iter().position(|id| id == &cell_id)
+                {
+                    self.cell_list.scroll_to_reveal_item(index);
+                }
                 self.execute_cell(cell_id, window, cx);
                 return;
             }
             // Skip markdown/raw cells and continue to the next.
         }
+    }
+
+    /// The index (in `cell_order`) of the cell currently executing, if any.
+    /// Backs both the Go to running cell action and its sidebar button's
+    /// enabled state. Only one cell runs at a time (sequential queue), so the
+    /// first executing cell is the running one.
+    fn running_cell_index(&self, cx: &App) -> Option<usize> {
+        self.cell_order.iter().position(|id| {
+            matches!(
+                self.cell_map.get(id),
+                Some(Cell::Code(cell)) if cell.read(cx).is_executing()
+            )
+        })
+    }
+
+    /// Reveal, select, and focus the currently-executing cell. A no-op (not an
+    /// error) when nothing is running.
+    fn go_to_running_cell(
+        &mut self,
+        _: &GoToRunningCell,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(index) = self.running_cell_index(cx) {
+            // `jump_to_index = true` top-aligns the cell (via `jump_to_cell`).
+            self.set_selected_index(index, true, window, cx);
+            self.enter_command_mode(window, cx);
+            cx.notify();
+        }
+    }
+
+    fn toggle_follow_running_cell(
+        &mut self,
+        _: &ToggleFollowRunningCell,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.follow_running_cell = !self.follow_running_cell;
+        // Turning it on jumps to the running cell immediately (if any), so the
+        // toggle's effect is visible right away rather than only on the next
+        // queue advance.
+        if self.follow_running_cell
+            && let Some(index) = self.running_cell_index(cx)
+        {
+            self.cell_list.scroll_to_reveal_item(index);
+        }
+        cx.notify();
     }
 
     /// Abort any in-progress multi-cell run (e.g. on error, interrupt, kernel
@@ -3870,6 +3931,8 @@ impl NotebookEditor {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let has_outputs = self.has_outputs(window, cx);
+        let has_running_cell = self.running_cell_index(cx).is_some();
+        let following = self.follow_running_cell;
 
         v_flex()
             .max_w(px(CONTROL_SIZE + 4.0))
@@ -3939,6 +4002,47 @@ impl NotebookEditor {
                                 })
                                 .on_click(|_, window, cx| {
                                     window.dispatch_action(Box::new(ClearOutputs), cx);
+                                }),
+                            ),
+                    )
+                    .child(
+                        Self::button_group(window, cx)
+                            .child(
+                                Self::render_notebook_control(
+                                    "go-to-running-cell",
+                                    IconName::Crosshair,
+                                    window,
+                                    cx,
+                                )
+                                .disabled(!has_running_cell)
+                                .tooltip(move |_window, cx| {
+                                    Tooltip::for_action(
+                                        "Go to running cell",
+                                        &GoToRunningCell,
+                                        cx,
+                                    )
+                                })
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(Box::new(GoToRunningCell), cx);
+                                }),
+                            )
+                            .child(
+                                Self::render_notebook_control(
+                                    "follow-running-cell",
+                                    IconName::Eye,
+                                    window,
+                                    cx,
+                                )
+                                .toggle_state(following)
+                                .tooltip(move |_window, cx| {
+                                    Tooltip::for_action(
+                                        "Follow running cell",
+                                        &ToggleFollowRunningCell,
+                                        cx,
+                                    )
+                                })
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(Box::new(ToggleFollowRunningCell), cx);
                                 }),
                             ),
                     )
@@ -4324,6 +4428,8 @@ impl Render for NotebookEditor {
                 cx.listener(|this, action, window, cx| this.run_and_advance(action, window, cx)),
             )
             .on_action(cx.listener(|this, _: &RunAll, window, cx| this.run_cells(window, cx)))
+            .on_action(cx.listener(Self::go_to_running_cell))
+            .on_action(cx.listener(Self::toggle_follow_running_cell))
             .on_action(
                 cx.listener(|this, _: &MoveCellUp, window, cx| this.move_cell_up(window, cx)),
             )
