@@ -24,6 +24,22 @@ listed here.
       end up open in two tabs again. (Cause found by inspection: stale
       entry id after save defeated the already-open dedup.)
 
+## Phase 49 — Creating kernel shown as a greyed entry in the picker
+
+Kind: new feature (finishes phase 48's picker side) — once confirmed present
+and basically working, refinements/defects become new items.
+
+- [ ] While an env is being created (Create Python/Conda Environment, with the
+      build in progress), open the kernel picker: a greyed, non-selectable
+      "Creating <name>…" row appears at the top, shown as the current
+      selection (checkmark on it, NOT on the previously selected kernel). You
+      cannot click/keyboard-select it, but you CAN still pick a different real
+      kernel (which supersedes the build — phase 48).
+- [ ] When the build finishes, the greyed row is replaced by the real,
+      selectable kernel entry (now the checkmarked selection); on failure it
+      disappears and the prior kernel's checkmark returns. Leaving the picker
+      open across completion updates it correctly (no stale "Creating" row).
+
 ## Phase 48 — Select a newly-created kernel immediately
 
 Kind: change to existing behaviour — if the new behaviour didn't take effect,

@@ -4198,6 +4198,9 @@ impl NotebookEditor {
                 // The picker reflects THIS notebook's kernel, not the
                 // worktree-level selection (bug #30).
                 .with_selected(self.kernel_specification.clone())
+                // While an env is building, show it as a greyed selected entry
+                // (phase 49); suppresses the old kernel's checkmark.
+                .with_creating(self.creating_kernel_name.clone())
                 .with_dismiss(Box::new(move |_window, cx| {
                     if let Some(view) = view_for_dismiss.upgrade() {
                         view.update(cx, |this, cx| {

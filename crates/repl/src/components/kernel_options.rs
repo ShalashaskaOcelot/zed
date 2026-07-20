@@ -20,6 +20,30 @@ pub enum KernelPickerEntry {
         spec: KernelSpecification,
         is_recommended: bool,
     },
+    /// An environment currently being created (venv/conda) that will become
+    /// the kernel once built (phase 48/49). Rendered greyed and NON-selectable
+    /// (every selectability check matches only `Kernel`), shown as the current
+    /// selection while it builds.
+    Creating(SharedString),
+}
+
+/// Build the kernel entries and, when an env is being created, prepend a
+/// greyed "creating" row (phase 49). Shared by the initial render and the
+/// store-observer rebuild so a mid-build store refresh doesn't drop it.
+fn build_entries_with_creating(
+    store: &ReplStore,
+    worktree_id: WorktreeId,
+    selected_kernel: Option<&KernelSpecification>,
+    creating: Option<&str>,
+) -> Vec<KernelPickerEntry> {
+    let mut entries = build_grouped_entries(store, worktree_id, selected_kernel);
+    if let Some(name) = creating {
+        entries.insert(
+            0,
+            KernelPickerEntry::Creating(SharedString::from(name.to_string())),
+        );
+    }
+    entries
 }
 
 fn build_grouped_entries(
@@ -149,6 +173,10 @@ where
     /// + Recommended override) instead of the store's worktree-level
     /// selection. Notebooks pass their own per-notebook kernel here (bug #30).
     selected_override: Option<Option<KernelSpecification>>,
+    /// When set, an environment of this name is being created and is shown as a
+    /// greyed, non-selectable "creating" entry that is the current selection
+    /// (phase 49). Suppresses the checkmark on any real kernel while set.
+    creating: Option<SharedString>,
     on_open: Option<OnOpen>,
 }
 
@@ -178,6 +206,7 @@ where
             info_text: None,
             worktree_id,
             selected_override: None,
+            creating: None,
             on_open: None,
         }
     }
@@ -194,6 +223,13 @@ where
     /// store's worktree-level selection (which belongs to the inline REPL).
     pub fn with_selected(mut self, selected: Option<KernelSpecification>) -> Self {
         self.selected_override = Some(selected);
+        self
+    }
+
+    /// Show a greyed, non-selectable "creating <name>…" entry as the current
+    /// selection while an env is being built (phase 49).
+    pub fn with_creating(mut self, creating: Option<String>) -> Self {
+        self.creating = creating.map(SharedString::from);
         self
     }
 
@@ -313,6 +349,12 @@ impl PickerDelegate for KernelPickerDelegate {
                     KernelPickerEntry::SectionHeader(_) => {
                         pending_header = Some(entry.clone());
                     }
+                    // The creating row is not a real kernel and has no header;
+                    // keep it visible regardless of the query so the build
+                    // stays represented while the user filters.
+                    KernelPickerEntry::Creating(_) => {
+                        filtered.push(entry.clone());
+                    }
                     KernelPickerEntry::Kernel { spec, .. } => {
                         if spec.name().to_lowercase().contains(&query_lower) {
                             if let Some(header) = pending_header.take() {
@@ -382,6 +424,39 @@ impl PickerDelegate for KernelPickerDelegate {
                             .size(LabelSize::Small)
                             .weight(FontWeight::SEMIBOLD)
                             .color(Color::Muted),
+                    ),
+            ),
+            KernelPickerEntry::Creating(name) => Some(
+                ListItem::new(ix)
+                    .inset(true)
+                    .spacing(ListItemSpacing::Sparse)
+                    .selectable(false)
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .gap_3()
+                            .opacity(0.5)
+                            .child(
+                                Icon::new(IconName::ArrowCircle)
+                                    .size(IconSize::Medium)
+                                    .color(Color::Muted),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap_1()
+                                    .child(Label::new(name.clone()).weight(FontWeight::MEDIUM))
+                                    .child(
+                                        Label::new("Creating…")
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted),
+                                    ),
+                            ),
+                    )
+                    // While building, this IS the notebook's selection.
+                    .end_slot(
+                        Icon::new(IconName::Check)
+                            .color(Color::Accent)
+                            .size(IconSize::Small),
                     ),
             ),
             KernelPickerEntry::Kernel {
@@ -522,12 +597,23 @@ where
         store_entity.update(cx, |store, cx| store.ensure_kernelspecs(cx));
         let store = store_entity.read(cx);
 
-        let selected_kernelspec = match &self.selected_override {
-            Some(selected) => selected.clone(),
-            None => store.active_kernelspec(self.worktree_id, None, cx),
+        let creating = self.creating.clone();
+        // While an env is building it is the notebook's selection (shown as the
+        // greyed "creating" row): suppress the checkmark on any real kernel.
+        let selected_kernelspec = if creating.is_some() {
+            None
+        } else {
+            match &self.selected_override {
+                Some(selected) => selected.clone(),
+                None => store.active_kernelspec(self.worktree_id, None, cx),
+            }
         };
-        let all_entries =
-            build_grouped_entries(store, self.worktree_id, selected_kernelspec.as_ref());
+        let all_entries = build_entries_with_creating(
+            store,
+            self.worktree_id,
+            selected_kernelspec.as_ref(),
+            creating.as_deref(),
+        );
         let selected_index = all_entries
             .iter()
             .position(|entry| {
@@ -540,6 +626,7 @@ where
             .unwrap_or_else(|| KernelPickerDelegate::first_selectable_index(&all_entries));
 
         let selected_for_rebuild = selected_kernelspec.clone();
+        let creating_for_rebuild = creating;
         let delegate = KernelPickerDelegate {
             on_select: self.on_select,
             on_dismiss: self.on_dismiss,
@@ -560,10 +647,13 @@ where
                 &store_entity,
                 window,
                 move |picker: &mut Picker<KernelPickerDelegate>, store, window, cx| {
-                    let entries = build_grouped_entries(
+                    // Re-inject the creating row on every rebuild so a mid-build
+                    // store refresh doesn't wipe it (bug #20 trap).
+                    let entries = build_entries_with_creating(
                         store.read(cx),
                         worktree_id,
                         selected_for_rebuild.as_ref(),
+                        creating_for_rebuild.as_deref(),
                     );
                     if picker.delegate.selected_kernelspec.is_none() {
                         picker.delegate.selected_index =

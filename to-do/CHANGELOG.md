@@ -138,6 +138,13 @@ entry rather than archiving it.
   failure the selection reverts and the cells return to Idle. An explicit
   kernel pick during the build supersedes it. Picker greyed-entry split to
   phase 49.
+- Phase 49 — Creating kernel shown in the picker: while an env is building
+  (phase 48), the kernel picker shows a greyed, non-selectable "Creating
+  <name>…" row as the current selection (checkmark on it, none on the old
+  kernel); it's re-injected on the store-observer rebuild so a mid-build
+  refresh doesn't drop it, and it's replaced by the real selectable kernel
+  entry once the build completes. New `KernelPickerEntry::Creating` variant +
+  `KernelSelector::with_creating`.
 
 ## Fixed bugs (confirmed)
 
