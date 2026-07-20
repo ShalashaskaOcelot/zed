@@ -1,13 +1,20 @@
 # Project purpose
 
-This fork of Zed exists to improve the current experimental Jupyter Notebook
-functionality and to add new notebook functionality. The notebook
-implementation lives primarily in `crates/repl/` (`src/notebook/`,
-`src/kernels/`, `src/outputs/`, `src/session.rs`). All work in this fork
-should serve that goal: fixing broken notebook behaviour, completing
-half-implemented features, and adding missing features (kernel lifecycle,
-cell-level actions, keyboard shortcuts, navigation/scrolling, environment
-management, etc.).
+This fork of Zed exists **primarily** to improve the current experimental
+Jupyter Notebook functionality and to add new notebook functionality, with a
+**secondary** focus on general quality-of-life fixes and features for the
+editor as a whole. In practice the large majority of work — roughly 80–90% —
+is notebook-related, but the fork is not exclusively about notebooks: broader
+editor QoL improvements are in scope too.
+
+The notebook implementation lives primarily in `crates/repl/`
+(`src/notebook/`, `src/kernels/`, `src/outputs/`, `src/session.rs`). The bulk
+of the work should serve the notebook goal: fixing broken notebook behaviour,
+completing half-implemented features, and adding missing features (kernel
+lifecycle, cell-level actions, keyboard shortcuts, navigation/scrolling,
+environment management, etc.). Alongside this, smaller quality-of-life fixes
+and features elsewhere in the editor are welcome when they improve the overall
+experience.
 
 # Dev workflow
 
