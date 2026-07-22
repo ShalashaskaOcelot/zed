@@ -155,6 +155,13 @@ entry rather than archiving it.
   `docs/fork/windows-installer-build.md` documenting the reproducible
   user-level unsigned build. Windows-machine verification tracked in
   `awaiting_testing.md`.
+- Phase 50 — Go to / Follow running cell: `notebook::GoToRunningCell` action +
+  sidebar Crosshair button reveals, selects, and top-aligns the executing cell
+  (greyed when idle); `notebook::ToggleFollowRunningCell` + sidebar Eye toggle
+  viewport-scrolls to each cell as a batch run advances, without touching
+  selection or edit/command mode. Both back onto a shared `running_cell_index`.
+  User-confirmed working; the follow-scroll landing-position tweak became
+  phase 51. `1516463c03`
 
 ## Fixed bugs (confirmed)
 

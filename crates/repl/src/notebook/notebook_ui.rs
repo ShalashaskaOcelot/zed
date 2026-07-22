@@ -2157,19 +2157,34 @@ impl NotebookEditor {
             let cell_id = self.run_queue.remove(0);
             if matches!(self.cell_map.get(&cell_id), Some(Cell::Code(_))) {
                 self.active_run_cell = Some(cell_id.clone());
-                // Follow mode: reveal the cell about to run WITHOUT touching the
-                // selection or edit/command mode, so a Run All walks down the
-                // notebook while a user editing elsewhere isn't yanked away.
+                // Follow mode: pin the cell about to run near the top of the
+                // viewport WITHOUT touching the selection or edit/command mode,
+                // so a Run All walks down the notebook while a user editing
+                // elsewhere isn't yanked away.
                 if self.follow_running_cell
                     && let Some(index) = self.cell_order.iter().position(|id| id == &cell_id)
                 {
-                    self.cell_list.scroll_to_reveal_item(index);
+                    self.follow_scroll_to(index);
                 }
                 self.execute_cell(cell_id, window, cx);
                 return;
             }
             // Skip markdown/raw cells and continue to the next.
         }
+    }
+
+    /// Scroll (viewport only) so the cell at `index` sits near the top of the
+    /// viewport, with a small margin of the preceding cell for context. Used by
+    /// follow mode instead of a minimal reveal, which would land each newly
+    /// running cell on the bottom edge as a Run All walks down. The margin
+    /// scales with the viewport but is bounded so it stays "near the top" on
+    /// large screens without dominating small ones; because it's a fixed offset
+    /// above the running cell, a tall preceding output never pushes the running
+    /// cell out of view.
+    fn follow_scroll_to(&self, index: usize) {
+        let viewport_height = self.cell_list.viewport_bounds().size.height;
+        let margin = (viewport_height * 0.12).max(px(40.)).min(px(96.));
+        self.cell_list.scroll_to_item_near_top(index, margin);
     }
 
     /// The index (in `cell_order`) of the cell currently executing, if any.
@@ -2214,7 +2229,7 @@ impl NotebookEditor {
         if self.follow_running_cell
             && let Some(index) = self.running_cell_index(cx)
         {
-            self.cell_list.scroll_to_reveal_item(index);
+            self.follow_scroll_to(index);
         }
         cx.notify();
     }

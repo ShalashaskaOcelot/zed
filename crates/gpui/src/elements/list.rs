@@ -703,6 +703,50 @@ impl ListState {
         state.logical_scroll_top = Some(scroll_top);
     }
 
+    /// Scroll so item `ix`'s top sits `margin` pixels below the top of the
+    /// viewport — pinning `ix` NEAR (but not flush against) the top, leaving a
+    /// sliver of the preceding item visible for context.
+    ///
+    /// The margin is a fixed offset applied ABOVE `ix`, so a tall preceding
+    /// item (e.g. a cell with a lot of output) can never push `ix` down and
+    /// out of view — only the last `margin` px of that item show. The margin
+    /// is clamped to at most a third of the viewport so it degrades gracefully
+    /// on short viewports (and to zero before the list has been measured).
+    ///
+    /// Unlike [`scroll_to_reveal_item`], which does a minimal reveal (landing a
+    /// below-viewport item on the BOTTOM edge), this always repositions `ix` to
+    /// the same near-top anchor — used by the notebook "follow running cell"
+    /// mode so a Run All visibly walks down with the running cell held near the
+    /// top.
+    pub fn scroll_to_item_near_top(&self, ix: usize, margin: Pixels) {
+        let state = &mut *self.0.borrow_mut();
+        let viewport_height = state
+            .last_layout_bounds
+            .map_or(px(0.), |bounds| bounds.size.height);
+        let margin = margin.max(px(0.)).min(viewport_height * 0.33);
+
+        // Scope the cursor so its immutable borrow of `state` ends before the
+        // mutable `rebase_pending_scroll` / `logical_scroll_top` writes below.
+        let scroll_top = {
+            let mut cursor = state.items.cursor::<ListItemSummary>(());
+            cursor.seek(&Count(ix), Bias::Right);
+            let item_top = cursor.start().height;
+            // The content-y the viewport top should land at: `margin` px above
+            // the item's top, never negative.
+            let target_top = (item_top - margin).max(px(0.));
+            // Convert that content-y back into a logical offset — which item
+            // contains it, and how far into that item. (`seek` re-seeks from
+            // the root, so seeking to an earlier position than `ix` is fine.)
+            cursor.seek(&Height(target_top), Bias::Left);
+            ListOffset {
+                item_ix: cursor.start().count,
+                offset_in_item: target_top - cursor.start().height,
+            }
+        };
+        state.rebase_pending_scroll(scroll_top);
+        state.logical_scroll_top = Some(scroll_top);
+    }
+
     /// Get the bounds for the given item in window coordinates, if it's
     /// been rendered.
     pub fn bounds_for_item(&self, ix: usize) -> Option<Bounds<Pixels>> {
