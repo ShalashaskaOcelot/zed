@@ -162,6 +162,14 @@ entry rather than archiving it.
   selection or edit/command mode. Both back onto a shared `running_cell_index`.
   User-confirmed working; the follow-scroll landing-position tweak became
   phase 51. `1516463c03`
+- Phase 51 — Follow running cell pins near the top: new
+  `ListState::scroll_to_item_near_top` anchors follow mode on an item boundary
+  (the highest preceding item that fits within a viewport-scaled margin, else
+  the running cell itself), so the running cell settles near the top with short
+  items as context while a tall preceding markdown/output is simply not shown
+  rather than pushing it down (immune to remeasurement above the anchor).
+  Replaces the minimal reveal that landed each running cell on the bottom edge.
+  User-confirmed working. `2e255cda3e`
 
 ## Fixed bugs (confirmed)
 
