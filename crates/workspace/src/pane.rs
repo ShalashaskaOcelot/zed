@@ -2471,7 +2471,14 @@ impl Pane {
                     .update(cx, |pane, cx| {
                         pane.project
                             .update(cx, |project, cx| {
-                                project.find_or_create_worktree(new_path, true, cx)
+                                // Save-as to a path INSIDE an existing worktree reuses
+                                // it (the `visible` flag is ignored on that branch). For
+                                // a path OUTSIDE every worktree we create an INVISIBLE
+                                // single-file worktree so the ad-hoc file stays open and
+                                // saveable without joining the project panel as a new
+                                // root — matching how opening an out-of-project file
+                                // behaves (e.g. image_viewer uses `visible=false`).
+                                project.find_or_create_worktree(new_path, false, cx)
                             })
                             .ok()
                     })

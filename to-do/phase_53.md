@@ -1,5 +1,13 @@
 # Phase 53 — Saving a file outside the workspace shouldn't add it to the workspace
 
+⚠️ **IMPLEMENTED — AWAITING USER TESTING**. One-line lever changed in shared
+save-as (`pane.rs:2474`, `visible=true`→`false`); verified against the code that
+in-project saves are unaffected (visible ignored on reuse) and that external
+opens already use `visible=false`. Runtime verification (text + notebook, in vs
+out of project, empty window) pending. Complements bug #48 (opening an external
+`.ipynb` via Open File now renders correctly) — together, external notebooks
+stay out of the panel yet reopen properly.
+
 Kind: **change to existing behaviour** (Zed-wide, user 2026-07-21). Added as a
 6th phase at the user's explicit request. Applies to ALL file types, not just
 notebooks — the user wants: a buffer saved to a path OUTSIDE the current
@@ -30,13 +38,15 @@ reflected). #49 (fs-watching of single-file worktrees) is tracked separately.
 
 ## Tasks
 
-- [ ] Make save-as to a path outside all existing worktrees create the
-      single-file worktree as **invisible** (so it doesn't become a project-panel
-      root), matching how Zed opens external files. Likely: change the
-      `visible` argument at `pane.rs:2474` — but do it CONDITIONALLY (only when
-      the path is not inside an existing visible worktree), or push the decision
-      into `find_or_create_worktree`, so that legitimately saving a new file
-      INSIDE the project still works and stays visible.
+- [x] Make save-as to a path outside all existing worktrees create the
+      single-file worktree as **invisible**. Changed `Pane::save_item`'s
+      `project.find_or_create_worktree(new_path, true, cx)` to `false`
+      (`pane.rs:2474`). No conditional needed: `find_or_create_worktree` ignores
+      `visible` on the find/reuse branch (in-project saves), so `false` only
+      affects the create branch (out-of-tree paths) → invisible single-file
+      worktree = no new panel root. This matches how Zed OPENS external files
+      (image_viewer, file-finder, debugger, settings all pass `visible=false`);
+      save-as was the lone outlier passing `true`.
 - [ ] Verify the item stays fully functional after an external save: the buffer
       keeps its path, Ctrl-S re-saves without a dialog, and the tab shows the
       real name (for notebooks this now depends on the abs-path title fix,
