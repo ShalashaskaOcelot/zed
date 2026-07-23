@@ -431,3 +431,30 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   (where bug #40's fix already lives) before choosing.
 - **Fix attempted:** none
 - **Tested:** n/a
+
+## 46. Interrupting the Rust kernel makes the next run prompt for a kernel instead of relaunching
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-07-21, Rust/evcxr kernel) Run a cell, then interrupt
+  the kernel. The kernel indicator turns red / "Error" (a KERNEL error, not a
+  cell error). Now click Run All or run any cell: the kernel PICKER pops up
+  asking which kernel to use, even though a kernel is already selected. Expected:
+  just relaunch the selected kernel and run. Not seen with ipykernel, and not
+  seen when continuing to run a kernel that was NOT interrupted — only from the
+  errored state, which (for evcxr) is only reached by interrupting.
+- **Analysis (code inspection):** unlike ipykernel (which handles SIGINT and
+  stays alive), the evcxr process EXITS when interrupted. The process-status
+  task then calls `kernel_errored` (`notebook_ui.rs:5146`), which sets
+  `Kernel::ErroredLaunch`. `execute_cell` treated ALL `ErroredLaunch` as a
+  failed launch → `Disposition::Prompt` (opens the picker) — a guard added for
+  bug #31 so a spec that can't start doesn't relaunch-loop. But a kernel that
+  DIED after running is different from one whose launch never connected.
+- **Fix attempted:** added `kernel_reached_running: bool` to `NotebookEditor`
+  (true once a launch connects at `:1642`, false when a launch begins at
+  `:1683`). In `execute_cell`, `Kernel::ErroredLaunch` now relaunches the
+  remembered spec (`Disposition::Queued { launch: true }`, like `Shutdown`)
+  when `kernel_reached_running && has_remembered_kernel`, else still prompts.
+  So a died-after-running kernel relaunches on next run; a launch that never
+  connected still prompts (bug #31 preserved), and a vanished env still prompts
+  (phase 42 filter makes `has_remembered_kernel` false).
+- **Tested:** untested — see `awaiting_testing.md`.

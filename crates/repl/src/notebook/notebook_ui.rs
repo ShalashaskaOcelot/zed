@@ -189,6 +189,13 @@ pub struct NotebookEditor {
     cell_map: HashMap<CellId, Cell>,
     kernel: Kernel,
     kernel_specification: Option<KernelSpecification>,
+    /// Whether the CURRENT kernel launch reached the running state. Set false
+    /// when a launch begins, true once it connects. Lets `execute_cell` tell a
+    /// kernel that DIED after running (e.g. the Rust/evcxr kernel exits when
+    /// interrupted, erroring the kernel — not a cell) from one whose LAUNCH
+    /// failed: the former relaunches the remembered spec on the next run, the
+    /// latter still prompts so a broken spec doesn't relaunch-loop (bug #31).
+    kernel_reached_running: bool,
     execution_requests: HashMap<String, CellId>,
     pending_executions: Vec<CellId>,
     /// Cells the user tried to run while no kernel was selected. They are held
@@ -410,6 +417,7 @@ impl NotebookEditor {
             cell_map: cell_map.clone(),
             kernel: Kernel::Shutdown,
             kernel_specification: None,
+            kernel_reached_running: false,
             execution_requests: HashMap::default(),
             pending_executions: Vec::new(),
             cells_awaiting_kernel_choice: Vec::new(),
@@ -1640,6 +1648,7 @@ impl NotebookEditor {
                     Ok(kernel) => {
                         this.update_in(cx, |editor, window, cx| {
                             editor.kernel = Kernel::RunningKernel(kernel);
+                            editor.kernel_reached_running = true;
                             cx.notify();
                             let queued = std::mem::take(&mut editor.pending_executions);
                             log::debug!(
@@ -1681,6 +1690,9 @@ impl NotebookEditor {
             .shared();
 
         self.kernel = Kernel::StartingKernel(pending_kernel);
+        // A fresh launch has not connected yet; until it does, an error is a
+        // launch failure (prompt), not a died-after-running kernel (relaunch).
+        self.kernel_reached_running = false;
         cx.notify();
     }
 
@@ -1888,6 +1900,7 @@ impl NotebookEditor {
 
         // Computed before borrowing `self.kernel` mutably below.
         let has_remembered_kernel = self.remembered_kernel_spec(cx).is_some();
+        let kernel_reached_running = self.kernel_reached_running;
 
         let disposition = match &mut self.kernel {
             Kernel::RunningKernel(kernel) => {
@@ -1912,11 +1925,22 @@ impl NotebookEditor {
                     Disposition::Prompt
                 }
             }
-            // A previous launch FAILED: silently relaunching the remembered
-            // spec would loop the error forever (e.g. an env deleted
-            // mid-session that discovery still lists — bug #31). Re-prompt
-            // instead; an explicit pick replaces the broken selection.
-            Kernel::ErroredLaunch(_) => Disposition::Prompt,
+            // The kernel is in an error state. Two cases:
+            // - It DIED after running (e.g. the Rust/evcxr kernel exits when
+            //   interrupted, which errors the KERNEL, not a cell). The spec is
+            //   good, so relaunch it on this run — like `Shutdown` does — rather
+            //   than asking which kernel to use.
+            // - Its LAUNCH never connected (`kernel_reached_running == false`):
+            //   silently relaunching would loop the error forever (e.g. a spec
+            //   that can't start — bug #31), so re-prompt; an explicit pick
+            //   replaces the broken selection.
+            Kernel::ErroredLaunch(_) => {
+                if kernel_reached_running && has_remembered_kernel {
+                    Disposition::Queued { launch: true }
+                } else {
+                    Disposition::Prompt
+                }
+            }
             Kernel::ShuttingDown => Disposition::Failed("the kernel is shutting down".to_string()),
         };
 
