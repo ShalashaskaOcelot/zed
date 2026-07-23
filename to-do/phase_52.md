@@ -1,5 +1,12 @@
 # Phase 52 — Notebook session persistence (restore open notebooks on relaunch)
 
+⚠️ **CORE IMPLEMENTED — AWAITING USER TESTING** (pushed). The `SerializableItem`
+impl (serialize/deserialize/cleanup + `NotebookDb`) is in and compiles clippy-
+clean; both saved-by-path and untitled-by-nbformat restore paths are written.
+One task remains: confirm/adjust the last-window-close save-prompt behaviour for
+untitled notebooks (see the open task below). Runtime test recipe in
+Verification.
+
 Kind: **new feature**. Promoted from the backlog (user 2026-07-16) to restore
 5 phases in rotation after phase 51 completed, and scheduled as the next work
 item (user 2026-07-21).
@@ -38,23 +45,24 @@ Primary files: `crates/repl/src/notebook/notebook_ui.rs` (the
 
 ## Tasks
 
-- [ ] Register `NotebookEditor` as a serializable item from the repl `init`
+- [x] Register `NotebookEditor` as a serializable item from the repl `init`
       (`register_serializable_item::<NotebookEditor>`), gated the same way the
       notebook feature already is.
-- [ ] Add a `repl`-crate persistence module (sqlez, modeled on
-      `editor/src/persistence.rs`): a table keyed by `(workspace_id, item_id)`
-      storing either an abs path (saved) or the serialized nbformat JSON
-      (untitled), plus save/load/delete queries.
-- [ ] Implement `serialize`: for a saved notebook, store its abs path; for an
-      untitled one, store its current nbformat JSON (the same bytes the save
-      path writes). Honor `closing`. `should_serialize` fires on the events
-      that change identity/content (path set on save, structural/exec edits) —
-      keep it cheap.
-- [ ] Implement `deserialize`: saved → reopen by path via the existing
-      `.ipynb` path opener (don't duplicate load logic); untitled → rebuild a
-      `NotebookEditor` from the stored nbformat JSON as an untitled item.
-- [ ] Implement `cleanup` to drop rows for items no longer alive (mirror the
-      editor's cleanup), so the DB doesn't grow unbounded.
+- [x] Add a `repl`-crate persistence module (`notebook/persistence.rs`, sqlez
+      `NotebookDb` modeled on `editor/src/persistence.rs`): a `notebook_editors`
+      table keyed by `(item_id, workspace_id)` storing an abs path (saved) OR
+      the serialized nbformat JSON (untitled), with get/save queries and
+      `delete_unloaded_items` cleanup. Added `db` as a repl dependency.
+- [x] Implement `serialize`: saved → store abs path; untitled (`path.is_none()`)
+      → store `serde_json::to_string(to_notebook())`. Returns `None` when
+      there's nothing to restore. `should_serialize` returns true (the item's
+      only `Event` is `()`; the close-time serialize captures final state).
+- [x] Implement `deserialize`: saved → `<NotebookItem as project::ProjectItem>
+      ::try_open` by path then `NotebookEditor::new` (reuses the real load/watch
+      path); untitled → `parse_notebook_text` → `NotebookItem::untitled` →
+      `NotebookEditor::new`.
+- [x] Implement `cleanup` via `delete_unloaded_items(.., "notebook_editors",
+      &NotebookDb::global(cx), ..)`.
 - [ ] Make an untitled notebook behave like an unsaved buffer on last-window
       close: it should be kept in the session (serialized) rather than forcing
       a save prompt. Verify the prompt-on-close path keys off session
@@ -75,9 +83,13 @@ Primary files: `crates/repl/src/notebook/notebook_ui.rs` (the
 
 ## Verification
 
-- `cargo clippy -p repl` clean; `cargo test -p repl` passes; add a
-  round-trip unit test for the untitled-notebook serialize→deserialize path if
-  feasible without a full workspace harness.
-- User test: open a saved notebook + an untitled one, quit and relaunch → both
-  reopen (saved by path with content; untitled with its cells intact), no
-  save-prompt on quit for the untitled one.
+- [x] `cargo clippy -p repl` clean; compiles.
+- [ ] ⚠ untested — User test (saved): open a saved `.ipynb`, quit and relaunch
+      → it reopens with its content.
+- [ ] ⚠ untested — User test (untitled): New Jupyter Notebook, add/edit cells
+      (don't save), quit and relaunch → it reopens as untitled with the cells
+      intact. Note whether quitting still shows a save-prompt for it (the open
+      task) or keeps it silently like an unsaved buffer.
+- [ ] (deferred) `cargo test -p repl` round-trip unit test for the
+      untitled-notebook serialize→deserialize path, if feasible without a full
+      workspace harness.

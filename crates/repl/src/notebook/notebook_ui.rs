@@ -3,7 +3,7 @@ use std::future::Future;
 use std::time::Duration;
 use std::{path::PathBuf, sync::Arc};
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, anyhow};
 use collections::HashMap;
 use feature_flags::{FeatureFlagAppExt as _, NotebookFeatureFlag};
 use futures::FutureExt;
@@ -21,7 +21,12 @@ use ui::{Tooltip, prelude::*};
 use workspace::item::{SaveOptions, TabContentParams};
 use workspace::notifications::NotificationId;
 use workspace::searchable::SearchableItemHandle;
-use workspace::{Item, Open, Pane, ProjectItem, Workspace};
+use workspace::{
+    Item, ItemId, Open, Pane, ProjectItem, SerializableItem, Workspace, WorkspaceId,
+    delete_unloaded_items,
+};
+
+use crate::notebook::persistence::{NotebookDb, SerializedNotebook};
 
 use super::{
     Cell, CellEvent, CellExecutionStatus, CellPosition, CellToolbarAction, MarkdownCellEvent,
@@ -152,12 +157,14 @@ pub(crate) const CONTROL_SIZE: f32 = 20.0;
 pub fn init(cx: &mut App) {
     if cx.has_flag::<NotebookFeatureFlag>() || std::env::var("LOCAL_NOTEBOOK_DEV").is_ok() {
         workspace::register_project_item::<NotebookEditor>(cx);
+        workspace::register_serializable_item::<NotebookEditor>(cx);
     }
 
     cx.observe_flag::<NotebookFeatureFlag, _>({
         move |flag, cx| {
             if *flag {
                 workspace::register_project_item::<NotebookEditor>(cx);
+                workspace::register_serializable_item::<NotebookEditor>(cx);
             } else {
                 // todo: there is no way to unregister a project item, so if the feature flag
                 // gets turned off they need to restart Zed.
@@ -5071,6 +5078,135 @@ impl ProjectItem for NotebookEditor {
         cx: &mut Context<Self>,
     ) -> Self {
         Self::new(project, item, window, cx)
+    }
+}
+
+impl SerializableItem for NotebookEditor {
+    fn serialized_item_kind() -> &'static str {
+        "NotebookEditor"
+    }
+
+    fn cleanup(
+        workspace_id: WorkspaceId,
+        alive_items: Vec<ItemId>,
+        _window: &mut Window,
+        cx: &mut App,
+    ) -> Task<Result<()>> {
+        delete_unloaded_items(
+            alive_items,
+            workspace_id,
+            "notebook_editors",
+            &NotebookDb::global(cx),
+            cx,
+        )
+    }
+
+    fn serialize(
+        &mut self,
+        workspace: &mut Workspace,
+        item_id: ItemId,
+        _closing: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Task<Result<()>>> {
+        let workspace_id = workspace.database_id()?;
+        let abs_path = self.notebook_item.read(cx).path.clone();
+        // A saved notebook only needs its path (reloaded from disk on restore);
+        // an untitled one persists its full nbformat JSON so its cells survive.
+        let contents = if abs_path.is_none() {
+            serde_json::to_string(&self.to_notebook(cx)).ok()
+        } else {
+            None
+        };
+        // Nothing to restore from (untitled whose contents failed to serialize).
+        if abs_path.is_none() && contents.is_none() {
+            return None;
+        }
+        let db = NotebookDb::global(cx);
+        Some(cx.spawn_in(window, async move |_this, cx| {
+            cx.background_spawn(async move {
+                db.save_serialized_notebook(
+                    item_id,
+                    workspace_id,
+                    SerializedNotebook { abs_path, contents },
+                )
+                .await
+                .context("failed to save serialized notebook")
+            })
+            .await
+        }))
+    }
+
+    fn deserialize(
+        project: Entity<Project>,
+        _workspace: WeakEntity<Workspace>,
+        workspace_id: WorkspaceId,
+        item_id: ItemId,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Task<Result<Entity<Self>>> {
+        let serialized =
+            match NotebookDb::global(cx).get_serialized_notebook(item_id, workspace_id) {
+                Ok(Some(serialized)) => serialized,
+                Ok(None) => {
+                    return Task::ready(Err(anyhow!(
+                        "no serialized notebook for item {item_id} in workspace {workspace_id:?}"
+                    )));
+                }
+                Err(error) => return Task::ready(Err(error)),
+            };
+
+        if let Some(abs_path) = serialized.abs_path {
+            // Saved: reopen by path via the normal notebook open route so the
+            // file is loaded and watched exactly as a fresh open would be.
+            let project_path = project.update(cx, |project, cx| {
+                project
+                    .find_worktree(&abs_path, cx)
+                    .map(|(worktree, path)| ProjectPath {
+                        worktree_id: worktree.read(cx).id(),
+                        path,
+                    })
+            });
+            let Some(project_path) = project_path else {
+                return Task::ready(Err(anyhow!(
+                    "serialized notebook path is not in any worktree: {abs_path:?}"
+                )));
+            };
+            let Some(open_task) =
+                <NotebookItem as project::ProjectItem>::try_open(&project, &project_path, cx)
+            else {
+                return Task::ready(Err(anyhow!("not a notebook path: {abs_path:?}")));
+            };
+            window.spawn(cx, async move |cx| {
+                let notebook_item = open_task
+                    .await
+                    .context("failed to open serialized notebook by path")?;
+                cx.update(|window, cx| {
+                    cx.new(|cx| NotebookEditor::new(project, notebook_item, window, cx))
+                })
+            })
+        } else if let Some(contents) = serialized.contents {
+            // Untitled: rebuild the item from the stored nbformat JSON.
+            window.spawn(cx, async move |cx| {
+                let notebook = NotebookEditor::parse_notebook_text(&contents)
+                    .context("failed to parse serialized untitled notebook")?;
+                cx.update(|window, cx| {
+                    let languages = project.read(cx).languages().clone();
+                    let notebook_item = cx
+                        .new(|_| NotebookItem::untitled(project.downgrade(), languages, notebook));
+                    cx.new(|cx| NotebookEditor::new(project, notebook_item, window, cx))
+                })
+            })
+        } else {
+            Task::ready(Err(anyhow!("empty serialized notebook")))
+        }
+    }
+
+    fn should_serialize(&self, _event: &Self::Event) -> bool {
+        // The notebook's only event type is `()`, emitted on content-relevant
+        // changes; serialize on any of them. The close-time serialize captures
+        // final state regardless, so this only affects hot-exit freshness.
+        true
     }
 }
 

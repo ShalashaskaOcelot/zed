@@ -15257,6 +15257,7 @@ dependencies = [
  "client",
  "collections",
  "command_palette_hooks",
+ "db",
  "editor",
  "feature_flags",
  "file_icons",
