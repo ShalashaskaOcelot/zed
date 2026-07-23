@@ -504,7 +504,8 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ## 49. Files opened/saved outside the workspace aren't removed from the panel when deleted externally
 
-- **Status:** open
+- **Status:** open (low priority — user-facing symptom resolved by phase 53;
+  only a latent watching gap remains)
 - **Symptom:** (user 2026-07-21) A notebook saved outside the workspace shows as
   a standalone root in the panel (see phase for the "don't add external saves to
   the workspace" change). Deleting that file from the OS file manager does not
@@ -519,7 +520,15 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   single-file worktree fs-event handling in `crates/worktree`. May become moot
   for the notebook flow once external saves no longer create visible worktrees
   (the Zed-wide behavior change), but the underlying watching gap is separate.
-- **Fix attempted:** none
+- **Update (post phase 53):** the reported SYMPTOM is resolved — external saves
+  no longer add a visible single-file-worktree root to the panel, and
+  externally-OPENED files were always in an INVISIBLE worktree (not shown in the
+  panel), so there is no longer a stuck panel entry to fail to remove. What
+  remains is a latent gap (a single-file worktree may not react to its root file
+  being deleted/renamed on disk), but it has no current user-visible symptom in
+  the save/open flow. Downgraded to low priority; fix only if a concrete symptom
+  reappears (would be a `crates/worktree` fs-event investigation).
+- **Fix attempted:** none (symptom addressed indirectly by phase 53)
 - **Tested:** n/a
 
 ## 50. Whole workspace/session lost after deleting externally-saved files
