@@ -458,3 +458,89 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   connected still prompts (bug #31 preserved), and a vanished env still prompts
   (phase 42 filter makes `has_remembered_kernel` false).
 - **Tested:** untested — see `awaiting_testing.md`.
+
+## 47. Notebook tab title stays "Untitled" after saving it outside the workspace
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-07-21) Save a notebook (untitled or otherwise) to a
+  path OUTSIDE the current workspace (e.g. the Desktop). The tab keeps showing
+  "Untitled" even though the file is saved and named (Ctrl-S shows no dialog and
+  there's no dirty dot — the path IS attached; only the title is wrong). Saving
+  INSIDE the workspace shows the correct name. Reproduces without any restart,
+  so unrelated to session restore (phase 52).
+- **Analysis (workflow investigation, high confidence):** saving to a path in no
+  existing worktree makes the shared save flow
+  `project.find_or_create_worktree(new_path, /*visible=*/true)` create a NEW
+  single-file worktree rooted AT the file; its worktree-relative path is
+  `RelPath::empty_arc()` (`worktree_store.rs:436`). `tab_content_text`
+  (`notebook_ui.rs:4856`) derived the label from `project_path.path.file_name()`,
+  which is `None` on the empty relative path → "Untitled". (The plain text
+  editor is unaffected: it titles from the buffer's file, which falls back to
+  the worktree root name.)
+- **Fix attempted:** derive the tab label from the ABSOLUTE `path` (always set
+  on save/open; `None` only when genuinely untitled) instead of the relative
+  path (`notebook_ui.rs` tab_content_text). Commit `ae75857da4`.
+- **Tested:** untested — see `awaiting_testing.md`.
+
+## 48. A notebook saved outside the workspace reopens as raw JSON (not the notebook UI)
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-07-21) After saving a notebook outside the workspace,
+  clicking it in the project panel opens the raw `.ipynb` JSON in a text editor
+  instead of rendering the notebook. In-workspace notebooks render fine.
+  Reproduces with a fresh notebook, no restart (not session restore).
+- **Analysis (workflow investigation, high confidence):** same single-file
+  worktree quirk as #47 — the external file's worktree-relative path is empty
+  and its name lives in the worktree `root_name`, so the relative path stays
+  empty permanently. `NotebookItem::try_open` (`notebook_ui.rs:4715`) gated the
+  `.ipynb` match on `path.path.extension()`, which is `None` on the empty
+  relative path → `try_open` returns `None` → the `ProjectItemRegistry` open
+  loop (`workspace.rs`) falls through to the universal text `Editor` → raw JSON.
+- **Fix attempted:** accept `.ipynb` by the ABSOLUTE path when the relative
+  path has no extension (`notebook_ui.rs` `NotebookItem::try_open`); the
+  relative check stays the fast path so in-workspace opens are unchanged. Commit
+  `ae75857da4`.
+- **Tested:** untested — see `awaiting_testing.md`.
+
+## 49. Files opened/saved outside the workspace aren't removed from the panel when deleted externally
+
+- **Status:** open
+- **Symptom:** (user 2026-07-21) A notebook saved outside the workspace shows as
+  a standalone root in the panel (see phase for the "don't add external saves to
+  the workspace" change). Deleting that file from the OS file manager does not
+  remove it from Zed's panel: one entry got renamed to the Windows Recycle Bin
+  artifact `$RVIBBRG.ipynb` (a rename event was seen) and another
+  (`test2.ipynb`) just stayed. Files INSIDE the workspace disappear from the
+  panel immediately on external delete.
+- **Analysis (hypothesis):** these external files live in single-file worktrees.
+  Single-file-worktree file-watching / entry-removal appears not to handle
+  deletion (or a Recycle-Bin rename) the way a normal directory worktree does.
+  Likely shared Zed behavior, not notebook-specific. Needs investigation of
+  single-file worktree fs-event handling in `crates/worktree`. May become moot
+  for the notebook flow once external saves no longer create visible worktrees
+  (the Zed-wide behavior change), but the underlying watching gap is separate.
+- **Fix attempted:** none
+- **Tested:** n/a
+
+## 50. Whole workspace/session lost after deleting externally-saved files
+
+- **Status:** open
+- **Symptom:** (user 2026-07-21) After saving files outside the workspace (which
+  were added as single-file worktree roots — see #49) and then deleting them
+  externally, closing and reopening Zed restored NO session at all — the open
+  workspace was lost. User couldn't test with unsaved work open. User suspects
+  the stale external entries corrupted the workspace session rather than a
+  phase-52 issue (phase 52 restore had been working).
+- **Analysis (hypothesis, NOT yet root-caused):** two candidates, needs
+  investigation: (1) WORKSPACE-LEVEL — a serialized worktree/item pointing at a
+  now-deleted external path throws during restore, and if that error isn't
+  isolated per-item the whole session restore aborts (Zed-core robustness gap);
+  (2) PHASE-52-LEVEL — `NotebookEditor::deserialize` returns `Err` for a saved
+  notebook whose path's worktree can't be found; must confirm the workspace
+  SKIPS a failed item deserialize rather than treating it as fatal. Either way,
+  phase 52's deserialize must fail gracefully for a vanished path (defensive fix
+  tracked in phase 52). Investigate `workspace` restore/`deserialize_to`/
+  `serialize_items` error handling and whether a missing serialized worktree
+  path aborts restore.
+- **Fix attempted:** none
+- **Tested:** n/a

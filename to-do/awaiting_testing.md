@@ -28,6 +28,12 @@ listed here.
       kernel and run, NOT pop up the kernel picker. Also confirm a genuine
       launch failure (e.g. pick a broken/removed env) still prompts rather than
       relaunch-looping.
+- [ ] Bug #47 — Save a notebook to a path OUTSIDE the workspace (e.g. Desktop):
+      the tab should show the real filename, not "Untitled". (In-workspace saves
+      should still show the correct name.)
+- [ ] Bug #48 — After saving a notebook outside the workspace, click it in the
+      project panel → it should render as a notebook, NOT open as raw JSON.
+      (In-workspace notebooks should still render.)
 
 ## Phase 44 — Build the user-level Windows installer locally
 

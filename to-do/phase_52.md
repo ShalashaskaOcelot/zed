@@ -1,11 +1,17 @@
 # Phase 52 — Notebook session persistence (restore open notebooks on relaunch)
 
-⚠️ **CORE IMPLEMENTED — AWAITING USER TESTING** (pushed). The `SerializableItem`
-impl (serialize/deserialize/cleanup + `NotebookDb`) is in and compiles clippy-
-clean; both saved-by-path and untitled-by-nbformat restore paths are written.
-One task remains: confirm/adjust the last-window-close save-prompt behaviour for
-untitled notebooks (see the open task below). Runtime test recipe in
-Verification.
+⚠️ **CORE CONFIRMED WORKING** (user 2026-07-21): saved-by-path restore, untitled
+restore (with outputs), and silent keep-on-close (no save prompt) all verified.
+ONE task remains before archiving — harden the deserialize path so it can never
+abort the whole session when a restored notebook's file/worktree is gone (see
+the open task + bug #50). Kept open deliberately: a persistence feature isn't
+"done" until its restore is proven unable to lose a session.
+
+Testing also surfaced separate, pre-existing bugs around saving OUTSIDE the
+workspace — NOT phase 52 (they reproduce with no restart): tab title
+(bug #47, fixed), reopen-as-raw-JSON (bug #48, fixed), external-delete not
+reflected (bug #49, open), session loss (bug #50, open), and the Zed-wide
+"external save shouldn't join the workspace" behaviour change (phase 53).
 
 Kind: **new feature**. Promoted from the backlog (user 2026-07-16) to restore
 5 phases in rotation after phase 51 completed, and scheduled as the next work
@@ -63,10 +69,18 @@ Primary files: `crates/repl/src/notebook/notebook_ui.rs` (the
       `NotebookEditor::new`.
 - [x] Implement `cleanup` via `delete_unloaded_items(.., "notebook_editors",
       &NotebookDb::global(cx), ..)`.
-- [ ] Make an untitled notebook behave like an unsaved buffer on last-window
-      close: it should be kept in the session (serialized) rather than forcing
-      a save prompt. Verify the prompt-on-close path keys off session
-      participation now that notebooks participate.
+- [x] Make an untitled notebook behave like an unsaved buffer on last-window
+      close (kept in the session, no save prompt). CONFIRMED 2026-07-21: the
+      user's untitled notebook was silently kept and restored on relaunch (with
+      outputs) — no explicit change was needed beyond participating in the
+      session.
+- [ ] Harden deserialize robustness so a restored notebook can NEVER abort the
+      workspace session restore — a saved notebook whose file/worktree is gone
+      must fail gracefully and be skipped, not take down the whole session.
+      Confirm the workspace isolates a failed `SerializableItem::deserialize`
+      per-item (coordinate with bug #50, the session-loss investigation); harden
+      here if it does not. This is the only reason the phase is still open: the
+      restore path must be proven safe before persistence is called done.
 
 ## Risks / gaps
 
