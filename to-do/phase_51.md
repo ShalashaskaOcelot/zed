@@ -21,13 +21,17 @@ Primary files: `crates/gpui/src/elements/list.rs` (new scroll primitive),
 
 ## Tasks
 
-- [x] Add `ListState::scroll_to_item_near_top(ix, margin)` in gpui: scroll so
-      `ix`'s top sits `margin` px below the viewport top. The margin is a fixed
-      offset applied ABOVE `ix` (converted back to a `ListOffset` via the
-      sum-tree cursor), so a tall preceding item only ever shows its last
-      `margin` px and can never push `ix` out of view. Margin clamped to ≤ ⅓ of
-      the viewport (and to 0 before the list is measured) so it degrades on
-      short viewports.
+- [x] Add `ListState::scroll_to_item_near_top(ix, margin)` in gpui. Anchors on
+      an item BOUNDARY: the highest preceding item whose cumulative height (down
+      to `ix`'s top) still fits within `margin`, else `ix` itself. The list
+      paints from the anchor down, so anchoring on a boundary makes `ix`'s
+      position immune to remeasurement of everything above the anchor — a tall
+      preceding item (big output OR large markdown cells) is simply not shown
+      rather than pushing `ix` down as it lays out. Margin clamped to ≤ ⅓ of the
+      viewport (and to 0 before measurement, pinning `ix` flush to the top).
+      (First cut anchored a partial slice INTO the item above; that drifted the
+      running cell down when a tall markdown/output above it measured taller —
+      user-found. Boundary anchoring fixes it.)
 - [x] Add a `follow_scroll_to(index)` helper on `NotebookEditor` that computes
       the margin from the viewport (`viewport_height * 0.12`, clamped to
       40–96 px — "near the top" on large screens without dominating small ones)
@@ -47,13 +51,18 @@ Primary files: `crates/gpui/src/elements/list.rs` (new scroll primitive),
   list behaves at its tail.
 - Margin is a taste value (40–96 px); easy to retune if the user wants
   more/less context above.
+- Consequence of boundary anchoring: context is whole preceding items that fit
+  within the margin (a heading, a short output), not a fixed-height sliver. A
+  preceding item taller than the margin shows nothing above — the running cell
+  pins to the top. This is the intended trade: robustness over always showing a
+  sliver of a big cell.
 
 ## Verification
 
-- [x] `cargo clippy -p repl -p zed_actions` clean (full `./script/clippy` can't
-      run in the remote env — `--all-features` needs the system ALSA dev lib).
-- [ ] ⚠ untested — User test: Follow on, Run All a notebook where cells have
-      substantial output → each running cell settles NEAR the top (a sliver of
-      the previous cell visible above), not jammed on the bottom edge, and a
-      big previous output does not push the running cell off-screen; walk
-      reaches the last cell without lurching.
+- [x] `cargo clippy` clean on touched crates (full `./script/clippy` can't run
+      in the remote env — `--all-features` needs the system ALSA dev lib).
+- [ ] ⚠ untested — User test: Follow on, Run All a notebook whose cells have
+      substantial output AND large markdown cells → each running cell settles
+      NEAR the top (whole short preceding items shown as context; large
+      preceding cells NOT shown and NOT pushing it down), never jammed on the
+      bottom edge; walk reaches the last cell without lurching.

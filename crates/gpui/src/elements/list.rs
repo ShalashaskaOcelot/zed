@@ -703,19 +703,24 @@ impl ListState {
         state.logical_scroll_top = Some(scroll_top);
     }
 
-    /// Scroll so item `ix`'s top sits `margin` pixels below the top of the
-    /// viewport — pinning `ix` NEAR (but not flush against) the top, leaving a
-    /// sliver of the preceding item visible for context.
+    /// Scroll to pin item `ix` NEAR the top of the viewport, showing whole
+    /// preceding items above it as context only while their cumulative height
+    /// fits within `margin`.
     ///
-    /// The margin is a fixed offset applied ABOVE `ix`, so a tall preceding
-    /// item (e.g. a cell with a lot of output) can never push `ix` down and
-    /// out of view — only the last `margin` px of that item show. The margin
-    /// is clamped to at most a third of the viewport so it degrades gracefully
-    /// on short viewports (and to zero before the list has been measured).
+    /// The anchor is always an item BOUNDARY (the top of the highest preceding
+    /// item that still fits within `margin`, or `ix` itself when even the
+    /// immediately-preceding item is taller than `margin`). Because the list
+    /// paints from the anchor downward, anchoring on a boundary makes `ix`'s
+    /// on-screen position immune to remeasurement of everything above the
+    /// anchor: a tall preceding item (a cell with lots of output, or several
+    /// large markdown cells) is simply not shown rather than pushing `ix` down
+    /// and out of view as it lays out. `margin` is clamped to at most a third
+    /// of the viewport (and to zero before the list has been measured, which
+    /// pins `ix` flush to the top).
     ///
     /// Unlike [`scroll_to_reveal_item`], which does a minimal reveal (landing a
-    /// below-viewport item on the BOTTOM edge), this always repositions `ix` to
-    /// the same near-top anchor — used by the notebook "follow running cell"
+    /// below-viewport item on the BOTTOM edge), this repositions `ix` to a
+    /// consistent near-top anchor — used by the notebook "follow running cell"
     /// mode so a Run All visibly walks down with the running cell held near the
     /// top.
     pub fn scroll_to_item_near_top(&self, ix: usize, margin: Pixels) {
@@ -727,21 +732,29 @@ impl ListState {
 
         // Scope the cursor so its immutable borrow of `state` ends before the
         // mutable `rebase_pending_scroll` / `logical_scroll_top` writes below.
-        let scroll_top = {
+        let anchor_ix = {
             let mut cursor = state.items.cursor::<ListItemSummary>(());
             cursor.seek(&Count(ix), Bias::Right);
             let item_top = cursor.start().height;
-            // The content-y the viewport top should land at: `margin` px above
-            // the item's top, never negative.
-            let target_top = (item_top - margin).max(px(0.));
-            // Convert that content-y back into a logical offset — which item
-            // contains it, and how far into that item. (`seek` re-seeks from
-            // the root, so seeking to an earlier position than `ix` is fine.)
-            cursor.seek(&Height(target_top), Bias::Left);
-            ListOffset {
-                item_ix: cursor.start().count,
-                offset_in_item: target_top - cursor.start().height,
+            // Walk up taking whole preceding items as context while the total
+            // shown (from the candidate's top down to `ix`'s top) stays within
+            // `margin`. (`seek` re-seeks from the root, so stepping to earlier
+            // indices is fine.)
+            let mut anchor_ix = ix;
+            while anchor_ix > 0 {
+                cursor.seek(&Count(anchor_ix - 1), Bias::Right);
+                let candidate_top = cursor.start().height;
+                if item_top - candidate_top > margin {
+                    break;
+                }
+                anchor_ix -= 1;
             }
+            anchor_ix
+        };
+
+        let scroll_top = ListOffset {
+            item_ix: anchor_ix,
+            offset_in_item: px(0.),
         };
         state.rebase_pending_scroll(scroll_top);
         state.logical_scroll_top = Some(scroll_top);
