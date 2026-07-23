@@ -531,17 +531,33 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   workspace was lost. User couldn't test with unsaved work open. User suspects
   the stale external entries corrupted the workspace session rather than a
   phase-52 issue (phase 52 restore had been working).
-- **Analysis (hypothesis, NOT yet root-caused):** two candidates, needs
-  investigation: (1) WORKSPACE-LEVEL — a serialized worktree/item pointing at a
-  now-deleted external path throws during restore, and if that error isn't
-  isolated per-item the whole session restore aborts (Zed-core robustness gap);
-  (2) PHASE-52-LEVEL — `NotebookEditor::deserialize` returns `Err` for a saved
-  notebook whose path's worktree can't be found; must confirm the workspace
-  SKIPS a failed item deserialize rather than treating it as fatal. Either way,
-  the notebook `deserialize` (`NotebookEditor::deserialize`, `notebook_ui.rs`)
-  must fail gracefully for a vanished path so it can never abort restore — that
-  defensive hardening is owned by THIS bug (phase 52 is complete). Investigate
-  `workspace` restore/`deserialize_to`/`serialize_items` error handling and
-  whether a missing serialized worktree path aborts restore.
-- **Fix attempted:** none
+- **Root cause (code inspection, high confidence):** the whole-workspace
+  restore gate is all-or-nothing on path existence.
+  `WorkspaceDb::all_paths_exist_with_a_directory` (`persistence.rs:2001-2014`)
+  loops the workspace's serialized root paths and `return false` the moment ONE
+  path's `fs.metadata` is `None` (deleted). The restore callers
+  (`recent_project_workspaces_ungrouped:2044`, `last_workspace`/its helper
+  `:2155`, `last_session_workspace_locations:2204`) then DROP the entire
+  workspace when it returns false. The user's workspace location was
+  `[rust-data-analysis (dir), Desktop/test.ipynb (file), Desktop/test2.ipynb
+  (file)]` — the external files were added to the location by save-as (the
+  phase-53 bug). Deleting them made one path missing → the whole workspace
+  (including the real folder) was excluded from restore = total session loss.
+  NOT a phase-52 issue: this gate runs on the workspace LOCATION before any item
+  is deserialized, so `NotebookEditor::deserialize` is not implicated (and
+  per-item deserialize errors are isolated, like the editor's). Phase 53
+  (external saves no longer add roots) removes the main TRIGGER going forward,
+  but the underlying all-or-nothing gate remains a robustness gap for any
+  multi-root workspace where one root later disappears (e.g. an unplugged drive).
+- **Fix direction (Zed-core, needs care — several callers):** instead of
+  rejecting the whole workspace when a path is missing, FILTER the missing paths
+  out and restore the workspace from the survivors as long as at least one
+  directory remains; only skip entirely when nothing usable survives. Must
+  thread the filtered path set through the callers (they currently build
+  `RecentWorkspace`/`SessionWorkspace` with the full `paths`) without breaking
+  workspace identity/dedup (note the existing `identity_paths` vs `paths`
+  split). Add a unit test: a location with one missing file + one present dir
+  restores with just the dir.
+- **Fix attempted:** none (root-caused; fix pending — core restore semantics
+  change, worth confirming the "restore survivors" behavior before shipping).
 - **Tested:** n/a
