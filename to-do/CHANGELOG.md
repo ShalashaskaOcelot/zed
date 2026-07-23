@@ -170,6 +170,14 @@ entry rather than archiving it.
   rather than pushing it down (immune to remeasurement above the anchor).
   Replaces the minimal reveal that landed each running cell on the bottom edge.
   User-confirmed working. `2e255cda3e`
+- Phase 52 — Notebook session persistence: `NotebookEditor` implements
+  `workspace::SerializableItem` (new `NotebookDb` sqlez module), so open
+  notebooks restore with the workspace session — saved ones reopen by path,
+  untitled ones round-trip their nbformat JSON and come back untitled with cells
+  and outputs intact, and an untitled notebook is silently kept on close (no
+  save prompt) like an unsaved buffer. User-confirmed working. `4f8238ff8f`.
+  (Deserialize robustness against a vanished restore path is tracked as bug #50,
+  not this phase.)
 
 ## Fixed bugs (confirmed)
 

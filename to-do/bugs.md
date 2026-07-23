@@ -538,9 +538,10 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   (2) PHASE-52-LEVEL — `NotebookEditor::deserialize` returns `Err` for a saved
   notebook whose path's worktree can't be found; must confirm the workspace
   SKIPS a failed item deserialize rather than treating it as fatal. Either way,
-  phase 52's deserialize must fail gracefully for a vanished path (defensive fix
-  tracked in phase 52). Investigate `workspace` restore/`deserialize_to`/
-  `serialize_items` error handling and whether a missing serialized worktree
-  path aborts restore.
+  the notebook `deserialize` (`NotebookEditor::deserialize`, `notebook_ui.rs`)
+  must fail gracefully for a vanished path so it can never abort restore — that
+  defensive hardening is owned by THIS bug (phase 52 is complete). Investigate
+  `workspace` restore/`deserialize_to`/`serialize_items` error handling and
+  whether a missing serialized worktree path aborts restore.
 - **Fix attempted:** none
 - **Tested:** n/a
