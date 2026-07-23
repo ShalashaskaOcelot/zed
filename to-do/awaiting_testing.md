@@ -34,6 +34,15 @@ listed here.
 - [ ] Bug #48 — After saving a notebook outside the workspace, click it in the
       project panel → it should render as a notebook, NOT open as raw JSON.
       (In-workspace notebooks should still render.)
+- [ ] Bug #50 — Open a workspace folder, then (a) also have another root that
+      you delete, or (b) create an UNSAVED notebook/buffer and then delete the
+      whole workspace folder. Quit and relaunch → the session should restore:
+      surviving roots come back, and unsaved items are recovered even if their
+      folder is gone (no more whole-session loss over a deleted path).
+- [ ] Phase 53 — Save a new buffer (text) AND a notebook to a path OUTSIDE the
+      project (e.g. Desktop): each stays open and re-saveable (Ctrl-S, no dialog)
+      but does NOT appear as a root in the project panel; saving a new file INTO
+      a workspace folder DOES still appear.
 
 ## Phase 44 — Build the user-level Windows installer locally
 

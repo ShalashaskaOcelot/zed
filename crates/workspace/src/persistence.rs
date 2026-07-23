@@ -2013,6 +2013,20 @@ impl WorkspaceDb {
         any_dir
     }
 
+    /// Keep only the root paths that still exist on disk. Used when restoring a
+    /// session so a deleted root drops just that root instead of discarding the
+    /// whole workspace — the surviving roots (and the workspace's unsaved,
+    /// DB-stored items) are preserved. See bug #50.
+    async fn existing_paths(paths: &PathList, fs: &dyn Fs) -> PathList {
+        let mut surviving = Vec::new();
+        for path in paths.paths() {
+            if fs.metadata(path).await.ok().flatten().is_some() {
+                surviving.push(path.clone());
+            }
+        }
+        PathList::new(&surviving)
+    }
+
     // Returns the raw recent workspace history. Scratch workspaces (no paths) are filtered
     // out because they are restored separately by `last_session_workspace_locations`.
     pub async fn recent_project_workspaces_ungrouped(
@@ -2201,14 +2215,19 @@ impl WorkspaceDb {
                 continue;
             }
 
-            if paths.is_empty() || Self::all_paths_exist_with_a_directory(paths.paths(), fs).await {
-                workspaces.push(SessionWorkspace {
-                    workspace_id,
-                    location: SerializedWorkspaceLocation::Local,
-                    paths,
-                    window_id,
-                });
-            }
+            // Restore the workspace even when some (or all) of its root paths
+            // no longer exist: drop just the missing roots and keep the
+            // survivors, so deleting a folder never discards the whole session.
+            // A workspace with NO surviving roots is still restored (as an empty
+            // location) so its unsaved items — which live in the DB, not on disk
+            // — are recovered rather than lost with the folder (bug #50).
+            let paths = Self::existing_paths(&paths, fs).await;
+            workspaces.push(SessionWorkspace {
+                workspace_id,
+                location: SerializedWorkspaceLocation::Local,
+                paths,
+                window_id,
+            });
         }
 
         if let Some(stack) = last_session_window_stack {
@@ -4941,6 +4960,88 @@ mod tests {
         assert!(
             restored_ids.contains(&ws1_id),
             "Remaining workspace should still appear in session restoration list"
+        );
+    }
+
+    // Bug #50: a session workspace whose root paths partly or wholly vanished
+    // must still be restored — dropping only the missing roots — so a deleted
+    // folder never discards the whole session (and its unsaved, DB-stored
+    // items are recovered even when every root is gone).
+    #[gpui::test]
+    async fn test_session_restore_drops_missing_roots_keeps_survivors(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        crate::tests::init_test(cx);
+
+        let fs = fs::FakeFs::new(cx.executor());
+        let present = tempfile::TempDir::with_prefix("restore_present").unwrap();
+        fs.insert_tree(present.path(), json!({})).await;
+        // A path that never exists in the fake fs (simulating a deleted root).
+        let missing = present.path().join("deleted_root_that_never_existed");
+
+        let db = cx.update(|cx| WorkspaceDb::global(cx));
+        let session_id = "test-restore-survivors-session";
+
+        let mixed_id = db.next_id().await.unwrap();
+        db.save_workspace(SerializedWorkspace {
+            id: mixed_id,
+            paths: PathList::new(&[present.path().to_path_buf(), missing.clone()]),
+            identity_paths: None,
+            location: SerializedWorkspaceLocation::Local,
+            center_group: Default::default(),
+            window_bounds: Default::default(),
+            display: Default::default(),
+            docks: Default::default(),
+            centered_layout: false,
+            session_id: Some(session_id.to_owned()),
+            bookmarks: Default::default(),
+            breakpoints: Default::default(),
+            window_id: Some(1),
+            user_toolchains: Default::default(),
+        })
+        .await;
+
+        let all_gone_id = db.next_id().await.unwrap();
+        db.save_workspace(SerializedWorkspace {
+            id: all_gone_id,
+            paths: PathList::new(&[missing.clone()]),
+            identity_paths: None,
+            location: SerializedWorkspaceLocation::Local,
+            center_group: Default::default(),
+            window_bounds: Default::default(),
+            display: Default::default(),
+            docks: Default::default(),
+            centered_layout: false,
+            session_id: Some(session_id.to_owned()),
+            bookmarks: Default::default(),
+            breakpoints: Default::default(),
+            window_id: Some(2),
+            user_toolchains: Default::default(),
+        })
+        .await;
+
+        let locations = db
+            .last_session_workspace_locations(session_id, None, fs.as_ref())
+            .await
+            .unwrap();
+
+        let mixed = locations
+            .iter()
+            .find(|sw| sw.workspace_id == mixed_id)
+            .expect("workspace with a surviving root must still be restored");
+        assert_eq!(
+            mixed.paths.paths().len(),
+            1,
+            "the missing root should be dropped, keeping only the surviving one"
+        );
+
+        let all_gone = locations
+            .iter()
+            .find(|sw| sw.workspace_id == all_gone_id)
+            .expect("workspace whose only root vanished must still be restored so its unsaved items survive");
+        assert!(
+            all_gone.paths.is_empty(),
+            "all roots gone -> empty location, but the workspace is still restored"
         );
     }
 

@@ -524,7 +524,7 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ## 50. Whole workspace/session lost after deleting externally-saved files
 
-- **Status:** open
+- **Status:** fix attempted - untested
 - **Symptom:** (user 2026-07-21) After saving files outside the workspace (which
   were added as single-file worktree roots — see #49) and then deleting them
   externally, closing and reopening Zed restored NO session at all — the open
@@ -558,6 +558,16 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   workspace identity/dedup (note the existing `identity_paths` vs `paths`
   split). Add a unit test: a location with one missing file + one present dir
   restores with just the dir.
-- **Fix attempted:** none (root-caused; fix pending — core restore semantics
-  change, worth confirming the "restore survivors" behavior before shipping).
-- **Tested:** n/a
+- **Fix attempted:** in `last_session_workspace_locations` (`persistence.rs`),
+  replaced the all-or-nothing `paths.is_empty() || all_paths_exist_with_a_directory`
+  gate with a new `existing_paths` filter: each restored session workspace keeps
+  only its surviving root paths, and is ALWAYS restored (even with zero surviving
+  roots, as an empty location) so its unsaved, DB-stored items are recovered
+  rather than discarded with a deleted folder. Covers both facets the user
+  raised: (1) a multi-root workspace with one dead root restores the survivors;
+  (2) unsaved items survive even when every folder is gone. Added unit test
+  `test_session_restore_drops_missing_roots_keeps_survivors`. The recent-projects
+  UI list (`recent_project_workspaces_ungrouped`) intentionally still hides
+  fully-dead projects; `garbage_collect_workspaces`'s 7-day deletion is mitigated
+  because a restored workspace rejoins the current session (so it's not GC'd).
+- **Tested:** unit test passes; runtime untested — see `awaiting_testing.md`.
