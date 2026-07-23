@@ -4712,7 +4712,22 @@ impl project::ProjectItem for NotebookItem {
         let project = project.clone();
         let languages = project.read(cx).languages().clone();
 
-        if path.path.extension().unwrap_or_default() == "ipynb" {
+        // Match `.ipynb` by the worktree-relative path (the fast common case),
+        // falling back to the ABSOLUTE path when the relative one carries no
+        // extension. A file saved/opened OUTSIDE any worktree gets a single-file
+        // worktree rooted at the file, whose relative path is empty — without
+        // this fallback the extension gate failed and the notebook opened as raw
+        // JSON in a plain text editor instead of the notebook UI.
+        let is_ipynb = path.path.extension() == Some("ipynb")
+            || project
+                .read(cx)
+                .absolute_path(&path, cx)
+                .as_deref()
+                .and_then(|abs_path| abs_path.extension())
+                .and_then(|ext| ext.to_str())
+                == Some("ipynb");
+
+        if is_ipynb {
             Some(cx.spawn(async move |cx| {
                 let abs_path = project
                     .read_with(cx, |project, cx| project.absolute_path(&path, cx))
@@ -4854,12 +4869,18 @@ impl Item for NotebookEditor {
     }
 
     fn tab_content_text(&self, _detail: usize, cx: &App) -> SharedString {
+        // Derive the tab label from the ABSOLUTE path, not the worktree-relative
+        // path: a notebook saved OUTSIDE any worktree lives in a single-file
+        // worktree rooted at the file itself, so its relative path is empty and
+        // `project_path.path.file_name()` is `None` (which fell back to
+        // "Untitled" even though the file was named and saved). `path` is set on
+        // both save and open, and is `None` only when genuinely untitled.
         self.notebook_item
             .read(cx)
-            .project_path
+            .path
             .as_ref()
-            .and_then(|project_path| project_path.path.file_name())
-            .map(|name| name.to_string().into())
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned().into())
             .unwrap_or_else(|| SharedString::from("Untitled"))
     }
 
