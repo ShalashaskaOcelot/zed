@@ -41,10 +41,10 @@ deltas — animating it again would add lag).
 
 - [ ] Add an `editor.smooth_scrolling` setting: `EditorSettings.smooth_scrolling:
       bool`, the `Option<bool>` source in `settings_content/src/editor.rs`, the
-      default in `assets/settings/default.json`, and a docs entry. **Default:**
-      recommend `true` (the user asked for the feature; it's their fork) — but
-      call it out; VS Code defaults its equivalent to `false`, so a conservative
-      opt-in default is also defensible.
+      default in `assets/settings/default.json`, and a docs entry. **Default:
+      `true`** (decided by the user 2026-07-23 — it's their fork; VS Code's
+      equivalent defaults off, but here we default on). Users who prefer instant
+      scrolling can set it `false`.
 - [ ] Add smooth-scroll animation state to `ScrollManager`: a target scroll
       position, the current animated position, the last-frame `Instant`, and an
       "animating" flag. Add a method to (re)target the animation to a new scroll
@@ -87,7 +87,7 @@ deltas — animating it again would add lag).
   cursor-reveal `autoscroll` — risks laggy cursor tracking on fast movement,
   deserves its own decision; (2) the NOTEBOOK cell list, which scrolls via a
   gpui `ListState` (`crates/gpui/src/elements/list.rs`), a DIFFERENT mechanism
-  from the editor — smooth scrolling there would be a separate phase.
+  from the editor — that is **phase 55**.
 - Upstream divergence: this touches core editor scroll; keep the change
   localized (ideally most logic inside `ScrollManager`) and record it in the
   upstream-merge playbook (phase 46) as a fork behavior addition.
