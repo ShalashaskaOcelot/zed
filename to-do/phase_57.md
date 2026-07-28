@@ -1,5 +1,8 @@
 # Phase 57 — In-notebook search (Ctrl-F), part 1: find / highlight / navigate
 
+⚠️ AWAITING USER TESTING (implementation complete, clippy-clean; runtime
+verification pending — see the user-test task).
+
 Kind: **new feature** (notebook-primary). Requested by the user 2026-07-23
 (promoted from the backlog item "In-notebook search (Ctrl-F)", reported
 2026-07-16). Priority: user's main ask this round.
@@ -76,18 +79,19 @@ advanced options are deferred to a part-2 phase.
 
 ## Tasks
 
-- [ ] Add `impl EventEmitter<SearchEvent> for NotebookEditor` and emit
-      `MatchesInvalidated` / `ActiveMatchChanged` where the per-editor impl does.
-- [ ] Define the `Match` type and implement `SearchableItem for NotebookEditor`
-      (find / update / clear / activate / active_index / query_suggestion /
-      select / supported_options / no-op replace) delegating to per-cell editors.
-- [ ] Flip `as_searchable` to `Some(Box::new(handle.clone()))`.
-- [ ] Cross-cell active-match index helper (ordered position vs selected cell +
-      cursor), reusing `editor::active_match_index` per cell where possible.
-- [ ] `activate_match` selects + focuses the cell and reveals it via the
-      index-anchored `follow_scroll_to` (bug-#45-safe), then selects the range
-      in the cell editor.
-- [ ] `./script/clippy` clean; `cargo build -p repl` succeeds.
+- [x] Add `impl EventEmitter<SearchEvent> for NotebookEditor` (emits
+      `MatchesInvalidated` on clear, `ActiveMatchChanged` on activate).
+- [x] Define the `Match` type (`NotebookSearchMatch { cell_id, range }`) and
+      implement `SearchableItem for NotebookEditor` (find / update / clear /
+      activate / active_index / query_suggestion / select / supported_options /
+      no-op replace) delegating to per-cell editors.
+- [x] Flip `as_searchable` to `Some(Box::new(handle.clone()))`.
+- [x] Cross-cell active-match index helper (ordered position vs selected cell +
+      cursor), reusing `editor::items::active_match_index` per cell.
+- [x] `activate_match` selects the cell and reveals it via the index-anchored
+      `follow_scroll_to` (bug-#45-safe), then selects the range in the cell
+      editor.
+- [x] `./script/clippy -p repl` clean; `cargo check -p repl` succeeds.
 - [ ] **User test:** Ctrl-F in a notebook highlights matches across cells;
       next/prev cycles through them in document order; activating a match
       selects the cell, scrolls to it, and selects the text; Esc closes search.

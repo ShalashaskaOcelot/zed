@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::future::Future;
+use std::ops::Range;
 use std::time::Duration;
 use std::{path::PathBuf, sync::Arc};
 
@@ -16,11 +17,13 @@ use gpui::{
 use language::{Buffer, Language, LanguageRegistry};
 use log;
 use project::{Project, ProjectEntryId, ProjectPath};
-use settings::{NotebookRunLandingMode, Settings as _};
+use settings::{NotebookRunLandingMode, SeedQuerySetting, Settings as _};
 use ui::{ScrollAxes, Scrollbars, Tooltip, WithScrollbar, prelude::*};
 use workspace::item::{SaveOptions, TabContentParams};
 use workspace::notifications::NotificationId;
-use workspace::searchable::SearchableItemHandle;
+use workspace::searchable::{
+    Direction, SearchEvent, SearchOptions, SearchToken, SearchableItem, SearchableItemHandle,
+};
 use workspace::{
     Item, ItemId, Open, Pane, ProjectItem, SerializableItem, Workspace, WorkspaceId,
     delete_unloaded_items,
@@ -4869,6 +4872,283 @@ impl EventEmitter<()> for NotebookItem {}
 
 impl EventEmitter<()> for NotebookEditor {}
 
+impl EventEmitter<SearchEvent> for NotebookEditor {}
+
+/// A single Ctrl-F match inside a notebook. A notebook is N independent cell
+/// editors (not a multibuffer), so a match is a cell plus a range within THAT
+/// cell's editor buffer — the range is only valid for `cell_id`'s editor and
+/// must never be handed to another cell.
+#[derive(Clone)]
+pub struct NotebookSearchMatch {
+    cell_id: CellId,
+    range: Range<editor::Anchor>,
+}
+
+impl NotebookEditor {
+    /// Ordered (cell, editor) pairs for every cell that has a source editor
+    /// (code + markdown; raw cells have none), in document order.
+    fn ordered_cell_editors(&self, cx: &App) -> Vec<(CellId, Entity<editor::Editor>)> {
+        self.cell_order
+            .iter()
+            .filter_map(|id| {
+                self.cell_map
+                    .get(id)
+                    .and_then(|cell| cell.editor(cx).cloned())
+                    .map(|editor| (id.clone(), editor))
+            })
+            .collect()
+    }
+
+    fn selected_cell_editor(&self, cx: &App) -> Option<Entity<editor::Editor>> {
+        self.cell_order
+            .get(self.selected_cell_index)
+            .and_then(|id| self.cell_map.get(id))
+            .and_then(|cell| cell.editor(cx).cloned())
+    }
+
+    fn cell_index_of(&self, cell_id: &CellId) -> Option<usize> {
+        self.cell_order.iter().position(|id| id == cell_id)
+    }
+}
+
+impl SearchableItem for NotebookEditor {
+    type Match = NotebookSearchMatch;
+
+    fn supported_options(&self) -> SearchOptions {
+        // Part 1: find / highlight / navigate only. Replace and selection-scoped
+        // search are deferred to a follow-up phase.
+        SearchOptions {
+            case: true,
+            word: true,
+            regex: true,
+            replacement: false,
+            selection: false,
+            select_all: true,
+            find_in_results: false,
+        }
+    }
+
+    fn clear_matches(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        for (_, editor) in self.ordered_cell_editors(cx) {
+            editor.update(cx, |editor, cx| {
+                SearchableItem::clear_matches(editor, window, cx);
+            });
+        }
+        cx.emit(SearchEvent::MatchesInvalidated);
+    }
+
+    fn update_matches(
+        &mut self,
+        matches: &[Self::Match],
+        active_match_index: Option<usize>,
+        token: SearchToken,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        for (cell_id, editor) in self.ordered_cell_editors(cx) {
+            let cell_ranges: Vec<Range<editor::Anchor>> = matches
+                .iter()
+                .filter(|m| m.cell_id == cell_id)
+                .map(|m| m.range.clone())
+                .collect();
+            // Translate the global active index to this cell's local index (its
+            // position among this cell's matches), when the active match is here.
+            let local_active = active_match_index.and_then(|global| {
+                matches.get(global).filter(|m| m.cell_id == cell_id).map(|_| {
+                    matches[..global]
+                        .iter()
+                        .filter(|m| m.cell_id == cell_id)
+                        .count()
+                })
+            });
+            editor.update(cx, |editor, cx| {
+                SearchableItem::update_matches(
+                    editor,
+                    &cell_ranges,
+                    local_active,
+                    token,
+                    window,
+                    cx,
+                );
+            });
+        }
+    }
+
+    fn query_suggestion(
+        &mut self,
+        seed_query_override: Option<SeedQuerySetting>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> String {
+        self.selected_cell_editor(cx)
+            .map(|editor| {
+                editor.update(cx, |editor, cx| {
+                    SearchableItem::query_suggestion(editor, seed_query_override, window, cx)
+                })
+            })
+            .unwrap_or_default()
+    }
+
+    fn activate_match(
+        &mut self,
+        index: usize,
+        matches: &[Self::Match],
+        token: SearchToken,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(search_match) = matches.get(index) else {
+            return;
+        };
+        let cell_id = search_match.cell_id.clone();
+        let range = search_match.range.clone();
+        let Some(cell_index) = self.cell_index_of(&cell_id) else {
+            return;
+        };
+        // Select the owning cell, select the range inside its editor, then reveal
+        // the cell via the index-anchored scroll (immune to unmeasured/stale cell
+        // heights — see bug #45), so a match in a far cell actually lands on it.
+        self.set_selected_index(cell_index, false, window, cx);
+        if let Some(editor) = self
+            .cell_map
+            .get(&cell_id)
+            .and_then(|cell| cell.editor(cx).cloned())
+        {
+            editor.update(cx, |editor, cx| {
+                SearchableItem::activate_match(
+                    editor,
+                    0,
+                    std::slice::from_ref(&range),
+                    token,
+                    window,
+                    cx,
+                );
+            });
+        }
+        self.follow_scroll_to(cell_index);
+        cx.emit(SearchEvent::ActiveMatchChanged);
+        cx.notify();
+    }
+
+    fn select_matches(
+        &mut self,
+        matches: &[Self::Match],
+        token: SearchToken,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        for (cell_id, editor) in self.ordered_cell_editors(cx) {
+            let cell_ranges: Vec<Range<editor::Anchor>> = matches
+                .iter()
+                .filter(|m| m.cell_id == cell_id)
+                .map(|m| m.range.clone())
+                .collect();
+            if cell_ranges.is_empty() {
+                continue;
+            }
+            editor.update(cx, |editor, cx| {
+                SearchableItem::select_matches(editor, &cell_ranges, token, window, cx);
+            });
+        }
+    }
+
+    fn replace(
+        &mut self,
+        _: &Self::Match,
+        _: &project::search::SearchQuery,
+        _token: SearchToken,
+        _window: &mut Window,
+        _: &mut Context<Self>,
+    ) {
+        // Replace is not offered in part 1 (`supported_options().replacement`
+        // is false), so this is never called.
+    }
+
+    fn find_matches(
+        &mut self,
+        query: Arc<project::search::SearchQuery>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Task<Vec<Self::Match>> {
+        let mut cell_tasks: Vec<(CellId, Task<Vec<Range<editor::Anchor>>>)> = Vec::new();
+        for (cell_id, editor) in self.ordered_cell_editors(cx) {
+            let task = editor.update(cx, |editor, cx| {
+                SearchableItem::find_matches(editor, query.clone(), window, cx)
+            });
+            cell_tasks.push((cell_id, task));
+        }
+        cx.background_spawn(async move {
+            let mut all_matches = Vec::new();
+            for (cell_id, task) in cell_tasks {
+                for range in task.await {
+                    all_matches.push(NotebookSearchMatch {
+                        cell_id: cell_id.clone(),
+                        range,
+                    });
+                }
+            }
+            all_matches
+        })
+    }
+
+    fn active_match_index(
+        &mut self,
+        direction: Direction,
+        matches: &[Self::Match],
+        _token: SearchToken,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<usize> {
+        if matches.is_empty() {
+            return None;
+        }
+        let selected = self.selected_cell_index;
+
+        // If the selected cell has matches, resolve the current match relative to
+        // that cell's cursor using the per-editor binary search, then map its
+        // local index back to the global index.
+        if let Some(cell_id) = self.cell_order.get(selected).cloned() {
+            let local: Vec<(usize, Range<editor::Anchor>)> = matches
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| m.cell_id == cell_id)
+                .map(|(global, m)| (global, m.range.clone()))
+                .collect();
+            if !local.is_empty()
+                && let Some(editor) = self
+                    .cell_map
+                    .get(&cell_id)
+                    .and_then(|cell| cell.editor(cx).cloned())
+            {
+                let (cursor, snapshot) = editor.update(cx, |editor, cx| {
+                    let snapshot = editor.buffer().read(cx).snapshot(cx);
+                    let cursor = editor.selections.newest_anchor().head();
+                    (cursor, snapshot)
+                });
+                let ranges: Vec<Range<editor::Anchor>> =
+                    local.iter().map(|(_, range)| range.clone()).collect();
+                if let Some(local_index) =
+                    editor::items::active_match_index(direction, &ranges, &cursor, &snapshot)
+                {
+                    return local.get(local_index).map(|(global, _)| *global);
+                }
+            }
+        }
+
+        // Otherwise fall back to the nearest match by cell position.
+        match direction {
+            Direction::Next => matches
+                .iter()
+                .position(|m| self.cell_index_of(&m.cell_id).is_some_and(|ci| ci >= selected))
+                .or(Some(0)),
+            Direction::Prev => matches
+                .iter()
+                .rposition(|m| self.cell_index_of(&m.cell_id).is_some_and(|ci| ci <= selected))
+                .or(Some(matches.len() - 1)),
+        }
+    }
+}
+
 impl Item for NotebookEditor {
     type Event = ();
 
@@ -4948,9 +5228,8 @@ impl Item for NotebookEditor {
         editor.read(cx).pixel_position_of_cursor(cx)
     }
 
-    // TODO
-    fn as_searchable(&self, _: &Entity<Self>, _: &App) -> Option<Box<dyn SearchableItemHandle>> {
-        None
+    fn as_searchable(&self, handle: &Entity<Self>, _: &App) -> Option<Box<dyn SearchableItemHandle>> {
+        Some(Box::new(handle.clone()))
     }
 
     fn set_nav_history(
