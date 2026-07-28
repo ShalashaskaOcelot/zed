@@ -2240,8 +2240,16 @@ impl NotebookEditor {
         cx: &mut Context<Self>,
     ) {
         if let Some(index) = self.running_cell_index(cx) {
-            // `jump_to_index = true` top-aligns the cell (via `jump_to_cell`).
-            self.set_selected_index(index, true, window, cx);
+            // Select without a cumulative-height reveal, then use the same
+            // index-anchored near-top scroll as follow mode. A plain reveal
+            // derives the scroll offset from the summed height of every cell
+            // ABOVE the target, which is wrong when those cells are unmeasured
+            // (large notebook just opened) or hold stale heights (their outputs
+            // grew while off-screen during a long Run All) — it lands partway
+            // instead of on the running cell. Anchoring on the target's index
+            // paints downward from it and is immune to those heights.
+            self.set_selected_index(index, false, window, cx);
+            self.follow_scroll_to(index);
             self.enter_command_mode(window, cx);
             cx.notify();
         }
@@ -3863,7 +3871,13 @@ impl NotebookEditor {
     pub fn select_last(&mut self, _: &SelectLastCell, window: &mut Window, cx: &mut Context<Self>) {
         let count = self.cell_count();
         if count > 0 {
-            self.set_selected_index(count - 1, true, window, cx);
+            // Select the last cell WITHOUT a cumulative-height reveal (which
+            // lands short when cells above are unmeasured or hold stale heights
+            // in a large notebook), then anchor on the end: `scroll_to_end`
+            // walks backwards from the last item, so it reaches the true bottom
+            // regardless of measurement state.
+            self.set_selected_index(count - 1, false, window, cx);
+            self.cell_list.scroll_to_end();
             cx.notify();
         }
     }

@@ -23,6 +23,12 @@ listed here.
       notebooks normally over a few sessions; the same file should never
       end up open in two tabs again. (Cause found by inspection: stale
       entry id after save defeated the already-open dedup.)
+- [ ] Bug #45 — Large notebook (the long Rust ones). (a) Open it fresh, first
+      cell selected, press End → should land on the true LAST cell (bottom), not
+      hop partway. (b) Execute All, wait until many cells above the running one
+      have grown outputs, then click "Go to running cell" → should land ON the
+      running cell (near top), not partway among already-run cells. Home and
+      single-step arrow navigation should be unchanged.
 - [ ] Bug #46 — Rust kernel: run a cell, interrupt the kernel (indicator goes
       red/Error), then Run All or run a cell → it should relaunch the SELECTED
       kernel and run, NOT pop up the kernel picker. Also confirm a genuine

@@ -400,9 +400,9 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 - **Fix attempted:** none
 - **Tested:** n/a
 
-## 45. Home/End (command mode) doesn't reach the true top/bottom of a large notebook until scrolled there
+## 45. Far-cell reveal (End, Go to running cell) lands short in a large notebook
 
-- **Status:** open
+- **Status:** fix attempted - untested
 - **Symptom:** (user 2026-07-16, large cloned notebooks) Open a big notebook,
   select the first cell in command mode, press End (SelectLastCell): instead
   of jumping to the last cell it only jumps DOWN a bit and the newly-focused
@@ -423,14 +423,38 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   Home/End are exact. Same widget family as bug #40 (also a
   `ListState::scroll_to_reveal_item*` estimation issue), but a distinct case:
   revealing a FAR item across unmeasured rows, not the already-visible guard.
-- **Fix direction (needs gpui-level work):** either make the reveal robust to
-  unmeasured rows (iteratively scroll → let it lay out → re-scroll until the
-  target is actually at the top, within the same frame or across a couple of
-  frames), improve the list's height estimate, or (costly for huge notebooks)
-  measure all items. Confirm against gpui `crates/gpui/src/elements/list.rs`
-  (where bug #40's fix already lives) before choosing.
-- **Fix attempted:** none
-- **Tested:** n/a
+- **Also reported (user 2026-07-23), SAME root cause:** clicking "Go to running
+  cell" after a long Run All (e.g. Execute All, wait 10 min) does NOT jump the
+  whole way to the running cell — it lands somewhere partway, among already-run
+  cells. `go_to_running_cell` went through the same buggy path
+  (`set_selected_index(index, true)` → `jump_to_cell` →
+  `scroll_to_reveal_item_top_aligned`). Two height sources feed the bad math
+  here: cells never measured on open (0 px in the summary — `list.rs:1698`) AND
+  cells whose outputs GREW while off-screen after they ran, leaving stale
+  (too-short) measured heights in the height tree until re-laid-out. Both make
+  the summed height above the target too small, so the computed offset lands
+  short. (NB: phases 50/51 delivered the follow-running-cell FEATURE and were
+  confirmed for that; the far-jump accuracy here was never fixed — this bug
+  stayed open.)
+- **Root cause (confirmed):** `scroll_to_reveal_item_top_aligned` only pins by
+  INDEX in its too-tall branch; a normal-height target falls through to
+  `scroll_to_reveal_item`, which computes `goal_top = bottom - height` from the
+  CUMULATIVE height of every item above (`list.rs:643-645`). That cumulative
+  height is wrong whenever rows above are unmeasured (0 px) or stale.
+- **Fix attempted (2026-07-23):** route the two far-jump entry points through
+  the existing INDEX-anchored primitives instead of the cumulative-height
+  reveal, so the landing is immune to the heights of cells above the target:
+  - `go_to_running_cell` (`notebook_ui.rs:2242`): select without the jump, then
+    `follow_scroll_to(index)` → `scroll_to_item_near_top` (the same anchor
+    follow mode uses; paints downward from an item boundary at/above the
+    target).
+  - `select_last` / End (`notebook_ui.rs:3863`): select without the jump, then
+    `cell_list.scroll_to_end()` (anchors on the item count and walks backward
+    from the end — reaches the true bottom regardless of measurement state).
+  Home (index 0) was already exact (nothing above it) and is unchanged.
+  Adjacent-arrow navigation still uses the minimal reveal (`jump_to_cell`) —
+  only the far jumps changed.
+- **Tested:** no — needs a large notebook. See awaiting_testing.md.
 
 ## 46. Interrupting the Rust kernel makes the next run prompt for a kernel instead of relaunching
 
