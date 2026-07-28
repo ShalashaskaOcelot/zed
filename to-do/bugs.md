@@ -454,7 +454,15 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   Home (index 0) was already exact (nothing above it) and is unchanged.
   Adjacent-arrow navigation still uses the minimal reveal (`jump_to_cell`) —
   only the far jumps changed.
-- **Tested:** no — needs a large notebook. See awaiting_testing.md.
+- **Tested (user 2026-07-23):** End + Home confirmed working perfectly on a
+  freshly-opened large notebook (End lands on the true bottom, no empty space —
+  `scroll_to_end` is the wanted behavior, no alignment change needed). Go to
+  running cell worked on a SHORT jump, but a far-jump confirmation is still
+  pending: the run hadn't progressed far enough down yet, and there's no visible
+  notebook scrollbar (backlog item) to gauge jump distance. Keep at
+  `fix attempted - untested` until a long-distance Go to running cell is
+  confirmed; high confidence since it uses the same index-anchored primitive as
+  the confirmed End/follow paths.
 
 ## 46. Interrupting the Rust kernel makes the next run prompt for a kernel instead of relaunching
 
