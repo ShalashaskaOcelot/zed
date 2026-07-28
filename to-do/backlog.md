@@ -55,16 +55,6 @@ high → low within each group.
   Must be done generically (editor can't depend on repl). Bigger follow-ups
   (separate items): jump to the matching cell; make search preview show cell
   content instead of raw JSON.
-- Notebook scrollbar missing / hidden behind the right bar (user 2026-07-16):
-  the notebook cell list has no visible scrollbar. Either there isn't one, or
-  one is drawn but sits UNDER the right-hand control sidebar
-  (`render_notebook_controls`) that runs down the right edge. Fix: add a
-  scrollbar to the cell-list container (the `list()`/`ListState` `cell_list`
-  in `NotebookEditor::render`, `notebook_ui.rs`) and, if one already exists,
-  position it so it's not occluded — e.g. inset it left of the sidebar, or
-  move the scrollbar/sidebar so they don't overlap. Check whether Zed's
-  editor/list scrollbar component can be reused. Investigate first whether a
-  hidden one is already there before adding a second.
 - Global kernel busy/idle indicator (user 2026-07-16): a single indicator,
   visible regardless of scroll position, showing whether the kernel is idle or
   actively working — NOT the per-cell spinner (that exists). The top kernel
