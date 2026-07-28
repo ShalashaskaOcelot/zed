@@ -4690,6 +4690,11 @@ impl Render for NotebookEditor {
                         let scrollbars =
                             Scrollbars::for_settings::<editor::EditorSettingsScrollbarProxy>()
                                 .show_along(ScrollAxes::Vertical)
+                                // Lighter resting shade (the theme's hover step) so
+                                // it's easier to spot, and tighter padding so the
+                                // gutter isn't so wide with empty space either side.
+                                .thumb_color(cx.theme().colors().scrollbar_thumb_hover_background)
+                                .thumb_padding(px(2.))
                                 .tracked_scroll_handle(&self.cell_list);
                         div()
                             .flex_1()

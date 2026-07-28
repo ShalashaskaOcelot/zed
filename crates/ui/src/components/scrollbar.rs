@@ -374,6 +374,12 @@ pub struct Scrollbars<T: ScrollableHandle = ScrollHandle> {
     style: Option<ScrollbarStyle>,
     track_color: Option<Hsla>,
     border: bool,
+    /// Overrides the resting thumb color (defaults to the theme's
+    /// `scrollbar_thumb_background`). Hover/active states stay theme-driven.
+    thumb_color: Option<Hsla>,
+    /// Overrides the per-side padding around the thumb (defaults to
+    /// `SCROLLBAR_PADDING`), which also sets the reserved gutter width.
+    thumb_padding: Option<Pixels>,
 }
 
 impl Scrollbars {
@@ -401,6 +407,8 @@ impl Scrollbars {
             style: None,
             track_color: None,
             border: false,
+            thumb_color: None,
+            thumb_padding: None,
         }
     }
 }
@@ -442,6 +450,8 @@ impl<ScrollHandle: ScrollableHandle> Scrollbars<ScrollHandle> {
             track_color,
             border,
             style,
+            thumb_color,
+            thumb_padding,
             ..
         } = self;
 
@@ -454,6 +464,8 @@ impl<ScrollHandle: ScrollableHandle> Scrollbars<ScrollHandle> {
             border,
             get_visibility,
             style,
+            thumb_color,
+            thumb_padding,
         }
     }
 
@@ -464,6 +476,20 @@ impl<ScrollHandle: ScrollableHandle> Scrollbars<ScrollHandle> {
 
     pub fn style(mut self, style: ScrollbarStyle) -> Self {
         self.style = Some(style);
+        self
+    }
+
+    /// Override the resting thumb color. Hover/active states stay theme-driven.
+    pub fn thumb_color(mut self, color: Hsla) -> Self {
+        self.thumb_color = Some(color);
+        self
+    }
+
+    /// Override the per-side padding around the thumb (default
+    /// `SCROLLBAR_PADDING`). Smaller values narrow both the thumb's side gaps
+    /// and the reserved gutter.
+    pub fn thumb_padding(mut self, padding: Pixels) -> Self {
+        self.thumb_padding = Some(padding);
         self
     }
 
@@ -628,6 +654,8 @@ struct ScrollbarState<T: ScrollableHandle = ScrollHandle> {
     track_color: Option<TrackColors>,
     show_state: VisibilityState,
     style: ScrollbarStyle,
+    thumb_color: Option<Hsla>,
+    thumb_padding: Pixels,
     mouse_in_parent: bool,
     last_prepaint_state: Option<ScrollbarPrepaintState>,
     _auto_hide_task: Option<Task<()>>,
@@ -654,6 +682,8 @@ impl<T: ScrollableHandle> ScrollbarState<T> {
             show_behavior,
             get_visibility: config.get_visibility,
             style: config.style.unwrap_or_default(),
+            thumb_color: config.thumb_color,
+            thumb_padding: config.thumb_padding.unwrap_or(SCROLLBAR_PADDING),
             show_state: VisibilityState::from_behavior(show_behavior),
             mouse_in_parent: true,
             last_prepaint_state: None,
@@ -739,7 +769,7 @@ impl<T: ScrollableHandle> ScrollbarState<T> {
     }
 
     fn space_to_reserve(&self) -> Pixels {
-        self.style.to_pixels() + 2 * SCROLLBAR_PADDING
+        self.style.to_pixels() + 2 * self.thumb_padding
     }
 
     fn handle_to_track<Handle: ScrollableHandle>(&self) -> Option<&Handle> {
@@ -1173,7 +1203,7 @@ impl<T: ScrollableHandle> Element for ScrollbarElement<T> {
                                     bounds.size.apply_along(axis.invert(), |_| {
                                         width
                                             + match state.style {
-                                                ScrollbarStyle::Regular => 2 * SCROLLBAR_PADDING,
+                                                ScrollbarStyle::Regular => 2 * state.thumb_padding,
                                                 ScrollbarStyle::Editor => Pixels::ZERO,
                                             }
                                     }),
@@ -1186,7 +1216,7 @@ impl<T: ScrollableHandle> Element for ScrollbarElement<T> {
                                 // we want the full length of the track
                                 let thumb_container_bounds = match state.style {
                                     ScrollbarStyle::Regular => {
-                                        scroll_track_bounds.dilate(-SCROLLBAR_PADDING)
+                                        scroll_track_bounds.dilate(-state.thumb_padding)
                                     }
                                     ScrollbarStyle::Editor if has_border => scroll_track_bounds
                                         .extend(match axis {
@@ -1342,7 +1372,12 @@ impl<T: ScrollableHandle> Element for ScrollbarElement<T> {
                         ThumbState::Hover(hovered_axis) if hovered_axis == axis => {
                             (colors.scrollbar_thumb_hover_background, true)
                         }
-                        _ => (colors.scrollbar_thumb_background, false),
+                        _ => (
+                            state
+                                .thumb_color
+                                .unwrap_or(colors.scrollbar_thumb_background),
+                            false,
+                        ),
                     };
 
                     let blend_color = track_config

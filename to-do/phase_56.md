@@ -41,10 +41,19 @@ the LEFT of the right-hand control sidebar (not occluded by it).
       left of the `gap_2` and the control sidebar (no occlusion), by
       construction (separate flex siblings) — verified by inspection; user to
       confirm visually.
+- [x] Polish (user feedback 2026-07-23): the default gutter was too wide (6px
+      thumb in a 14px reserved band — 4px empty each side) and the thumb too
+      low-contrast. Added two backward-compatible knobs to the shared
+      `ui::Scrollbars` (`.thumb_color`, `.thumb_padding`, both default to
+      current behavior so no other scrollbar changes) and set the notebook to a
+      lighter resting shade (theme hover step) and `thumb_padding(px(2.))`.
 - [ ] **User test:** open a notebook — a vertical scrollbar is visible on the
       cell list (per the user's scrollbar visibility setting), sits to the LEFT
       of the right control bar (not hidden behind it), tracks scroll position,
       and can be dragged to scroll.
+- [ ] **User test (polish):** the thumb is easier to spot (lighter) and the
+      gutter is tighter (less empty space either side). Values are first-cut —
+      tune `thumb_color` / `thumb_padding` at the call site if desired.
 
 ## Known limitation (note, not a blocker)
 
