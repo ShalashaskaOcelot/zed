@@ -17,7 +17,7 @@ use language::{Buffer, Language, LanguageRegistry};
 use log;
 use project::{Project, ProjectEntryId, ProjectPath};
 use settings::{NotebookRunLandingMode, Settings as _};
-use ui::{Tooltip, prelude::*};
+use ui::{ScrollAxes, Scrollbars, Tooltip, WithScrollbar, prelude::*};
 use workspace::item::{SaveOptions, TabContentParams};
 use workspace::notifications::NotificationId;
 use workspace::searchable::SearchableItemHandle;
@@ -4681,7 +4681,22 @@ impl Render for NotebookEditor {
                     .w_full()
                     .min_h_0()
                     .gap_2()
-                    .child(div().flex_1().h_full().child(self.cell_list(window, cx)))
+                    .child({
+                        // Vertical scrollbar tracking the cell-list `ListState`.
+                        // Attached to the list column (a flex sibling left of the
+                        // `gap_2` and the control bar), so it sits at the list's
+                        // right edge without being occluded by the sidebar.
+                        // Visibility follows the user's editor scrollbar setting.
+                        let scrollbars =
+                            Scrollbars::for_settings::<editor::EditorSettingsScrollbarProxy>()
+                                .show_along(ScrollAxes::Vertical)
+                                .tracked_scroll_handle(&self.cell_list);
+                        div()
+                            .flex_1()
+                            .h_full()
+                            .child(self.cell_list(window, cx))
+                            .custom_scrollbars(scrollbars, window, cx)
+                    })
                     .child(self.render_notebook_controls(window, cx)),
             )
     }
