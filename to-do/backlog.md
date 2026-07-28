@@ -29,18 +29,6 @@ high → low within each group.
 
 ## Medium priority (cont.)
 
-- In-notebook search (Ctrl-F) (user 2026-07-16): searching within a notebook
-  does nothing today. Root cause (research 2026-07-16): `NotebookEditor::as_searchable`
-  returns `None` (`crates/repl/src/notebook/notebook_ui.rs`); the rest of the
-  Ctrl-F pipeline is generic and works once an item is a `SearchableItem`.
-  A notebook is N independent cell editors (not a multibuffer), so this is the
-  first fan-out `SearchableItem`: `NotebookEditor` implements the
-  `SearchableItem` trait (`crates/workspace/src/searchable.rs`) delegating each
-  primitive to the per-cell `Entity<Editor>` (Match = (CellId, Range<Anchor>));
-  `activate_match` selects the cell + `scroll_to_reveal_item_top_aligned` +
-  focuses + delegates. Phase 1 = find/highlight/Next-Prev across cells (no
-  replace); Phase 2 = replace + options. Est. medium (~1.5–3 days), all in
-  `crates/repl/src/notebook/`.
 - Global-search result opens raw JSON, not the notebook (user 2026-07-16,
   DEFECT): Ctrl-Shift-F does include notebook content, but clicking a notebook
   result opens the `.ipynb` as raw JSON text instead of the `NotebookEditor`.
