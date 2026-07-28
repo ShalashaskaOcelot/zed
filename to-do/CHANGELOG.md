@@ -235,3 +235,10 @@ entry rather than archiving it.
   bottom-pinned it (a gpui `ListState::scroll_to_reveal_item` index-vs-pixel
   guard); the reveal now compares pixel offsets and only scrolls to reveal an
   off-screen edge. Confirmed 2026-07-16.
+- #45 — End and "Go to running cell" landed short in large notebooks: the
+  cumulative-height reveal derived the scroll offset from the summed height of
+  cells above the target, which is wrong when those cells are unmeasured
+  (0 px) or grew outputs off-screen. Routed the two far jumps through the
+  index-anchored primitives instead — End uses `scroll_to_end`, Go to running
+  cell uses `scroll_to_item_near_top` — immune to heights above the target.
+  `3e96779`. Confirmed 2026-07-23.
