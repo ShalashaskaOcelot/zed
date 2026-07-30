@@ -719,6 +719,25 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   sliver can remain clipped. If that proves annoying, the follow needs the line
   height to add a half-line allowance (not currently reachable there without
   threading `window` into the cell-editor subscription).
+- **Follow-up (user 2026-07-30, after confirming the click behaviour):** mouse
+  behaviour confirmed PERFECT — a line even slightly out of view scrolls fully
+  in, a fully visible line never moves the viewport. Two ARROW-KEY problems
+  remained, both now addressed:
+  1. *Intermittently let the cursor slide off screen.* The editor records its
+     cursor's exact position while PAINTING, so checking during the
+     `SelectionsChanged` event read the PREVIOUS frame's position — i.e. always
+     one keystroke behind. Moving down a line decided using the old row, so the
+     new row could land off screen and only correct on the NEXT keypress, which
+     reads as "sometimes it follows, sometimes it doesn't". The follow now runs
+     via `window.on_next_frame`, after the paint, so the position is current.
+     (Required converting the cell-editor subscriptions to `subscribe_in` so the
+     handler receives `window`.)
+  2. *Holding an arrow key stuttered, then jumped several lines at once.* Every
+     selection change built a full `display_snapshot` just to compute a fallback
+     that was almost never used, and did a follow per keystroke. The snapshot is
+     now built ONLY when there is no painted position, and a `cursor_follow_pending`
+     flag collapses a burst of changes into one follow per frame. (A debug build
+     amplifies this; re-check on release.)
 - **Tested:** no — see `awaiting_testing.md`.
 
 ## 61. A cell's stream output is split into many separate output blocks

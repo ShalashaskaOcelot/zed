@@ -254,6 +254,10 @@ pub struct NotebookEditor {
     /// down the notebook. Viewport-only: it never changes the selection or
     /// edit/command mode, so it doesn't fight a user editing a later cell.
     follow_running_cell: bool,
+    /// A cursor-follow check is already scheduled for after the next frame, so
+    /// a burst of selection changes (a held arrow key) does one follow, not one
+    /// per keystroke.
+    cursor_follow_pending: bool,
     /// Multi-selection: every selected index INCLUDING the primary
     /// (`selected_cell_index`). Empty when only a single cell is selected.
     /// Index-based, so any structural change collapses the selection.
@@ -338,8 +342,8 @@ impl NotebookEditor {
 
                     let cell_id_for_editor = cell_id.clone();
                     let editor = code_cell.read(cx).editor().clone();
-                    cx.subscribe(&editor, move |this, _editor, event, cx| {
-                        this.on_cell_editor_event(&cell_id_for_editor, event, cx);
+                    cx.subscribe_in(&editor, window, move |this, _editor, event, window, cx| {
+                        this.on_cell_editor_event(&cell_id_for_editor, event, window, cx);
                     })
                     .detach();
                 }
@@ -382,8 +386,8 @@ impl NotebookEditor {
 
                     let cell_id_for_editor = cell_id.clone();
                     let editor = markdown_cell.read(cx).editor().clone();
-                    cx.subscribe(&editor, move |this, _editor, event, cx| {
-                        this.on_cell_editor_event(&cell_id_for_editor, event, cx);
+                    cx.subscribe_in(&editor, window, move |this, _editor, event, window, cx| {
+                        this.on_cell_editor_event(&cell_id_for_editor, event, window, cx);
                     })
                     .detach();
                 }
@@ -435,6 +439,7 @@ impl NotebookEditor {
             run_queue: Vec::new(),
             active_run_cell: None,
             follow_running_cell: false,
+            cursor_follow_pending: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             kernel_picker_handle: PopoverMenuHandle::default(),
@@ -2823,8 +2828,8 @@ impl NotebookEditor {
 
         let cell_id_for_editor = cell_id;
         let editor = code_cell.read(cx).editor().clone();
-        cx.subscribe(&editor, move |this, _editor, event, cx| {
-            this.on_cell_editor_event(&cell_id_for_editor, event, cx);
+        cx.subscribe_in(&editor, window, move |this, _editor, event, window, cx| {
+            this.on_cell_editor_event(&cell_id_for_editor, event, window, cx);
         })
         .detach();
     }
@@ -2863,8 +2868,8 @@ impl NotebookEditor {
 
         let cell_id_for_editor = cell_id;
         let editor = markdown_cell.read(cx).editor().clone();
-        cx.subscribe(&editor, move |this, _editor, event, cx| {
-            this.on_cell_editor_event(&cell_id_for_editor, event, cx);
+        cx.subscribe_in(&editor, window, move |this, _editor, event, window, cx| {
+            this.on_cell_editor_event(&cell_id_for_editor, event, window, cx);
         })
         .detach();
     }
@@ -3911,6 +3916,7 @@ impl NotebookEditor {
         &mut self,
         cell_id: &CellId,
         event: &editor::EditorEvent,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match event {
@@ -3920,7 +3926,7 @@ impl NotebookEditor {
                     && let Some(index) = self.cell_order.iter().position(|id| id == cell_id)
                     && index == self.selected_cell_index
                 {
-                    self.follow_cursor_in_cell(index, cx);
+                    self.follow_cursor_in_cell(index, window, cx);
                 }
             }
             _ => {}
@@ -3933,11 +3939,32 @@ impl NotebookEditor {
         self.cell_list.scroll_to_reveal_item_top_aligned(index);
     }
 
-    /// Keep the cursor visible while editing a tall cell: scroll the notebook
-    /// only when the cursor would fall outside the viewport (it does not keep
-    /// the cursor centered). Cell editors are `SizeByContent` and have no
-    /// internal scroll, so the outer list must follow the cursor.
-    fn follow_cursor_in_cell(&mut self, index: usize, cx: &mut Context<Self>) {
+    /// Keep the cursor visible while editing a tall cell. Runs AFTER the next
+    /// frame, because the editor only records its cursor's exact position while
+    /// painting: checking during the selection change itself would read the
+    /// position from the previous frame and so act one keystroke behind —
+    /// letting an arrow key walk the cursor off screen before the scroll
+    /// catches up. Repeated changes in one frame (holding an arrow key) collapse
+    /// into a single follow.
+    fn follow_cursor_in_cell(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.cursor_follow_pending {
+            return;
+        }
+        self.cursor_follow_pending = true;
+        let notebook = cx.entity().downgrade();
+        window.on_next_frame(move |_window, cx| {
+            notebook
+                .update(cx, |this, cx| {
+                    this.cursor_follow_pending = false;
+                    this.apply_cursor_follow(index, cx);
+                })
+                .ok();
+        });
+    }
+
+    /// Scroll the list if the cursor now sits outside the viewport. Only valid
+    /// straight after a paint — see [`Self::follow_cursor_in_cell`].
+    fn apply_cursor_follow(&mut self, index: usize, cx: &mut Context<Self>) {
         let Some(cell) = self
             .cell_order
             .get(index)
@@ -3948,15 +3975,6 @@ impl NotebookEditor {
         let Some(editor) = cell.editor(cx).cloned() else {
             return;
         };
-
-        let (cursor_row, total_rows) = editor.update(cx, |editor, cx| {
-            let snapshot = editor.display_snapshot(cx);
-            let cursor_row = snapshot
-                .max_point()
-                .row()
-                .min(editor.selections.newest_display(&snapshot).head().row());
-            (cursor_row.0, snapshot.max_point().row().0)
-        });
 
         let Some(cell_bounds) = self.cell_list.bounds_for_item(index) else {
             // Not currently laid out (e.g. scrolled far away): reveal it.
@@ -3969,19 +3987,28 @@ impl NotebookEditor {
         }
 
         // The editor reports its cursor's exact position (the centre of the
-        // cursor's line, in window coordinates) once it has been painted. Fall
-        // back to interpolating the row within the cell's laid-out height only
-        // when it hasn't — that estimate is poor, because the cell's height
-        // includes non-editor chrome, so it can be out by several lines.
-        let cursor_y = editor
-            .read(cx)
-            .pixel_position_of_cursor(cx)
-            .map(|position| position.y)
-            .unwrap_or_else(|| {
+        // cursor's line, in window coordinates) once it has been painted. The
+        // fallback interpolates the row within the cell's laid-out height, which
+        // is poor — the cell's height includes non-editor chrome, so it can be
+        // out by several lines — and it needs a display snapshot, which is far
+        // too expensive to build on every keystroke. So only take that path when
+        // there is genuinely no painted position to use.
+        let cursor_y = match editor.read(cx).pixel_position_of_cursor(cx) {
+            Some(position) => position.y,
+            None => {
+                let (cursor_row, total_rows) = editor.update(cx, |editor, cx| {
+                    let snapshot = editor.display_snapshot(cx);
+                    let cursor_row = snapshot
+                        .max_point()
+                        .row()
+                        .min(editor.selections.newest_display(&snapshot).head().row());
+                    (cursor_row.0, snapshot.max_point().row().0)
+                });
                 let rows = (total_rows + 1).max(1) as f32;
                 let fraction = (cursor_row as f32 + 0.5) / rows;
                 cell_bounds.top() + cell_bounds.size.height * fraction
-            });
+            }
+        };
 
         // Scroll ONLY when the cursor has actually left the viewport — no
         // margin. Keeping a few lines of lead here would move the viewport when

@@ -42,6 +42,10 @@ listed here.
       edge → it scrolls one line at a time and does NOT run away into selecting
       the whole cell; (d) same with arrow keys / pressing Enter at the edges.
       Regular (non-notebook) editors must be unchanged.
+      FOLLOW-UP (mouse already confirmed good): with ARROW KEYS, the cursor
+      should never slide off screen — the viewport follows every time, not
+      intermittently; and HOLDING up/down should scroll steadily line by line
+      rather than stuttering and then jumping several lines at once.
 - [ ] Bug #61 — Run a cell that prints repeatedly inside a loop (with a little
       work between prints, e.g. a sleep) → all the printed lines should appear
       in ONE output block with a single copy button, and a click-drag should
