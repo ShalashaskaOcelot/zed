@@ -3,6 +3,16 @@
 ⚠️ AWAITING USER TESTING (implementation complete, clippy-clean; runtime
 verification pending — see the user-test task).
 
+Post-implementation fix (2026-07-30): the first cut hung the app on notebook
+OPEN (no search needed). When a notebook becomes the active pane item the search
+toolbar calls `set_active_searchable_item` → `update_matches` (empty query) →
+`clear_active_searchable_item_matches` → `NotebookEditor::clear_matches`, which
+emitted `MatchesInvalidated` UNCONDITIONALLY; the search bar reacts to that by
+re-running its update → clear → emit → … an infinite main-thread loop (which
+also starved Run All, so cells wouldn't execute). Fixed by emitting only when a
+cell actually had matches to clear (mirroring `Editor`), and dropped the
+`ActiveMatchChanged` emit from `activate_match` (`Editor` doesn't emit it).
+
 Kind: **new feature** (notebook-primary). Requested by the user 2026-07-23
 (promoted from the backlog item "In-notebook search (Ctrl-F)", reported
 2026-07-16). Priority: user's main ask this round.

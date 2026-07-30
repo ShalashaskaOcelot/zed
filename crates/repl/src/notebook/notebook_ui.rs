@@ -4929,12 +4929,25 @@ impl SearchableItem for NotebookEditor {
     }
 
     fn clear_matches(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Only signal invalidation when a cell actually had matches to clear.
+        // Emitting unconditionally hangs the app: the buffer search bar reacts
+        // to MatchesInvalidated by re-running its update, which calls back into
+        // clear_matches — so an unconditional emit is an infinite clear/emit
+        // loop the moment the notebook becomes the active searchable item.
+        // (Editor guards its emit the same way — only when a highlight was
+        // actually removed.)
+        let mut had_matches = false;
         for (_, editor) in self.ordered_cell_editors(cx) {
             editor.update(cx, |editor, cx| {
+                if !SearchableItem::get_matches(editor, window, cx).0.is_empty() {
+                    had_matches = true;
+                }
                 SearchableItem::clear_matches(editor, window, cx);
             });
         }
-        cx.emit(SearchEvent::MatchesInvalidated);
+        if had_matches {
+            cx.emit(SearchEvent::MatchesInvalidated);
+        }
     }
 
     fn update_matches(
@@ -5026,7 +5039,6 @@ impl SearchableItem for NotebookEditor {
             });
         }
         self.follow_scroll_to(cell_index);
-        cx.emit(SearchEvent::ActiveMatchChanged);
         cx.notify();
     }
 
