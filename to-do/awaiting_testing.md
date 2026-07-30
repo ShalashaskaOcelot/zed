@@ -16,10 +16,7 @@ These are implementation-complete and marked `⚠️ AWAITING USER TESTING` in
 `to-do/`; their test steps are in the phase file itself. Listed here so this
 stays the one place to see everything needing a look.
 
-- [ ] Phase 53 — external saves no longer join the workspace/project panel
-- [ ] Phase 55 — smooth mouse-wheel scrolling in the notebook cell list (same setting)
 - [ ] Phase 56 — notebook cell-list scrollbar (user says still needs work)
-- [ ] Phase 57 — in-notebook Ctrl-F search across cells
 
 ## Bug fixes awaiting confirmation
 
@@ -34,14 +31,10 @@ listed here.
       notebooks normally over a few sessions; the same file should never
       end up open in two tabs again. (Cause found by inspection: stale
       entry id after save defeated the already-open dedup.)
-- [ ] Bug #47 + the "Failed to save / no such worktree" dialog — Save a
-      notebook (and separately a plain text file) to a path OUTSIDE the
-      workspace, e.g. the Desktop. There should be NO error dialog; the tab
-      should switch from "Untitled" to the real filename; Ctrl-S should re-save
-      with no dialog; and it should NOT appear as a root in the project panel.
-      Saving INSIDE the workspace must still work and still show in the panel.
-- [ ] Bug #54 — Click the kernel selector at the BOTTOM of the notebook's right
-      control sidebar → the picker opens instead of the app crashing.
+- [ ] Bug #56 — Open/save a notebook OUTSIDE the workspace (e.g. on the
+      Desktop) and start a kernel → it should launch instead of failing with
+      "The directory name is invalid. (os error 267)". The kernel's working
+      directory is now the file's folder. In-project notebooks unchanged.
 - [ ] Bug #50 — Open a workspace folder, then (a) also have another root that
       you delete, or (b) create an UNSAVED notebook/buffer and then delete the
       whole workspace folder. Quit and relaunch → the session should restore:
@@ -70,7 +63,7 @@ file it in `bugs.md`, annotate the failing line, and tick it here.
 Kind: change to existing behaviour — if the new behaviour didn't take effect,
 say so and it gets fixed in place (not archived-and-refiled).
 
-- [ ] With kernel A already selected and running, Create Env (venv or conda):
+- [x] With kernel A already selected and running, Create Env (venv or conda):
       the NEW env shows as the notebook's selected kernel immediately (top
       strip, "Starting"), NOT kernel A. Run a cell during the build → it goes
       Pending and kernel A does NOT start/run it; once the env is ready the
@@ -79,7 +72,7 @@ say so and it gets fixed in place (not archived-and-refiled).
 - [ ] Build FAILURE (e.g. a conda name that can't solve) → the selection
       reverts (no longer shows the half-made env) and any cell held during the
       build returns to Idle (not stuck Pending); the failure toast still shows.
-- [ ] Not regressed: creating from the "Select Kernel" (no-kernel) state still
+- [x] Not regressed: creating from the "Select Kernel" (no-kernel) state still
       works as before; and picking a DIFFERENT kernel from the picker WHILE an
       env is building switches to that kernel (the building env no longer
       auto-steals the selection when it finishes).

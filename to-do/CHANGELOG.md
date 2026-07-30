@@ -194,6 +194,22 @@ entry rather than archiving it.
   `01f09be`. Confirmed working on a mousewheel 2026-07-30. GUI settings entry
   backlogged.
 
+- Phase 53 — Saving a file outside the project no longer adds it to the
+  workspace: out-of-project save-as creates an INVISIBLE single-file worktree,
+  so the file stays open and re-saveable without becoming a project-panel root.
+  Applies to all file types. `a26a766`. Confirmed 2026-07-30.
+- Phase 55 — Smooth mouse-wheel scrolling in the notebook cell list: opt-in on
+  gpui's `ListState` (off by default, so no other list changes), driven by a
+  pending pixel delta that decays to zero rather than an absolute ListOffset —
+  so it needs no item-height math and cannot regress reveal accuracy. Absolute
+  scrolls cancel a glide in flight. `e4bb183`. Confirmed 2026-07-30 (easing
+  values still to be tuned — backlogged).
+- Phase 57 — In-notebook Ctrl-F: `NotebookEditor` implements `SearchableItem`,
+  delegating each primitive to the per-cell editors (Match = cell + range), so
+  matches highlight across all cells, next/prev cycles them in document order,
+  and activating one selects + reveals the owning cell. `2915bbd` (+ `45cb601`
+  fixing an invalidation loop). Confirmed working 2026-07-30.
+
 ## Fixed bugs (confirmed)
 
 - #1 — Restart kernel killed the kernel but the relaunch failed. `7bd5b5a`
@@ -250,6 +266,16 @@ entry rather than archiving it.
   bottom-pinned it (a gpui `ListState::scroll_to_reveal_item` index-vs-pixel
   guard); the reveal now compares pixel offsets and only scrolls to reveal an
   off-screen edge. Confirmed 2026-07-16.
+- #47 — Saving a notebook outside the workspace failed with "no such worktree"
+  (while still writing the file) and left the tab titled "Untitled": phase 53's
+  invisible worktree is held only weakly, and `Pane::save_item`'s strong handle
+  dropped before the save completed, so the post-write `open_buffer` failed and
+  the `?` skipped recording the new path. The worktree is now held across the
+  save. `a2009b4`. Confirmed 2026-07-30.
+- #54 — Clicking the notebook sidebar's kernel selector aborted the app with a
+  GPUI double-lease panic (the click listener held a lease and toggled the
+  picker inline, whose on_open updates the same notebook); the toggle is now
+  deferred with `window.defer`. `a2009b4`. Confirmed 2026-07-30.
 - #46 — Interrupting the Rust kernel made the next run prompt for a kernel
   instead of relaunching the selected one. Confirmed 2026-07-30.
 - #51 — Run All (and the other notebook control buttons) silently did nothing

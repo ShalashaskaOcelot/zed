@@ -597,21 +597,46 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ## 56. Kernel fails to start for a notebook opened outside the workspace
 
-- **Status:** open
-- **Symptom:** (user 2026-07-30) A notebook opened from outside the workspace
-  cannot start a kernel — red error indicator. Log:
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-07-30, still failing on `a2009b4`) A notebook opened
+  or saved outside the workspace cannot start ANY kernel — red error indicator.
+  Reproduced with several interpreters, e.g.
   `Kernel failed to start: failed to spawn command
-  "C:\Users\SamKirby\Dev\venvs\test2\Scripts\python.exe" ...
+  "...\cpython-3.11.15-...\python.exe" "-m" "ipykernel_launcher" ...
   Caused by: The directory name is invalid. (os error 267)`
-- **Analysis (to investigate):** os error 267 (ERROR_DIRECTORY) on Windows from
-  `spawn` almost always means the child's WORKING DIRECTORY is invalid — not the
-  executable path. The kernel is presumably spawned with the notebook's
-  worktree root as cwd; for a notebook opened outside the project that root is
-  the FILE itself (single-file worktree), and a file path is not a valid cwd →
-  ERROR_DIRECTORY. Check where `repl::kernels` sets the working directory for a
-  local kernel and make it use the file's PARENT directory (or the project root)
-  when the worktree root is a single file. Likely the same root cause family as
-  #55 (single-file worktree assumptions).
+- **Root cause (CONFIRMED in code):** `launch_kernel_with_spec`
+  (`notebook_ui.rs`) derived the kernel's working directory from the notebook's
+  worktree: `worktree_for_id(...).abs_path()`. A notebook outside the project
+  lives in a SINGLE-FILE worktree whose `abs_path()` is the FILE ITSELF, not a
+  directory — so the kernel was spawned with a *file* as its cwd. Windows
+  rejects that with ERROR_DIRECTORY (os error 267). Nothing to do with the
+  interpreter path (which is why every interpreter failed identically).
+- **Fix attempted (2026-07-30):** when the worktree `is_single_file()`, use the
+  file's PARENT directory as the kernel working directory (falling back to the
+  root if it somehow has no parent). Directory worktrees are unchanged.
+- **Tested:** no — see `awaiting_testing.md`.
+
+## 59. External notebooks are not restored on restart (reopen as empty "Untitled")
+
+- **Status:** open
+- **Symptom:** (user 2026-07-30) Save notebooks to a path OUTSIDE the workspace
+  (e.g. the Desktop), then quit and reopen Zed. The external notebooks are NOT
+  restored — instead two EMPTY "Untitled" notebooks open in their place. The
+  startup log shows no attempt to load the external paths at all.
+- **Analysis (hypothesis, needs confirming):** likely a direct consequence of
+  phase 53. Session restore persists the workspace's VISIBLE roots; an
+  out-of-project file now lives in an INVISIBLE single-file worktree, which is
+  not persisted as a root. On restart the item's stored worktree id resolves to
+  nothing, so the notebook deserializes with no path — i.e. an untitled
+  notebook. Before phase 53 these files became visible roots, so they did come
+  back (but as unwanted panel roots — the very thing phase 53 removed).
+  The goal is BOTH: restored as open tabs, still not panel roots. That means the
+  item's serialization must carry the ABSOLUTE PATH rather than relying on a
+  worktree id that no longer survives, and restore must re-create the invisible
+  worktree for it. Check `NotebookEditor`'s `SerializableItem` impl
+  (`serialize`/`deserialize`, `notebook/persistence.rs`) and how the workspace
+  restores items whose worktree is gone. NOTE: plain TEXT files saved outside
+  the project probably have the same problem — worth testing both.
 - **Fix attempted:** none
 - **Tested:** n/a
 

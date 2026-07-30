@@ -182,3 +182,12 @@ high → low within each group.
   `mouse_wheel_zoom` boolean exactly. NOTE: `page_data.rs` is a known
   upstream-merge hotspot (phase 46) — keep the addition minimal and adjacent to
   the related entries.
+
+- Remove the redundant kernel selector from the notebook's right sidebar (user
+  2026-07-30). There are two kernel-picker triggers: the top-right kernel strip
+  and one at the bottom of the right control sidebar. They share a single
+  `PopoverMenuHandle`, so clicking the SIDEBAR one opens the popover anchored at
+  the TOP-RIGHT trigger — visibly odd, and confirming the redundancy. Simplest
+  fix is to drop the sidebar trigger and keep the top-right strip (which already
+  shows kernel name + status). This is a subset of the larger "top control bar
+  vs right sidebar" item above, but is worth doing on its own regardless of that.

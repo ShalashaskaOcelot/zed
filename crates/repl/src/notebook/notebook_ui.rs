@@ -1590,7 +1590,22 @@ impl NotebookEditor {
             .project
             .read(cx)
             .worktree_for_id(self.worktree_id, cx)
-            .map(|worktree| worktree.read(cx).abs_path().to_path_buf())
+            .map(|worktree| {
+                let worktree = worktree.read(cx);
+                let root = worktree.abs_path().to_path_buf();
+                // A notebook opened or saved OUTSIDE the project lives in a
+                // single-file worktree whose root is the FILE, not a directory.
+                // Spawning the kernel with a file as its working directory
+                // fails (on Windows: "The directory name is invalid",
+                // os error 267), so use the containing directory instead.
+                if worktree.is_single_file() {
+                    root.parent()
+                        .map(|parent| parent.to_path_buf())
+                        .unwrap_or(root)
+                } else {
+                    root
+                }
+            })
             .unwrap_or_else(std::env::temp_dir);
         let fs = self.project.read(cx).fs().clone();
         // Weak: the kernel's tasks must not keep this editor (and therefore
