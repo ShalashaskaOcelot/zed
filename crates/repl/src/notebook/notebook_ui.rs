@@ -18,7 +18,7 @@ use language::{Buffer, Language, LanguageRegistry};
 use log;
 use project::{Project, ProjectEntryId, ProjectPath};
 use settings::{NotebookRunLandingMode, SeedQuerySetting, Settings as _};
-use ui::{ScrollAxes, Scrollbars, Tooltip, WithScrollbar, prelude::*};
+use ui::{ScrollAxes, ScrollbarStyle, Scrollbars, Tooltip, WithScrollbar, prelude::*};
 use workspace::item::{SaveOptions, TabContentParams};
 use workspace::notifications::NotificationId;
 use workspace::searchable::{
@@ -4693,11 +4693,11 @@ impl Render for NotebookEditor {
                         let scrollbars =
                             Scrollbars::for_settings::<editor::EditorSettingsScrollbarProxy>()
                                 .show_along(ScrollAxes::Vertical)
-                                // Lighter resting shade (the theme's hover step) so
-                                // it's easier to spot, and tighter padding so the
-                                // gutter isn't so wide with empty space either side.
-                                .thumb_color(cx.theme().colors().scrollbar_thumb_hover_background)
-                                .thumb_padding(px(2.))
+                                // Match the editor's scrollbar (wider, full-width
+                                // thumb, no side gaps) rather than the default
+                                // Regular style, which read as too thin/floaty in
+                                // the notebook. See phase 56.
+                                .style(ScrollbarStyle::Editor)
                                 .tracked_scroll_handle(&self.cell_list);
                         div()
                             .flex_1()
