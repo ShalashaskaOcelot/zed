@@ -116,9 +116,12 @@ that keeps the final resting position exact.
 
 ## Verification
 
-- `./script/clippy` clean; `cargo test -p gpui` (list tests) and
-  `cargo test -p repl` pass.
-- User test: with `smooth_scrolling` on, notebook wheel scrolling and up/down
-  cell navigation glide; adding/removing a cell snaps; a non-notebook
-  `ListState` view (e.g. chat) is unchanged; turning the setting off restores
-  instant notebook scrolling.
+- [x] `./script/clippy -p gpui -p repl` clean; `cargo test -p gpui --lib list`
+      passes (27 passed, 0 failed — covers scroll, reveal, scrollbar drag and
+      follow-tail, confirming the default-off path is unchanged).
+- [ ] **User test:** with `smooth_scrolling` on (the default), notebook WHEEL
+      scrolling glides and repeated ticks accumulate; up/down cell navigation
+      and Home/End still land EXACTLY on target (no drift — this is the bug #45
+      behaviour); adding/removing a cell snaps; a non-notebook `ListState` view
+      (e.g. chat, the kernel picker) is completely unchanged; setting
+      `"smooth_scrolling": false` restores instant notebook scrolling.

@@ -10,6 +10,18 @@ it in `bugs.md` (or as a backlog/phase item per the kind rules), annotate the
 line with the bug number, and tick it here (the follow-up is tracked
 elsewhere). Delete a section once all its boxes are ticked.
 
+## Phases awaiting confirmation (detail lives in the phase file)
+
+These are implementation-complete and marked `⚠️ AWAITING USER TESTING` in
+`to-do/`; their test steps are in the phase file itself. Listed here so this
+stays the one place to see everything needing a look.
+
+- [ ] Phase 53 — external saves no longer join the workspace/project panel
+- [ ] Phase 54 — smooth MOUSE-WHEEL scrolling in the editor (`editor.smooth_scrolling`, default on)
+- [ ] Phase 55 — smooth mouse-wheel scrolling in the notebook cell list (same setting)
+- [ ] Phase 56 — notebook cell-list scrollbar (user says still needs work)
+- [ ] Phase 57 — in-notebook Ctrl-F search across cells
+
 ## Bug fixes awaiting confirmation
 
 Pointer list so there's ONE place to see everything needing a test. The full

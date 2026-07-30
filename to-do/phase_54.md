@@ -106,8 +106,11 @@ deltas — animating it again would add lag).
 
 ## Verification
 
-- `./script/clippy` clean; `cargo test -p editor` passes.
-- User test: with `smooth_scrolling` on, mouse wheel and PageUp/PageDown animate
-  smoothly and remain interruptible; the trackpad still feels native (no added
-  lag); go-to-line jumps immediately; turning the setting off restores instant
-  scrolling.
+- [x] `./script/clippy -p editor` clean; `cargo test -p editor scroll` passes
+      (21 passed, 0 failed).
+- [ ] **User test:** with `smooth_scrolling` on (the default), the MOUSE WHEEL
+      glides instead of jumping and stays interruptible (a new tick mid-glide
+      extends it rather than restarting); the trackpad still feels native with
+      no added lag; scrollbar drag and go-to-line land immediately; setting
+      `"smooth_scrolling": false` restores instant wheel scrolling.
+      (PageUp/PageDown are NOT animated — that is phase 58.)
