@@ -1503,9 +1503,28 @@ impl CodeCell {
     ) {
         match &message.content {
             JupyterMessageContent::StreamContent(stream) => {
-                self.outputs.push(Output::Stream {
-                    content: cx.new(|cx| TerminalOutput::from(&stream.text, window, cx)),
-                });
+                // A cell that prints repeatedly (typically inside a loop) emits
+                // one stream message per flush, so pushing each as its own
+                // output splits what is really one run of text into many
+                // blocks — each with its own copy button, and each its own
+                // selection boundary, so a drag can't select across them.
+                // Jupyter merges consecutive stream output; append to the
+                // trailing stream block when there is one, as the inline REPL's
+                // `apply_terminal_text` already does.
+                let trailing_stream = match self.outputs.last() {
+                    Some(Output::Stream { content }) => Some(content.clone()),
+                    _ => None,
+                };
+                if let Some(content) = trailing_stream {
+                    content.update(cx, |terminal, cx| {
+                        terminal.append_text(&stream.text, cx);
+                        cx.notify();
+                    });
+                } else {
+                    self.outputs.push(Output::Stream {
+                        content: cx.new(|cx| TerminalOutput::from(&stream.text, window, cx)),
+                    });
+                }
             }
             JupyterMessageContent::DisplayData(display_data) => {
                 self.outputs

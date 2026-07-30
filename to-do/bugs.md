@@ -720,3 +720,34 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   height to add a half-line allowance (not currently reachable there without
   threading `window` into the cell-editor subscription).
 - **Tested:** no — see `awaiting_testing.md`.
+
+## 61. A cell's stream output is split into many separate output blocks
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-07-30, screenshots) One cell's printed output appears
+  as SEVERAL separate output blocks — the screenshot shows 6 copy/open-in-buffer
+  button pairs for a single cell's 7 printed lines. Because each block is its
+  own selection region, a click-drag cannot select across them: the user could
+  select the first two lines together (they happened to share a block) but the
+  remaining five only one line at a time. Observed in cells whose prints happen
+  inside a `for` loop.
+- **Root cause (CONFIRMED):** `CodeCell::handle_message` (`notebook/cell.rs`)
+  pushed a NEW `Output::Stream` for every `StreamContent` message. ipykernel
+  flushes stdout periodically, so a loop that prints with work in between sends
+  one stream message per flush — hence one block per iteration, and hence why
+  two quick prints landing in the same flush shared a block. Jupyter's nbformat
+  merges CONSECUTIVE stream output instead of accumulating separate outputs.
+  The inline REPL already did the right thing (`ExecutionView::apply_terminal_text`,
+  `outputs.rs`: "Previous stream data will combine together") — only the
+  notebook path missed it.
+- **Fix attempted (2026-07-30):** when the cell's last output is already a
+  stream block, append the new text to it (`TerminalOutput::append_text`)
+  instead of pushing another block; otherwise create one as before. Mirrors the
+  inline REPL exactly.
+- **Nuance (matches the inline REPL, noted deliberately):** consecutive stream
+  output is merged without distinguishing stdout from stderr, because the
+  notebook renders both as `Output::Stream` today and the terminal renderer
+  interleaves them the way a console would. If stdout/stderr ever need separate
+  blocks (see the backlog item about evcxr writing build logs to stderr),
+  `Output::Stream` will need to carry the stream name and the merge gated on it.
+- **Tested:** no — see `awaiting_testing.md`.

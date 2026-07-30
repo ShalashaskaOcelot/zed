@@ -42,6 +42,12 @@ listed here.
       edge → it scrolls one line at a time and does NOT run away into selecting
       the whole cell; (d) same with arrow keys / pressing Enter at the edges.
       Regular (non-notebook) editors must be unchanged.
+- [ ] Bug #61 — Run a cell that prints repeatedly inside a loop (with a little
+      work between prints, e.g. a sleep) → all the printed lines should appear
+      in ONE output block with a single copy button, and a click-drag should
+      select across all of them. Separate outputs of DIFFERENT kinds (e.g. a
+      print followed by a DataFrame followed by another print) should still be
+      separate blocks.
 - [ ] Bug #50 — Open a workspace folder, then (a) also have another root that
       you delete, or (b) create an UNSAVED notebook/buffer and then delete the
       whole workspace folder. Quit and relaunch → the session should restore:
