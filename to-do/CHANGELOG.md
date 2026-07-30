@@ -184,6 +184,16 @@ entry rather than archiving it.
   selection. Confirmed working 2026-07-30 (live refresh on completion filed as
   bug #58; visual polish backlogged).
 
+- Phase 54 — Smooth mouse-wheel scrolling in the editor: new
+  `editor.smooth_scrolling` setting (default on, VS Code's
+  `editor.smoothScrolling` mapped on import); ScrollManager eases toward a
+  target with frame-rate-independent exponential decay, successive ticks extend
+  the pending target, and any other scroll (scrollbar drag, go-to-line,
+  autoscroll) supersedes it. Trackpad left untouched. Keyboard scroll actions
+  split out as phase 58 (vim reads the scroll position back synchronously).
+  `01f09be`. Confirmed working on a mousewheel 2026-07-30. GUI settings entry
+  backlogged.
+
 ## Fixed bugs (confirmed)
 
 - #1 — Restart kernel killed the kernel but the relaunch failed. `7bd5b5a`

@@ -168,3 +168,17 @@ high → low within each group.
 - Kernel picker "Creating <name>…" row polish (user 2026-07-30): the row works
   but "could look a little better" visually. (The separate defect — it not
   refreshing live when the build completes — is bug #58.)
+
+- Add `smooth_scrolling` to the GUI settings UI (user 2026-07-30). Phase 54
+  added the setting to `default.json`, the schema and the docs, but NOT to the
+  settings UI — so it's JSON-only today. It belongs in the existing **Editor →
+  "Scrolling"** section (`crates/settings_ui/src/page_data.rs:1811`), right
+  alongside its siblings `scroll_sensitivity`, `mouse_wheel_zoom` and
+  `fast_scroll_sensitivity`, which all already have entries there — so its
+  absence is a genuine gap, not an upstream convention. It is a GENERAL editor
+  setting (it affects every file, not just notebooks), so it does not belong on
+  the REPL & Notebooks page. Small: one `SettingsPageItem` with a
+  `json_path: Some("smooth_scrolling")` + pick/place pair following the
+  `mouse_wheel_zoom` boolean exactly. NOTE: `page_data.rs` is a known
+  upstream-merge hotspot (phase 46) — keep the addition minimal and adjacent to
+  the related entries.

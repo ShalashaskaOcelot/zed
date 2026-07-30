@@ -17,7 +17,6 @@ These are implementation-complete and marked `⚠️ AWAITING USER TESTING` in
 stays the one place to see everything needing a look.
 
 - [ ] Phase 53 — external saves no longer join the workspace/project panel
-- [ ] Phase 54 — smooth MOUSE-WHEEL scrolling in the editor (`editor.smooth_scrolling`, default on)
 - [ ] Phase 55 — smooth mouse-wheel scrolling in the notebook cell list (same setting)
 - [ ] Phase 56 — notebook cell-list scrollbar (user says still needs work)
 - [ ] Phase 57 — in-notebook Ctrl-F search across cells
@@ -48,6 +47,7 @@ listed here.
       whole workspace folder. Quit and relaunch → the session should restore:
       surviving roots come back, and unsaved items are recovered even if their
       folder is gone (no more whole-session loss over a deleted path).
+
 ## Phase 44 — Build the user-level Windows installer locally
 
 Kind: new feature (fork release engineering). Implementation (the three
