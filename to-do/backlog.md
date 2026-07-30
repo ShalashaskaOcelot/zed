@@ -102,3 +102,10 @@ high → low within each group.
   and `util::process` `spawn_interruptible`/Windows interrupt plumbing
   (`crates/util/src/process.rs`).
 
+- Horizontal scrollbar for wide notebook outputs (user 2026-07-30): rich outputs
+  (e.g. pandas DataFrames) render at full width but overflow the viewport and
+  clip on the right with no way to scroll horizontally. Add a horizontal
+  scrollbar / horizontal scroll to the cell output container for wide outputs
+  (tables, wide text). Relates to bug #53 (text output too narrow) but is the
+  opposite end — this is about outputs that are TOO wide to fit. Investigate the
+  output container sizing in `crates/repl/src/outputs/` and `notebook/cell.rs`.

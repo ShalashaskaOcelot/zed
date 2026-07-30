@@ -577,3 +577,37 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 - **Tested:** n/a. NEXT STEP: user captures the log when Run All does nothing
   (look for the "notebook run batch:" line and whether a "resuming queued run"
   line follows).
+
+## 52. Pane nav buttons (new / split / zoom) flicker at times
+
+- **Status:** open
+- **Symptom:** (user 2026-07-30, third screenshot) The pane toolbar buttons at
+  the top-right — new file, split pane, zoom-in — randomly flicker/redraw at
+  times while a notebook is open.
+- **Analysis (hypothesis, unconfirmed):** likely re-render churn — the notebook
+  emits frequent `cx.notify()` (kernel status ticks, execution-state changes,
+  follow-scroll) which can drive the surrounding pane toolbar to repaint. Could
+  also be pre-existing Zed behaviour unrelated to the notebook. Needs runtime
+  investigation: does it flicker only during kernel activity / execution, or at
+  idle too? Does it happen with a non-notebook item?
+- **Fix attempted:** none
+- **Tested:** n/a
+
+## 53. Notebook text output is narrower than the available width (wraps early)
+
+- **Status:** open
+- **Symptom:** (user 2026-07-30, fourth screenshot) Stream/text output in a
+  notebook wraps well before the edge of the available space — e.g. a single
+  "Sample master files:" line, and the "Volume totals:" / "Area totals:" lines,
+  wrap roughly halfway across even though they'd nearly fit on one line. By
+  contrast a rich DataFrame output (fifth screenshot) DOES stretch the full
+  width (but has its own problem — it clips outside the viewport with no
+  horizontal scrollbar; see backlog).
+- **Analysis (to investigate):** the text/stream output container appears to be
+  laid out narrower than the cell/viewport width — likely a max-width or a
+  non-`full`/shrink sizing on the output block in `crates/repl/src/outputs/`
+  (stream/plain-text renderer) or the cell output container in
+  `notebook/cell.rs`. Compare against the DataFrame/rich renderer which fills
+  the width.
+- **Fix attempted:** none
+- **Tested:** n/a
