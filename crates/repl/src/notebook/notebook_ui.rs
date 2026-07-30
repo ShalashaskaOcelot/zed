@@ -254,10 +254,6 @@ pub struct NotebookEditor {
     /// down the notebook. Viewport-only: it never changes the selection or
     /// edit/command mode, so it doesn't fight a user editing a later cell.
     follow_running_cell: bool,
-    /// A cursor-follow check is already scheduled for after the next frame, so
-    /// a burst of selection changes (a held arrow key) does one follow, not one
-    /// per keystroke.
-    cursor_follow_pending: bool,
     /// Multi-selection: every selected index INCLUDING the primary
     /// (`selected_cell_index`). Empty when only a single cell is selected.
     /// Index-based, so any structural change collapses the selection.
@@ -439,7 +435,6 @@ impl NotebookEditor {
             run_queue: Vec::new(),
             active_run_cell: None,
             follow_running_cell: false,
-            cursor_follow_pending: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             kernel_picker_handle: PopoverMenuHandle::default(),
@@ -3939,32 +3934,24 @@ impl NotebookEditor {
         self.cell_list.scroll_to_reveal_item_top_aligned(index);
     }
 
-    /// Keep the cursor visible while editing a tall cell. Runs AFTER the next
-    /// frame, because the editor only records its cursor's exact position while
-    /// painting: checking during the selection change itself would read the
-    /// position from the previous frame and so act one keystroke behind —
-    /// letting an arrow key walk the cursor off screen before the scroll
-    /// catches up. Repeated changes in one frame (holding an arrow key) collapse
-    /// into a single follow.
-    fn follow_cursor_in_cell(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if self.cursor_follow_pending {
-            return;
-        }
-        self.cursor_follow_pending = true;
-        let notebook = cx.entity().downgrade();
-        window.on_next_frame(move |_window, cx| {
-            notebook
-                .update(cx, |this, cx| {
-                    this.cursor_follow_pending = false;
-                    this.apply_cursor_follow(index, cx);
-                })
-                .ok();
-        });
-    }
-
-    /// Scroll the list if the cursor now sits outside the viewport. Only valid
-    /// straight after a paint — see [`Self::follow_cursor_in_cell`].
-    fn apply_cursor_follow(&mut self, index: usize, cx: &mut Context<Self>) {
+    /// Keep the cursor visible while editing a tall cell: scroll the notebook
+    /// only when the cursor actually sits outside the viewport.
+    ///
+    /// The cursor's position is derived from the editor's LAID-OUT bounds and
+    /// the cursor's row, never from where the cursor was painted. A painted
+    /// position only exists for a cursor that was on screen, so relying on it
+    /// meant that once the cursor left the viewport there was nothing left to
+    /// tell us it had — the follow went permanently dead, and no amount of
+    /// further arrow presses recovered it. Cell editors are `SizeByContent`,
+    /// with no internal scroll, so their height is exactly their rows: the row
+    /// maps linearly onto those bounds, which are known whether or not the row
+    /// is visible.
+    fn follow_cursor_in_cell(
+        &mut self,
+        index: usize,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(cell) = self
             .cell_order
             .get(index)
@@ -3976,48 +3963,44 @@ impl NotebookEditor {
             return;
         };
 
-        let Some(cell_bounds) = self.cell_list.bounds_for_item(index) else {
+        if self.cell_list.bounds_for_item(index).is_none() {
             // Not currently laid out (e.g. scrolled far away): reveal it.
             self.cell_list.scroll_to_reveal_item_top_aligned(index);
             return;
-        };
+        }
         let viewport = self.cell_list.viewport_bounds();
         if viewport.size.height <= px(0.) {
             return;
         }
 
-        // The editor reports its cursor's exact position (the centre of the
-        // cursor's line, in window coordinates) once it has been painted. The
-        // fallback interpolates the row within the cell's laid-out height, which
-        // is poor — the cell's height includes non-editor chrome, so it can be
-        // out by several lines — and it needs a display snapshot, which is far
-        // too expensive to build on every keystroke. So only take that path when
-        // there is genuinely no painted position to use.
-        let cursor_y = match editor.read(cx).pixel_position_of_cursor(cx) {
-            Some(position) => position.y,
-            None => {
-                let (cursor_row, total_rows) = editor.update(cx, |editor, cx| {
-                    let snapshot = editor.display_snapshot(cx);
-                    let cursor_row = snapshot
-                        .max_point()
-                        .row()
-                        .min(editor.selections.newest_display(&snapshot).head().row());
-                    (cursor_row.0, snapshot.max_point().row().0)
-                });
-                let rows = (total_rows + 1).max(1) as f32;
-                let fraction = (cursor_row as f32 + 0.5) / rows;
-                cell_bounds.top() + cell_bounds.size.height * fraction
-            }
-        };
+        let (cursor_row, total_rows) = editor.update(cx, |editor, cx| {
+            let snapshot = editor.display_snapshot(cx);
+            let cursor_row = snapshot
+                .max_point()
+                .row()
+                .min(editor.selections.newest_display(&snapshot).head().row());
+            (cursor_row.0, snapshot.max_point().row().0)
+        });
 
-        // Scroll ONLY when the cursor has actually left the viewport — no
-        // margin. Keeping a few lines of lead here would move the viewport when
-        // the cursor is still perfectly visible, which is disorienting while
-        // editing and (with the pointer held) compounds into runaway scrolling.
-        if cursor_y < viewport.top() {
-            self.cell_list.scroll_by(cursor_y - viewport.top());
-        } else if cursor_y > viewport.bottom() {
-            self.cell_list.scroll_by(cursor_y - viewport.bottom());
+        // The editor's own laid-out bounds, which exist regardless of what is
+        // currently on screen.
+        let Some(editor_bounds) = editor.read(cx).last_bounds().copied() else {
+            return;
+        };
+        let rows = (total_rows + 1).max(1) as f32;
+        let line_height = editor_bounds.size.height / rows;
+        let cursor_top = editor_bounds.top() + line_height * cursor_row as f32;
+        let cursor_bottom = cursor_top + line_height;
+
+        // Scroll ONLY when the cursor's line is actually outside the viewport,
+        // and then only far enough to bring that one line fully in. Any lead
+        // here would move the viewport while the cursor is still perfectly
+        // visible, which is disorienting while editing and (with the pointer
+        // held) compounds into runaway scrolling.
+        if cursor_top < viewport.top() {
+            self.cell_list.scroll_by(cursor_top - viewport.top());
+        } else if cursor_bottom > viewport.bottom() {
+            self.cell_list.scroll_by(cursor_bottom - viewport.bottom());
         }
     }
 

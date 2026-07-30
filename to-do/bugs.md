@@ -723,15 +723,29 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   behaviour confirmed PERFECT — a line even slightly out of view scrolls fully
   in, a fully visible line never moves the viewport. Two ARROW-KEY problems
   remained, both now addressed:
-  1. *Intermittently let the cursor slide off screen.* The editor records its
-     cursor's exact position while PAINTING, so checking during the
-     `SelectionsChanged` event read the PREVIOUS frame's position — i.e. always
-     one keystroke behind. Moving down a line decided using the old row, so the
-     new row could land off screen and only correct on the NEXT keypress, which
-     reads as "sometimes it follows, sometimes it doesn't". The follow now runs
-     via `window.on_next_frame`, after the paint, so the position is current.
-     (Required converting the cell-editor subscriptions to `subscribe_in` so the
-     handler receives `window`.)
+  1. *Arrow keys let the cursor leave the viewport and then never recover.*
+     TWO WRONG DIAGNOSES were tried first and are recorded here so they are not
+     repeated: (a) "the painted position is one frame stale, defer to the next
+     frame" — disproved by the user pressing DOWN 30 times with no movement at
+     all, and by the follow being correct (not lagging) when it did work;
+     (b) the `window.on_next_frame` deferral that theory motivated, which also
+     did not help (and `on_next_frame` does not itself request a frame, so it is
+     not even a reliable "after paint" hook).
+     REAL CAUSE: `pixel_position_of_cursor` only exists for a cursor that was
+     PAINTED. Once the cursor scrolled out of the viewport there was no painted
+     position, so the stale one — still inside the viewport — was used, the
+     follow concluded "nothing to do", and it stayed dead no matter how many
+     more arrow presses arrived. This matches every reported symptom: a
+     partially-visible line still scrolled (that row was painted), the next
+     fully-out-of-view line did not, and pressing LEFT/RIGHT recovered it (the
+     editor's own autoscroll request path, which is independent of this).
+     FIX: derive the cursor's position geometrically from `Editor::last_bounds()`
+     (set during LAYOUT, so valid whether or not the row is on screen) and the
+     cursor's row — cell editors are `SizeByContent`, so their height is exactly
+     their rows and the row maps linearly onto those bounds. This also yields
+     the line height, so the check is now a true "is this line fully visible"
+     test rather than a centre-point approximation, and the deferral and its
+     pending flag are gone.
   2. *Holding an arrow key stuttered, then jumped several lines at once.* Every
      selection change built a full `display_snapshot` just to compute a fallback
      that was almost never used, and did a follow per keystroke. The snapshot is
