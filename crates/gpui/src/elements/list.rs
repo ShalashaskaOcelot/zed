@@ -15,10 +15,17 @@ use crate::{
 };
 use collections::VecDeque;
 use refineable::Refineable as _;
-use std::{cell::RefCell, ops::Range, rc::Rc};
+use std::{cell::RefCell, ops::Range, rc::Rc, time::Instant};
 use sum_tree::{Bias, Dimensions, SumTree};
 
 type RenderItemFn = dyn FnMut(usize, &mut Window, &mut App) -> AnyElement + 'static;
+
+/// Time constant of the smooth-scroll exponential decay, in seconds: the
+/// un-applied wheel distance shrinks by ~63% every `tau`.
+const SMOOTH_SCROLL_TAU: f32 = 0.07;
+/// Apply the remainder in one go once less than this is left, so the
+/// animation terminates instead of asymptotically approaching zero.
+const SMOOTH_SCROLL_EPSILON: f32 = 0.5;
 
 /// Construct a new list element
 pub fn list(
@@ -73,6 +80,15 @@ struct StateInner {
     measuring_behavior: ListMeasuringBehavior,
     pending_scroll: Option<PendingScroll>,
     follow_state: FollowState,
+    /// Opt-in: ease mouse-wheel scrolling instead of applying it in one jump.
+    /// Off by default so lists that don't ask for it are unaffected.
+    smooth_scroll: bool,
+    /// Wheel distance not yet applied, decayed toward zero a fraction per
+    /// frame. Working in *remaining delta* rather than an absolute target
+    /// keeps this independent of item heights, which are only estimates until
+    /// an item has been laid out.
+    pending_smooth_delta: Pixels,
+    smooth_scroll_last_step: Option<Instant>,
 }
 
 /// Deferred scroll adjustment applied after the scroll-top item has been remeasured.
@@ -325,9 +341,22 @@ impl ListState {
             measuring_behavior: ListMeasuringBehavior::default(),
             pending_scroll: None,
             follow_state: FollowState::default(),
+            smooth_scroll: false,
+            pending_smooth_delta: px(0.),
+            smooth_scroll_last_step: None,
         })));
         this.splice(0..0, item_count);
         this
+    }
+
+    /// Enable or disable eased mouse-wheel scrolling for this list. Trackpad
+    /// (pixel) scrolling is never eased — it already arrives smoothed.
+    pub fn set_smooth_scroll(&self, enabled: bool) {
+        let state = &mut *self.0.borrow_mut();
+        state.smooth_scroll = enabled;
+        if !enabled {
+            state.cancel_smooth_scroll();
+        }
     }
 
     /// Set the list to measure all items in the list in the first layout phase.
@@ -348,6 +377,7 @@ impl ListState {
             state.measuring_behavior.reset();
             state.logical_scroll_top = None;
             state.pending_scroll = None;
+            state.cancel_smooth_scroll();
             state.scrollbar_drag_start_height = None;
             state.items.summary().count
         };
@@ -552,6 +582,7 @@ impl ListState {
             offset_in_item: new_pixel_offset - cursor.start().height,
         };
         drop(cursor);
+        state.cancel_smooth_scroll();
         state.rebase_pending_scroll(scroll_top);
         state.logical_scroll_top = Some(scroll_top);
     }
@@ -566,6 +597,7 @@ impl ListState {
         let state = &mut *self.0.borrow_mut();
         let item_count = state.items.summary().count;
         state.pending_scroll = None;
+        state.cancel_smooth_scroll();
         state.logical_scroll_top = Some(ListOffset {
             item_ix: item_count,
             offset_in_item: px(0.),
@@ -618,6 +650,7 @@ impl ListState {
             state.follow_state.stop_following();
         }
 
+        state.cancel_smooth_scroll();
         state.rebase_pending_scroll(scroll_top);
         state.logical_scroll_top = Some(scroll_top);
     }
@@ -657,6 +690,7 @@ impl ListState {
             }
         }
 
+        state.cancel_smooth_scroll();
         state.rebase_pending_scroll(scroll_top);
         state.logical_scroll_top = Some(scroll_top);
     }
@@ -699,6 +733,7 @@ impl ListState {
             item_ix: ix,
             offset_in_item: px(0.),
         };
+        state.cancel_smooth_scroll();
         state.rebase_pending_scroll(scroll_top);
         state.logical_scroll_top = Some(scroll_top);
     }
@@ -756,6 +791,7 @@ impl ListState {
             item_ix: anchor_ix,
             offset_in_item: px(0.),
         };
+        state.cancel_smooth_scroll();
         state.rebase_pending_scroll(scroll_top);
         state.logical_scroll_top = Some(scroll_top);
     }
@@ -896,6 +932,42 @@ impl ListState {
 }
 
 impl StateInner {
+    /// Drop any un-applied smooth-scroll distance. Every absolute scroll
+    /// (reveal, scroll-to, scrollbar drag) calls this so it lands exactly where
+    /// asked instead of being dragged onward by a glide still in flight.
+    fn cancel_smooth_scroll(&mut self) {
+        self.pending_smooth_delta = px(0.);
+        self.smooth_scroll_last_step = None;
+    }
+
+    /// Consume one frame's worth of the pending wheel distance, returning the
+    /// amount to scroll now. Returns `None` when nothing is animating.
+    fn take_smooth_scroll_step(&mut self) -> Option<Pixels> {
+        if !self.smooth_scroll || self.pending_smooth_delta == px(0.) {
+            return None;
+        }
+
+        let now = Instant::now();
+        let elapsed = self
+            .smooth_scroll_last_step
+            .map_or(SMOOTH_SCROLL_TAU, |last| {
+                now.saturating_duration_since(last).as_secs_f32()
+            });
+        self.smooth_scroll_last_step = Some(now);
+
+        // Applying the remainder below the epsilon keeps this terminating.
+        if self.pending_smooth_delta.abs().0 <= SMOOTH_SCROLL_EPSILON {
+            let step = self.pending_smooth_delta;
+            self.cancel_smooth_scroll();
+            return Some(step);
+        }
+
+        let progress = 1.0 - (-elapsed / SMOOTH_SCROLL_TAU).exp();
+        let step = self.pending_smooth_delta * progress;
+        self.pending_smooth_delta -= step;
+        Some(step)
+    }
+
     /// Re-anchor a pending scroll adjustment from a remeasure onto a newly set
     /// scroll position, so it clamps to the remeasured item's new height on
     /// the next layout instead of reverting the scroll.
@@ -1426,6 +1498,9 @@ impl StateInner {
         let Some(bounds) = self.last_layout_bounds else {
             return;
         };
+        // A drag positions the view directly; it must not be dragged onward by
+        // a wheel glide still in flight.
+        self.cancel_smooth_scroll();
         let height = bounds.size.height;
 
         let padding = self.last_padding.unwrap_or_default();
@@ -1651,19 +1726,47 @@ impl Element for List {
         let height = bounds.size.height;
         let scroll_top = prepaint.layout.scroll_top;
         let hitbox_id = prepaint.hitbox.id;
+
+        // Drive an in-flight smooth scroll: apply this frame's slice of the
+        // remaining wheel distance and ask for another frame until it is spent.
+        let smooth_step = self.state.0.borrow_mut().take_smooth_scroll_step();
+        if let Some(step) = smooth_step {
+            self.state.0.borrow_mut().scroll(
+                &scroll_top,
+                height,
+                point(px(0.), step),
+                current_view,
+                window,
+                cx,
+            );
+            window.request_animation_frame();
+        }
+
         let mut accumulated_scroll_delta = ScrollDelta::default();
         window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
             if phase == DispatchPhase::Bubble && hitbox_id.should_handle_scroll(window) {
                 accumulated_scroll_delta = accumulated_scroll_delta.coalesce(event.delta);
                 let pixel_delta = accumulated_scroll_delta.pixel_delta(px(20.));
-                list_state.0.borrow_mut().scroll(
-                    &scroll_top,
-                    height,
-                    pixel_delta,
-                    current_view,
-                    window,
-                    cx,
-                )
+                // Only the wheel is eased. Trackpad deltas arrive as `Pixels`
+                // already smoothed with momentum, so easing them adds lag.
+                let smooth = list_state.0.borrow().smooth_scroll
+                    && matches!(event.delta, ScrollDelta::Lines(_));
+                if smooth {
+                    // Accumulate onto whatever is still pending so repeated
+                    // ticks build up instead of restarting the glide. The
+                    // borrow ends before notifying, which re-enters paint.
+                    list_state.0.borrow_mut().pending_smooth_delta += pixel_delta.y;
+                    cx.notify(current_view);
+                } else {
+                    list_state.0.borrow_mut().scroll(
+                        &scroll_top,
+                        height,
+                        pixel_delta,
+                        current_view,
+                        window,
+                        cx,
+                    )
+                }
             }
         });
     }

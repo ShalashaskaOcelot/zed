@@ -1,9 +1,21 @@
 # Phase 55 — Smooth scrolling for the notebook cell list
 
+⚠️ AWAITING USER TESTING (implementation complete, clippy-clean).
+
 Kind: **new feature** (notebook-primary; sibling to phase 54). Requested by the
-user 2026-07-23. Depends conceptually on phase 54 (shares the
-`editor.smooth_scrolling` setting) but is a SEPARATE mechanism — do phase 54
-first so the setting and the easing approach already exist to reuse.
+user 2026-07-23. Shares the `editor.smooth_scrolling` setting from phase 54.
+
+**Approach decided during implementation (2026-07-30) — NEITHER of the two
+options originally written below.** Both assumed easing toward an absolute
+`ListOffset` target, which is exactly the fragile math behind bug #45: item
+heights are estimates until laid out, so an absolute target across unmeasured
+items is unreliable. Instead the list keeps a **pending pixel delta that decays
+to zero**: a wheel tick adds its distance to `pending_smooth_delta`, and each
+frame applies a fraction of what remains through the list's existing
+`scroll()`. This needs no cumulative-height math at all, so it cannot regress
+landing accuracy, and repeated ticks simply add to the pending distance.
+Cell-navigation reveals are deliberately NOT animated — they stay exact (see
+the note under Tasks).
 
 Goal: animate the notebook cell list's scroll changes (mouse wheel + cell-to-cell
 navigation reveals) with the same short eased transition as the editor, instead
@@ -58,23 +70,31 @@ flag contains the blast radius.
 
 ## Tasks
 
-- [ ] Decide + record the approach (recommend option 1) at the top of this phase
-      before coding.
-- [ ] (Option 1) Add opt-in smooth-scroll support to `ListState`: a way to mark
-      the state as smooth, a target `ListOffset`, last-frame `Instant`, and a
-      per-frame step easing current→target (reuse phase 54's exponential-decay
-      model + `tau`). Default OFF so existing `ListState` users are unaffected.
-- [ ] Route the wheel path and the `scroll_to*` / `scroll_to_reveal_item*` /
-      `scroll_to_end` movers through the target-and-animate path when smooth mode
-      is on; snap instantly when off. A new scroll while animating re-targets.
-- [ ] Wire the notebook to opt in based on the `editor.smooth_scrolling` setting
-      (gpui can't read editor settings, so pass the bool in from
-      `notebook_ui.rs`; update it if the setting changes). Reuse the phase-54
-      setting — one toggle governs both editor and notebook.
-- [ ] Confirm cell navigation (up/down cell selection → `scroll_to_reveal_item*`)
-      glides, and that `splice`-driven scrolls on add/remove cell
-      (`notebook_ui.rs:2712`, `:3371`, `:3421`) behave sensibly (probably snap,
-      not animate — a structural edit shouldn't glide).
+- [x] Decided + recorded the approach (pending-delta decay — see the note at the
+      top; neither original option).
+- [x] Add opt-in smooth-scroll support to `ListState`: `smooth_scroll` flag,
+      `pending_smooth_delta`, `smooth_scroll_last_step`, plus
+      `set_smooth_scroll()`, `cancel_smooth_scroll()` and
+      `take_smooth_scroll_step()`. Default OFF, so every other `ListState` user
+      (chat, pickers, csv preview, settings UI) is unaffected.
+- [x] Route the WHEEL path through it: `ScrollDelta::Lines` adds to the pending
+      delta and refreshes; the element's `paint` applies one eased step per
+      frame and calls `request_animation_frame` until it is spent. Trackpad
+      (`ScrollDelta::Pixels`) still applies immediately.
+- [x] Wire the notebook to opt in from `editor.smooth_scrolling` (re-applied
+      each render in `cell_list()`, so toggling the setting takes effect live).
+- [x] Absolute scrolls cancel any in-flight glide (`scroll_to`,
+      `scroll_to_reveal_item`, `..._top_aligned`, `scroll_to_item_near_top`,
+      `scroll_to_end`, `reset`, scrollbar drag). This is what keeps cell
+      navigation landing EXACTLY on target — i.e. it preserves the bug #45 fix
+      rather than risking it.
+
+**Deliberately not animated: cell-navigation reveals.** The original phase
+called these "the most visible win", but bug #45 was *just* fixed by making
+those jumps index-anchored and exact, and easing them would reintroduce the
+landing inaccuracy that fix removed. Structural edits (add/remove cell) snap for
+the same reason. If gliding navigation is still wanted, it needs its own phase
+that keeps the final resting position exact.
 
 ## Risks / gaps
 

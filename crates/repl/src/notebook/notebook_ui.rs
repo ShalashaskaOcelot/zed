@@ -4411,6 +4411,10 @@ impl NotebookEditor {
 
     fn cell_list(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity();
+        // gpui can't read editor settings, so the notebook opts its list in.
+        // Re-applied each render so toggling the setting takes effect live.
+        self.cell_list
+            .set_smooth_scroll(editor::EditorSettings::get_global(cx).smooth_scrolling);
         list(self.cell_list.clone(), move |index, window, cx| {
             view.update(cx, |this, cx| {
                 let cell_id = &this.cell_order[index];
