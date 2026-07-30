@@ -548,3 +548,27 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   fully-dead projects; `garbage_collect_workspaces`'s 7-day deletion is mitigated
   because a restored workspace rejoins the current session (so it's not GC'd).
 - **Tested:** unit test passes; runtime untested — see `awaiting_testing.md`.
+
+## 51. Run All does nothing even with a ready (green) kernel
+
+- **Status:** open — LIKELY a symptom of the phase-57 search-invalidation loop
+  (fixed in `45cb601`); re-test before investigating as independent.
+- **Symptom:** (user 2026-07-30, build `2915bbd`, Python venv notebook) Run All
+  did nothing across repeated tries. Even after the kernel picker was answered
+  and the kernel indicator went solid green, Run All still executed nothing.
+  Shift-Enter on a cell did run it, and once that happened Run All started
+  working.
+- **Analysis (hypothesis):** `2915bbd` shipped an infinite clear/emit loop
+  (`NotebookEditor::clear_matches` emitted `MatchesInvalidated` unconditionally →
+  buffer search bar re-update → clear → …) that pegs the MAIN THREAD as soon as
+  the notebook is the active pane item. A pegged main thread would accept the
+  Run All action but never get to schedule the cell execution, so "nothing
+  happens" while async things (kernel indicator) still update. Shift-Enter
+  appearing to break the logjam fits a main-thread that's intermittently
+  yielding. The loop is fixed in `45cb601`.
+- **Fix attempted:** none directly; expected to be resolved by the loop fix
+  (`45cb601`). If Run All still does nothing on a green kernel AFTER that build,
+  this is a genuine independent bug — investigate the run-queue /
+  `execute`/`run_all` path in `notebook_ui.rs` (kernel-ready gating, selected
+  cell/focus requirements).
+- **Tested:** pending user re-test on the loop-fix build.
