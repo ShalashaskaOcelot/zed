@@ -549,26 +549,31 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   because a restored workspace rejoins the current session (so it's not GC'd).
 - **Tested:** unit test passes; runtime untested — see `awaiting_testing.md`.
 
-## 51. Run All does nothing even with a ready (green) kernel
+## 51. Run All intermittently does nothing
 
-- **Status:** open — LIKELY a symptom of the phase-57 search-invalidation loop
-  (fixed in `45cb601`); re-test before investigating as independent.
-- **Symptom:** (user 2026-07-30, build `2915bbd`, Python venv notebook) Run All
-  did nothing across repeated tries. Even after the kernel picker was answered
-  and the kernel indicator went solid green, Run All still executed nothing.
-  Shift-Enter on a cell did run it, and once that happened Run All started
-  working.
-- **Analysis (hypothesis):** `2915bbd` shipped an infinite clear/emit loop
-  (`NotebookEditor::clear_matches` emitted `MatchesInvalidated` unconditionally →
-  buffer search bar re-update → clear → …) that pegs the MAIN THREAD as soon as
-  the notebook is the active pane item. A pegged main thread would accept the
-  Run All action but never get to schedule the cell execution, so "nothing
-  happens" while async things (kernel indicator) still update. Shift-Enter
-  appearing to break the logjam fits a main-thread that's intermittently
-  yielding. The loop is fixed in `45cb601`.
-- **Fix attempted:** none directly; expected to be resolved by the loop fix
-  (`45cb601`). If Run All still does nothing on a green kernel AFTER that build,
-  this is a genuine independent bug — investigate the run-queue /
-  `execute`/`run_all` path in `notebook_ui.rs` (kernel-ready gating, selected
-  cell/focus requirements).
-- **Tested:** pending user re-test on the loop-fix build.
+- **Status:** open — real, independent bug (NOT the search loop). The search
+  loop (`45cb601`) is fixed but Run All still fails intermittently.
+- **Symptom:** (user 2026-07-30) Run All sometimes does nothing — no cells run —
+  even with a ready (solid green) kernel. Running a single cell with Shift-Enter
+  works and can un-stick Run All. Intermittent; often works fine (queues, starts
+  the kernel, runs all).
+- **Analysis (code inspection — `run_cell_batch` / `advance_run_queue` /
+  `route`, all pre-existing, not from this session's changes):**
+  - `run_cell_batch` (`notebook_ui.rs:2137`): if a run is superseded on a BUSY
+    kernel it sets `resume_run_queue_on_idle = true` and waits for a FUTURE
+    `Status(Idle)` (handled in `route`, `:5567`) before submitting. Prime
+    suspect: an EDGE-vs-LEVEL race — `kernel_busy` is read as true, but the
+    kernel's idle transition already passed (or none follows), so the batch
+    waits forever. `advance_run_queue` (`:2186`) also early-returns while
+    `active_run_cell.is_some()`, so a stale active cell would block a queue.
+  - The supersede path DOES clear `active_run_cell` via `cancel_run_queue`
+    (`:2292`), so a simple dangling handle isn't it — points to the resume race.
+- **Diagnostic added (`<pending commit>`):** `log::info!` lines in
+  `run_cell_batch` (which branch: "advance now" vs "wait for kernel idle"),
+  `advance_run_queue` (early-return on active cell), and the idle-resume path.
+  Next time Run All does nothing, the log shows which branch stalled.
+- **Fix attempted:** none yet — deliberately not blind-fixing a kernel-state
+  race without a repro (risk of breaking interrupt-then-rerun). Waiting on logs.
+- **Tested:** n/a. NEXT STEP: user captures the log when Run All does nothing
+  (look for the "notebook run batch:" line and whether a "resuming queued run"
+  line follows).
