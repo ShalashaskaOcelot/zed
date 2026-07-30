@@ -30,6 +30,21 @@ use workspace::{ItemId, WorkspaceId};
 pub const SCROLL_EVENT_SEPARATION: Duration = Duration::from_millis(28);
 const SCROLLBAR_SHOW_INTERVAL: Duration = Duration::from_secs(1);
 
+/// Time constant of the smooth-scroll exponential decay, in seconds. The
+/// remaining distance shrinks by `1 - e^-1` (~63%) every `tau`, so larger
+/// values glide longer. Tuned to read as eased but still responsive.
+const SMOOTH_SCROLL_TAU: f64 = 0.07;
+/// How often the smooth-scroll animation steps. The easing is frame-rate
+/// independent (it uses the real elapsed time), so this only sets smoothness.
+const SMOOTH_SCROLL_FRAME_INTERVAL: Duration = Duration::from_millis(8);
+/// Snap to the target once every axis is within this many lines/columns —
+/// below this the remaining difference is sub-pixel.
+const SMOOTH_SCROLL_EPSILON: f64 = 0.01;
+/// If a step moves the view less than this, the target is unreachable (the
+/// position clamped at a document edge), so the animation stops rather than
+/// easing toward something it can never arrive at.
+const SMOOTH_SCROLL_STALL_EPSILON: f64 = 1e-4;
+
 pub struct WasScrolled(pub(crate) bool);
 
 pub type ScrollOffset = f64;
@@ -229,6 +244,18 @@ pub struct ScrollManager {
     forbid_vertical_scroll: bool,
     notified_top_overscroll: bool,
     minimap_thumb_state: Option<ScrollbarThumbState>,
+    /// Where an in-flight smooth scroll is heading, in scroll-position space.
+    /// `None` when nothing is animating.
+    smooth_scroll_target: Option<gpui::Point<ScrollOffset>>,
+    smooth_scroll_last_step: Option<Instant>,
+    /// Whether the driving task is alive. Kept separate from the task handle so
+    /// the task can mark itself finished without dropping the handle it is
+    /// running under.
+    smooth_scroll_running: bool,
+    /// Set only while the animation writes its own frame, so that those writes
+    /// don't trip the cancel-on-external-scroll check in `set_anchor`.
+    applying_smooth_scroll: bool,
+    smooth_scroll_task: Option<Task<()>>,
     _save_scroll_position_task: Task<()>,
 }
 
@@ -253,6 +280,11 @@ impl ScrollManager {
             forbid_vertical_scroll: false,
             notified_top_overscroll: false,
             minimap_thumb_state: None,
+            smooth_scroll_target: None,
+            smooth_scroll_last_step: None,
+            smooth_scroll_running: false,
+            applying_smooth_scroll: false,
+            smooth_scroll_task: None,
             _save_scroll_position_task: Task::ready(()),
         }
     }
@@ -480,6 +512,12 @@ impl ScrollManager {
 
         self.scroll_max_x.take();
         self.autoscroll_request.take();
+        // Any scroll that isn't the animation's own frame supersedes it, so
+        // scrollbar drags, go-to-line, and cursor autoscroll land immediately
+        // instead of fighting an in-flight glide.
+        if !self.applying_smooth_scroll {
+            self.cancel_smooth_scroll();
+        }
 
         let current = self.anchor.read(cx);
         if current.scroll_anchor == adjusted_anchor {
@@ -658,6 +696,19 @@ impl ScrollManager {
     pub fn forbid_vertical_scroll(&self) -> bool {
         self.forbid_vertical_scroll
     }
+
+    /// Where an in-flight smooth scroll is heading, if one is running. Callers
+    /// adding to a scroll (e.g. another wheel tick) should extend this rather
+    /// than the on-screen position, so input accumulates instead of restarting
+    /// from wherever the glide happens to be.
+    pub fn pending_smooth_scroll_target(&self) -> Option<gpui::Point<ScrollOffset>> {
+        self.smooth_scroll_target
+    }
+
+    pub(crate) fn cancel_smooth_scroll(&mut self) {
+        self.smooth_scroll_target = None;
+        self.smooth_scroll_last_step = None;
+    }
 }
 
 impl Editor {
@@ -739,6 +790,121 @@ impl Editor {
         let display_map = self.display_map.update(cx, |map, cx| map.snapshot(cx));
         let position = self.scroll_manager.scroll_position(&display_map, cx) + delta.map(f64::from);
         self.set_scroll_position_taking_display_map(position, true, false, display_map, window, cx);
+    }
+
+    /// Whether scrolls routed through [`Editor::scroll_smoothly`] should
+    /// animate. Off for the single-line and minimap modes, where a glide makes
+    /// no sense.
+    pub fn smooth_scrolling_enabled(&self, cx: &App) -> bool {
+        EditorSettings::get_global(cx).smooth_scrolling
+            && !matches!(
+                self.mode,
+                EditorMode::SingleLine | EditorMode::Minimap { .. }
+            )
+    }
+
+    /// Where an in-flight smooth scroll is heading, if any.
+    pub fn pending_smooth_scroll_target(&self) -> Option<gpui::Point<ScrollOffset>> {
+        self.scroll_manager.pending_smooth_scroll_target()
+    }
+
+    /// Scroll toward `scroll_position` with a short eased glide rather than
+    /// jumping. Calling this mid-animation re-targets the existing glide
+    /// instead of restarting it. Falls back to an instant scroll when smooth
+    /// scrolling is disabled.
+    ///
+    /// The caller is responsible for clamping `scroll_position` to the
+    /// scrollable range; an unreachable target still terminates (the animation
+    /// stops once a step stops making progress) but wastes frames getting there.
+    pub fn scroll_smoothly(
+        &mut self,
+        scroll_position: gpui::Point<ScrollOffset>,
+        axis: Option<Axis>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.smooth_scrolling_enabled(cx) {
+            self.scroll(scroll_position, axis, window, cx);
+            return;
+        }
+
+        self.scroll_manager.update_ongoing_scroll(axis);
+        self.scroll_manager.smooth_scroll_target = Some(scroll_position);
+        if self.scroll_manager.smooth_scroll_running {
+            return;
+        }
+
+        self.scroll_manager.smooth_scroll_running = true;
+        self.scroll_manager.smooth_scroll_last_step = Some(Instant::now());
+        // Replacing the handle here is safe: a previous task only leaves
+        // `smooth_scroll_running` false once it has finished its loop.
+        self.scroll_manager.smooth_scroll_task = Some(cx.spawn_in(window, async move |editor, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(SMOOTH_SCROLL_FRAME_INTERVAL)
+                    .await;
+                let still_animating = editor
+                    .update_in(cx, |editor, window, cx| {
+                        editor.step_smooth_scroll(window, cx)
+                    })
+                    .unwrap_or(false);
+                if !still_animating {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// Advance the smooth-scroll glide by one step, returning whether it is
+    /// still running.
+    fn step_smooth_scroll(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(target) = self.scroll_manager.smooth_scroll_target else {
+            self.scroll_manager.smooth_scroll_running = false;
+            return false;
+        };
+
+        let now = Instant::now();
+        let elapsed = self
+            .scroll_manager
+            .smooth_scroll_last_step
+            .map_or(SMOOTH_SCROLL_FRAME_INTERVAL, |last| {
+                now.saturating_duration_since(last)
+            })
+            .as_secs_f64();
+        self.scroll_manager.smooth_scroll_last_step = Some(now);
+
+        let current = self.scroll_position(cx);
+        // Exponential decay toward the target. Deriving the step from the real
+        // elapsed time keeps the glide the same duration regardless of how
+        // often this runs.
+        let progress = 1.0 - (-elapsed / SMOOTH_SCROLL_TAU).exp();
+        let mut next = current + (target - current) * progress;
+
+        let reached_target = (target.x - next.x).abs() < SMOOTH_SCROLL_EPSILON
+            && (target.y - next.y).abs() < SMOOTH_SCROLL_EPSILON;
+        if reached_target {
+            next = target;
+        }
+
+        self.scroll_manager.applying_smooth_scroll = true;
+        let _was_scrolled = self.set_scroll_position(next, window, cx);
+        self.scroll_manager.applying_smooth_scroll = false;
+
+        // An external scroll during the write (or between steps) clears the
+        // target; that scroll wins and the glide is over.
+        if self.scroll_manager.smooth_scroll_target.is_none() {
+            self.scroll_manager.smooth_scroll_running = false;
+            return false;
+        }
+
+        let applied = self.scroll_position(cx);
+        let moved = (applied.x - current.x).abs() + (applied.y - current.y).abs();
+        if reached_target || moved < SMOOTH_SCROLL_STALL_EPSILON {
+            self.scroll_manager.cancel_smooth_scroll();
+            self.scroll_manager.smooth_scroll_running = false;
+            return false;
+        }
+        true
     }
 
     pub fn set_scroll_position(

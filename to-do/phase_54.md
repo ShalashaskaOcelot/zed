@@ -1,8 +1,21 @@
 # Phase 54 — Smooth scrolling (general/core editor)
 
+⚠️ AWAITING USER TESTING (implementation complete, clippy-clean).
+
 Kind: **new feature** (general editor QoL, Zed-wide — NOT notebook-specific;
 fits the fork's secondary "core editor improvements" scope). Requested by the
 user 2026-07-23. Added as a 6th phase (the "5 in rotation" is a floor).
+
+**Scope change during implementation (2026-07-30):** keyboard scroll actions
+were split out into **phase 58**. `Editor::scroll_screen` applies its position
+synchronously and callers depend on that — vim
+(`crates/vim/src/normal/scroll.rs:130`) calls it and then IMMEDIATELY reads
+`scroll_top_display_point` (`:144`) to place the cursor, so animating it would
+put vim's cursor in the wrong place (a correctness bug, not just a test
+failure); `editor_tests.rs:2932-2955` asserts the position synchronously too.
+Doing it properly means animating at the RENDER layer (VS Code's model) rather
+than the logical position — a different, larger change. The wheel path, which
+this phase's own notes call "the primary target", is delivered.
 
 Goal: animate editor scroll-position changes over a short eased transition
 instead of instant jumps — the equivalent of VS Code's `editor.smoothScrolling`.
@@ -39,36 +52,35 @@ deltas — animating it again would add lag).
 
 ## Tasks
 
-- [ ] Add an `editor.smooth_scrolling` setting: `EditorSettings.smooth_scrolling:
+- [x] Add an `editor.smooth_scrolling` setting: `EditorSettings.smooth_scrolling:
       bool`, the `Option<bool>` source in `settings_content/src/editor.rs`, the
       default in `assets/settings/default.json`, and a docs entry. **Default:
-      `true`** (decided by the user 2026-07-23 — it's their fork; VS Code's
-      equivalent defaults off, but here we default on). Users who prefer instant
-      scrolling can set it `false`.
-- [ ] Add smooth-scroll animation state to `ScrollManager`: a target scroll
-      position, the current animated position, the last-frame `Instant`, and an
-      "animating" flag. Add a method to (re)target the animation to a new scroll
-      position and one to advance it one frame (ease current→target).
-- [ ] Choose the easing model + tuning constant: exponential decay toward the
-      target (frame-rate-independent: `current += (target - current) * (1 -
-      exp(-dt / tau))`) reads well and naturally handles a moving target; pick
-      `tau` (~60-100ms) as a tunable constant. Snap to target and stop once
-      within an epsilon.
-- [ ] Route the mouse-wheel `Lines` path (`element/mouse.rs`) through the
-      smooth target instead of `editor.scroll(...)` instantly. Keep the
-      `Pixels` (trackpad) path exactly as-is. A new wheel delta while animating
-      RE-TARGETS (adds to the pending target) rather than restarting.
-- [ ] Route keyboard scroll actions (`ScrollAmount::Line`/`Page`, `actions.rs`)
-      through the smooth target under the same setting.
-- [ ] Drive the animation each frame: while animating, advance the eased step
-      and write it via the existing `set_scroll_position` (local scroll, NOT an
-      autoscroll request), respecting `forbid_vertical_scroll`,
-      `scroll_beyond_last_line` clamping, and `scroll_max`; call
-      `window.request_animation_frame()` until converged, then snap + clear the
-      flag. When the setting is off, keep today's instant behavior.
-- [ ] Cancel/snap the animation on inputs that must be immediate: scrollbar
-      drag, `scroll_to`/go-to-line/programmatic jumps, and selection-follow —
-      these should not lag behind an in-flight smooth animation.
+      `true`** (decided by the user 2026-07-23). Also mapped VS Code's
+      `editor.smoothScrolling` in `settings/src/vscode_import.rs`.
+- [x] Add smooth-scroll animation state to `ScrollManager`
+      (`smooth_scroll_target`, `smooth_scroll_last_step`,
+      `smooth_scroll_running`, `applying_smooth_scroll`, `smooth_scroll_task`)
+      plus `pending_smooth_scroll_target()` and `cancel_smooth_scroll()`.
+- [x] Easing: frame-rate-independent exponential decay
+      (`current += (target - current) * (1 - exp(-dt/tau))`) with
+      `SMOOTH_SCROLL_TAU = 0.07s`, stepped every 8ms. Snaps within
+      `SMOOTH_SCROLL_EPSILON`, and also stops when a step makes no progress
+      (`SMOOTH_SCROLL_STALL_EPSILON`) so an unreachable/clamped target can't
+      spin forever.
+- [x] Route the mouse-wheel `Lines` path (`element/mouse.rs`) through
+      `Editor::scroll_smoothly`. The `Pixels` (trackpad) path is untouched.
+      Successive wheel ticks extend `pending_smooth_scroll_target()` so input
+      accumulates instead of restarting the glide.
+- [~] Keyboard scroll actions — **moved to phase 58** (see the scope note
+      above: vim reads the scroll position back synchronously).
+- [x] Drive the animation: a task on the editor steps it every 8ms via
+      `set_scroll_position` (local, not an autoscroll request), so existing
+      `forbid_vertical_scroll` / `scroll_beyond_last_line` clamping applies
+      unchanged. Terminates on convergence, on stall, or when superseded.
+- [x] Cancel/snap on inputs that must be immediate — handled centrally in
+      `ScrollManager::set_anchor`: any scroll that isn't the animation's own
+      frame (guarded by `applying_smooth_scroll`) cancels the glide, so
+      scrollbar drags, go-to-line, and cursor autoscroll all land immediately.
 
 ## Risks / gaps
 

@@ -3644,6 +3644,16 @@ Positive `float` values
 
 `boolean` values
 
+### Smooth Scrolling
+
+- Description: Whether mouse-wheel scrolling glides to its destination instead of jumping there instantly. Trackpad scrolling is unaffected — it already produces smooth, momentum-based deltas.
+- Setting: `smooth_scrolling`
+- Default: `true`
+
+**Options**
+
+`boolean` values
+
 ### Fast Scroll Sensitivity
 
 - Description: Scroll sensitivity multiplier for fast scrolling. This multiplier is applied to both the horizontal and vertical delta values while scrolling. Fast scrolling happens when a user holds the alt or option key while scrolling.

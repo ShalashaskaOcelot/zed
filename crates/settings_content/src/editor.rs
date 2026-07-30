@@ -101,6 +101,12 @@ pub struct EditorSettingsContent {
     ///
     /// Default: false
     pub mouse_wheel_zoom: Option<bool>,
+    /// Whether mouse-wheel scrolling glides to its destination instead of
+    /// jumping there instantly. Trackpad scrolling is unaffected — it already
+    /// produces smooth, momentum-based deltas.
+    ///
+    /// Default: true
+    pub smooth_scrolling: Option<bool>,
     /// Scroll sensitivity multiplier for fast scrolling. This multiplier is applied
     /// to both the horizontal and vertical delta values while scrolling. Fast scrolling
     /// happens when a user holds the alt or option key while scrolling.

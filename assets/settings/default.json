@@ -701,6 +701,9 @@
   // Whether to zoom the editor font size with the mouse wheel
   // while holding the primary modifier key (Cmd on macOS, Ctrl on other platforms).
   "mouse_wheel_zoom": false,
+  // Whether mouse-wheel scrolling glides to its destination instead of jumping
+  // there instantly. Trackpad scrolling is unaffected.
+  "smooth_scrolling": true,
   // Scroll sensitivity multiplier for fast scrolling. This multiplier is applied
   // to both the horizontal and vertical delta values while scrolling. Fast scrolling
   // happens when a user holds the alt or option key while scrolling.

@@ -533,29 +533,40 @@ impl EditorElement {
                         editor.update(cx, |editor, cx| {
                             let line_height = position_map.line_height;
                             let glyph_width = position_map.em_layout_width;
-                            let (delta, axis) = match delta {
+                            let (delta, axis, from_wheel) = match delta {
                                 gpui::ScrollDelta::Pixels(mut pixels) => {
                                     //Trackpad
                                     let axis =
                                         position_map.snapshot.ongoing_scroll.filter(&mut pixels);
-                                    (pixels, axis)
+                                    (pixels, axis, false)
                                 }
 
                                 gpui::ScrollDelta::Lines(lines) => {
                                     //Not trackpad
                                     let pixels =
                                         point(lines.x * glyph_width, lines.y * line_height);
-                                    (pixels, None)
+                                    (pixels, None, true)
                                 }
                             };
 
                             let current_scroll_position = position_map.snapshot.scroll_position();
-                            let x = (current_scroll_position.x
-                                * ScrollPixelOffset::from(glyph_width)
+                            // Only the wheel glides: trackpad deltas already
+                            // arrive smoothed with momentum, and easing them
+                            // again just adds lag. Successive wheel ticks build
+                            // on the pending target so they accumulate rather
+                            // than restarting from wherever the glide is now.
+                            let smooth = from_wheel && editor.smooth_scrolling_enabled(cx);
+                            let base_position = if smooth {
+                                editor
+                                    .pending_smooth_scroll_target()
+                                    .unwrap_or(current_scroll_position)
+                            } else {
+                                current_scroll_position
+                            };
+                            let x = (base_position.x * ScrollPixelOffset::from(glyph_width)
                                 - ScrollPixelOffset::from(delta.x * scroll_sensitivity))
                                 / ScrollPixelOffset::from(glyph_width);
-                            let y = (current_scroll_position.y
-                                * ScrollPixelOffset::from(line_height)
+                            let y = (base_position.y * ScrollPixelOffset::from(line_height)
                                 - ScrollPixelOffset::from(delta.y * scroll_sensitivity))
                                 / ScrollPixelOffset::from(line_height);
                             let mut scroll_position =
@@ -563,10 +574,13 @@ impl EditorElement {
                             let forbid_vertical_scroll =
                                 editor.scroll_manager.forbid_vertical_scroll();
                             if forbid_vertical_scroll {
-                                scroll_position.y = current_scroll_position.y;
+                                scroll_position.y = base_position.y;
                             }
 
-                            if scroll_position != current_scroll_position {
+                            if smooth && scroll_position != base_position {
+                                editor.scroll_smoothly(scroll_position, axis, window, cx);
+                                cx.stop_propagation();
+                            } else if !smooth && scroll_position != current_scroll_position {
                                 editor.scroll(scroll_position, axis, window, cx);
                                 cx.stop_propagation();
                             } else if y < 0. && !forbid_vertical_scroll {
