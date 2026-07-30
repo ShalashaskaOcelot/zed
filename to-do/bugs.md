@@ -551,32 +551,36 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ## 51. Run All intermittently does nothing
 
-- **Status:** open — real, independent bug (NOT the search loop). The search
-  loop (`45cb601`) is fixed but Run All still fails intermittently.
-- **Symptom:** (user 2026-07-30) Run All sometimes does nothing — no cells run —
-  even with a ready (solid green) kernel. Running a single cell with Shift-Enter
-  works and can un-stick Run All. Intermittent; often works fine (queues, starts
-  the kernel, runs all).
-- **Analysis (code inspection — `run_cell_batch` / `advance_run_queue` /
-  `route`, all pre-existing, not from this session's changes):**
-  - `run_cell_batch` (`notebook_ui.rs:2137`): if a run is superseded on a BUSY
-    kernel it sets `resume_run_queue_on_idle = true` and waits for a FUTURE
-    `Status(Idle)` (handled in `route`, `:5567`) before submitting. Prime
-    suspect: an EDGE-vs-LEVEL race — `kernel_busy` is read as true, but the
-    kernel's idle transition already passed (or none follows), so the batch
-    waits forever. `advance_run_queue` (`:2186`) also early-returns while
-    `active_run_cell.is_some()`, so a stale active cell would block a queue.
-  - The supersede path DOES clear `active_run_cell` via `cancel_run_queue`
-    (`:2292`), so a simple dangling handle isn't it — points to the resume race.
-- **Diagnostic added (`<pending commit>`):** `log::info!` lines in
-  `run_cell_batch` (which branch: "advance now" vs "wait for kernel idle"),
-  `advance_run_queue` (early-return on active cell), and the idle-resume path.
-  Next time Run All does nothing, the log shows which branch stalled.
-- **Fix attempted:** none yet — deliberately not blind-fixing a kernel-state
-  race without a repro (risk of breaking interrupt-then-rerun). Waiting on logs.
-- **Tested:** n/a. NEXT STEP: user captures the log when Run All does nothing
-  (look for the "notebook run batch:" line and whether a "resuming queued run"
-  line follows).
+- **Status:** fix attempted - untested. (NOT the search loop — that was fixed in
+  `45cb601`; and NOT the kernel-state race I first hypothesised.)
+- **Symptom:** (user 2026-07-30) Run All does nothing right after opening a
+  notebook, even with a ready (green) kernel — repeated clicks do nothing. It
+  starts working the moment the notebook gains focus: after clicking a cell /
+  clicking a cell's gutter / restarting the kernel, Run All works. When the user
+  had already "clicked around in the notebook" before Run All, it worked first
+  time.
+- **Root cause (user diagnosis, confirmed in code):** the notebook control-
+  sidebar buttons dispatched their actions with
+  `window.dispatch_action(Box::new(RunAll), cx)` (and the same for RunCellsAbove,
+  RunCellAndBelow, ClearOutputs, GoToRunningCell, ToggleFollowRunningCell,
+  MoveCellUp/Down, AddMarkdown/CodeBlock). `dispatch_action` routes to the
+  FOCUSED element's dispatch tree. Opening a notebook from the project panel
+  leaves focus on the PANEL (Zed's single-click preview convention — arrow keys
+  still drive the file list), so the `RunAll` action was dispatched into the
+  project panel, which doesn't handle it → silent no-op. Clicking a cell focuses
+  the notebook, so the action then routes correctly. This is why it was
+  "intermittent" — it depended entirely on whether the notebook had focus.
+- **Fix attempted (`<pending commit>`):** the control buttons now call the
+  notebook's methods DIRECTLY via `cx.listener(|this, _, window, cx| this.<m>())`
+  (e.g. `this.run_cells(window, cx)`), like the sidebar's other buttons already
+  did (`notebook_ui.rs:4255+`). A button belongs to a specific `NotebookEditor`
+  instance, so it now acts on THAT notebook regardless of focus — also fixing the
+  multi-open-notebook case (each sidebar controls only its own notebook). Not
+  auto-focusing on open: that's Zed's standard single-click-preview behaviour and
+  isn't notebook-specific; keyboard shortcuts still require focusing the notebook
+  first (click it / double-click to open non-preview), same as any editor.
+- **Tested:** no — user to confirm Run All (and the other sidebar buttons) work
+  immediately after opening a notebook, without first clicking into it.
 
 ## 52. Pane nav buttons (new / split / zoom) flicker at times
 

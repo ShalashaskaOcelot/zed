@@ -2172,19 +2172,6 @@ impl NotebookEditor {
         // arrive, so waiting would deadlock the batch at "Pending" forever —
         // submit immediately instead.
         let kernel_busy = matches!(self.kernel.status(), KernelStatus::Busy);
-        // Diagnostic for bug #51 (Run All intermittently does nothing): record
-        // which path a batch takes. "wait for kernel idle" relies on a future
-        // Status(Idle) to resume; if that edge was already missed the batch
-        // stalls here.
-        log::info!(
-            "notebook run batch: {} cell(s), superseded={superseded}, kernel_busy={kernel_busy} -> {}",
-            self.run_queue.len(),
-            if superseded && kernel_busy {
-                "wait for kernel idle"
-            } else {
-                "advance now"
-            },
-        );
         if superseded && kernel_busy {
             self.resume_run_queue_on_idle = true;
         } else {
@@ -2198,12 +2185,6 @@ impl NotebookEditor {
     /// failure can cancel the rest.
     fn advance_run_queue(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.active_run_cell.is_some() {
-            // Diagnostic for bug #51: a stale active cell here would block the
-            // whole queue from starting.
-            log::info!(
-                "notebook advance_run_queue: a cell is already active; not starting the {} queued cell(s)",
-                self.run_queue.len(),
-            );
             return;
         }
         while !self.run_queue.is_empty() {
@@ -4039,9 +4020,9 @@ impl NotebookEditor {
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Execute all cells", &RunAll, cx)
                                 })
-                                .on_click(|_, window, cx| {
-                                    window.dispatch_action(Box::new(RunAll), cx);
-                                }),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.run_cells(window, cx);
+                                })),
                             )
                             .child(
                                 Self::render_notebook_control(
@@ -4053,9 +4034,9 @@ impl NotebookEditor {
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Run cells above", &RunCellsAbove, cx)
                                 })
-                                .on_click(|_, window, cx| {
-                                    window.dispatch_action(Box::new(RunCellsAbove), cx);
-                                }),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.run_cells_above(&RunCellsAbove, window, cx);
+                                })),
                             )
                             .child(
                                 Self::render_notebook_control(
@@ -4067,9 +4048,9 @@ impl NotebookEditor {
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Run cell and below", &RunCellAndBelow, cx)
                                 })
-                                .on_click(|_, window, cx| {
-                                    window.dispatch_action(Box::new(RunCellAndBelow), cx);
-                                }),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.run_cell_and_below(&RunCellAndBelow, window, cx);
+                                })),
                             )
                             .child(
                                 Self::render_notebook_control(
@@ -4082,9 +4063,9 @@ impl NotebookEditor {
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Clear all outputs", &ClearOutputs, cx)
                                 })
-                                .on_click(|_, window, cx| {
-                                    window.dispatch_action(Box::new(ClearOutputs), cx);
-                                }),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.clear_outputs(window, cx);
+                                })),
                             ),
                     )
                     .child(
@@ -4104,9 +4085,9 @@ impl NotebookEditor {
                                         cx,
                                     )
                                 })
-                                .on_click(|_, window, cx| {
-                                    window.dispatch_action(Box::new(GoToRunningCell), cx);
-                                }),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.go_to_running_cell(&GoToRunningCell, window, cx);
+                                })),
                             )
                             .child(
                                 Self::render_notebook_control(
@@ -4123,9 +4104,13 @@ impl NotebookEditor {
                                         cx,
                                     )
                                 })
-                                .on_click(|_, window, cx| {
-                                    window.dispatch_action(Box::new(ToggleFollowRunningCell), cx);
-                                }),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.toggle_follow_running_cell(
+                                        &ToggleFollowRunningCell,
+                                        window,
+                                        cx,
+                                    );
+                                })),
                             ),
                     )
                     .child(
@@ -4140,9 +4125,9 @@ impl NotebookEditor {
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Move cell up", &MoveCellUp, cx)
                                 })
-                                .on_click(|_, window, cx| {
-                                    window.dispatch_action(Box::new(MoveCellUp), cx);
-                                }),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.move_cell_up(window, cx);
+                                })),
                             )
                             .child(
                                 Self::render_notebook_control(
@@ -4154,9 +4139,9 @@ impl NotebookEditor {
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Move cell down", &MoveCellDown, cx)
                                 })
-                                .on_click(|_, window, cx| {
-                                    window.dispatch_action(Box::new(MoveCellDown), cx);
-                                }),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.move_cell_down(window, cx);
+                                })),
                             ),
                     )
                     .child(
@@ -4171,9 +4156,9 @@ impl NotebookEditor {
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Add markdown block", &AddMarkdownBlock, cx)
                                 })
-                                .on_click(|_, window, cx| {
-                                    window.dispatch_action(Box::new(AddMarkdownBlock), cx);
-                                }),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.add_markdown_block(window, cx);
+                                })),
                             )
                             .child(
                                 Self::render_notebook_control(
@@ -4185,9 +4170,9 @@ impl NotebookEditor {
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Add code block", &AddCodeBlock, cx)
                                 })
-                                .on_click(|_, window, cx| {
-                                    window.dispatch_action(Box::new(AddCodeBlock), cx);
-                                }),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.add_code_block(window, cx);
+                                })),
                             ),
                     ),
             )
@@ -5589,10 +5574,6 @@ impl KernelSession for NotebookEditor {
                 && !self.run_queue.is_empty()
             {
                 self.resume_run_queue_on_idle = false;
-                log::info!(
-                    "notebook: kernel idle; resuming queued run of {} cell(s)",
-                    self.run_queue.len(),
-                );
                 self.advance_run_queue(window, cx);
             }
             cx.notify();
