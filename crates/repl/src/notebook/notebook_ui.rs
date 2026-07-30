@@ -3968,20 +3968,29 @@ impl NotebookEditor {
             return;
         }
 
-        // Estimate the cursor's vertical position by its fractional row within
-        // the cell's laid-out height. Approximate (the cell includes non-editor
-        // chrome) but only used to decide when to nudge the viewport.
-        let rows = (total_rows + 1).max(1) as f32;
-        let fraction = (cursor_row as f32 + 0.5) / rows;
-        let cursor_y = cell_bounds.top() + cell_bounds.size.height * fraction;
+        // The editor reports its cursor's exact position (the centre of the
+        // cursor's line, in window coordinates) once it has been painted. Fall
+        // back to interpolating the row within the cell's laid-out height only
+        // when it hasn't — that estimate is poor, because the cell's height
+        // includes non-editor chrome, so it can be out by several lines.
+        let cursor_y = editor
+            .read(cx)
+            .pixel_position_of_cursor(cx)
+            .map(|position| position.y)
+            .unwrap_or_else(|| {
+                let rows = (total_rows + 1).max(1) as f32;
+                let fraction = (cursor_row as f32 + 0.5) / rows;
+                cell_bounds.top() + cell_bounds.size.height * fraction
+            });
 
-        let margin = px(24.);
-        if cursor_y < viewport.top() + margin {
-            self.cell_list
-                .scroll_by(cursor_y - (viewport.top() + margin));
-        } else if cursor_y > viewport.bottom() - margin {
-            self.cell_list
-                .scroll_by(cursor_y - (viewport.bottom() - margin));
+        // Scroll ONLY when the cursor has actually left the viewport — no
+        // margin. Keeping a few lines of lead here would move the viewport when
+        // the cursor is still perfectly visible, which is disorienting while
+        // editing and (with the pointer held) compounds into runaway scrolling.
+        if cursor_y < viewport.top() {
+            self.cell_list.scroll_by(cursor_y - viewport.top());
+        } else if cursor_y > viewport.bottom() {
+            self.cell_list.scroll_by(cursor_y - viewport.bottom());
         }
     }
 

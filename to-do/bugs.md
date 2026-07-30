@@ -677,3 +677,46 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   notebook itself).
 - **Fix attempted:** none
 - **Tested:** n/a
+
+## 60. Cursor-follow scrolls the notebook viewport too eagerly
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-07-30, screenshots) Clicking a line that is ALREADY
+  fully visible shifts the notebook viewport to reveal ~4 more lines beyond it,
+  at both the top and bottom edges. Worse, when click-DRAGGING to select text
+  near an edge the viewport keeps shifting under the held pointer — the pointer
+  stays at the same screen position, so it lands on newly revealed lines and the
+  scroll feeds itself, ending with the whole cell selected. Also happens on
+  arrow-key / newline cursor movement. Expected: the viewport should move ONLY
+  when the cursor would actually leave the view, and then only far enough to
+  bring that one line fully in.
+- **Root cause (CONFIRMED — TWO independent mechanisms):**
+  1. **The dominant one, for mouse input.** A cell editor sits inside the
+     notebook's gpui `List`, which consumes `Window::take_autoscroll`
+     (`list.rs`). `EditorElement` sets `autoscroll_containing_element =
+     autoscroll_request.is_some() || editor.has_pending_selection()`
+     (`element.rs`) — i.e. it is ON WHILE THE MOUSE IS HELD — and then asks the
+     container to reveal `cursor_row - 3 ..= cursor_row + 4` (`element.rs`).
+     That hard-coded ±3/4-line lead is exactly the ~4 lines observed, fires on
+     click/drag, and is what makes a drag run away.
+  2. **The keyboard path.** `follow_cursor_in_cell` (`notebook_ui.rs`) used a
+     `px(24.)` margin AND estimated the cursor's Y by interpolating its row
+     across the whole cell height — which includes non-editor chrome, so the
+     estimate can be several lines out, scrolling even for a visible cursor.
+- **Fix attempted (2026-07-30):**
+  1. New `Editor::set_minimal_container_autoscroll()` (field
+     `container_autoscroll_reveals_context`, default TRUE so every other editor
+     is unchanged) switches the container-autoscroll lead from `(3, 4)` to
+     `(0, 1)` — reveal the cursor's own line only. Notebook cell editors opt in
+     (`cell.rs`, both code and markdown).
+  2. `follow_cursor_in_cell` now uses the editor's EXACT reported cursor
+     position (`pixel_position_of_cursor`, the centre of the cursor's line in
+     window coordinates), keeping the old interpolation only as a fallback for
+     a not-yet-painted editor, and uses ZERO margin — it scrolls only once the
+     cursor is actually outside the viewport.
+- **Known nuance:** the exact position is the CENTRE of the cursor's line, so a
+  line more than half off-screen scrolls until its centre reaches the edge; a
+  sliver can remain clipped. If that proves annoying, the follow needs the line
+  height to add a half-line allowance (not currently reachable there without
+  threading `window` into the cell-editor subscription).
+- **Tested:** no — see `awaiting_testing.md`.

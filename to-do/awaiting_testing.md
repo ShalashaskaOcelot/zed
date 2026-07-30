@@ -35,6 +35,13 @@ listed here.
       Desktop) and start a kernel → it should launch instead of failing with
       "The directory name is invalid. (os error 267)". The kernel's working
       directory is now the file's folder. In-project notebooks unchanged.
+- [ ] Bug #60 — In a notebook cell: (a) click a line that is already fully
+      visible near the top/bottom edge → the viewport must NOT move; (b) click
+      a partly-cut-off line at an edge → it scrolls only enough to show it, not
+      several extra lines; (c) click-drag to select text down to the bottom
+      edge → it scrolls one line at a time and does NOT run away into selecting
+      the whole cell; (d) same with arrow keys / pressing Enter at the edges.
+      Regular (non-notebook) editors must be unchanged.
 - [ ] Bug #50 — Open a workspace folder, then (a) also have another root that
       you delete, or (b) create an UNSAVED notebook/buffer and then delete the
       whole workspace folder. Quit and relaunch → the session should restore:

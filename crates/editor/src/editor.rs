@@ -982,6 +982,13 @@ pub struct Editor {
     enable_runnables: bool,
     enable_code_lens: bool,
     enable_mouse_wheel_zoom: bool,
+    /// When this editor sits inside a scrolling container (e.g. a notebook
+    /// cell in a `List`), whether asking that container to follow the cursor
+    /// should reveal a few lines of context around it, or only the cursor's
+    /// own line. Context is right for a chat-style transcript; for a notebook
+    /// cell it makes clicking an already-visible line jump the viewport, and
+    /// makes a click-drag near an edge run away and select the whole cell.
+    container_autoscroll_reveals_context: bool,
     show_line_numbers: Option<bool>,
     use_relative_line_numbers: Option<bool>,
     show_git_diff_gutter: Option<bool>,
@@ -1823,6 +1830,7 @@ impl Editor {
         clone.buffers_with_disabled_indent_guides =
             self.buffers_with_disabled_indent_guides.clone();
         clone.enable_mouse_wheel_zoom = self.enable_mouse_wheel_zoom;
+        clone.container_autoscroll_reveals_context = self.container_autoscroll_reveals_context;
         clone.enable_lsp_data = self.enable_lsp_data;
         clone.needs_initial_data_update = self.enable_lsp_data;
         clone.enable_runnables = self.enable_runnables;
@@ -2287,6 +2295,7 @@ impl Editor {
             enable_runnables: full_mode,
             enable_code_lens: full_mode,
             enable_mouse_wheel_zoom: full_mode,
+            container_autoscroll_reveals_context: true,
             show_git_diff_gutter: None,
             show_code_actions: None,
             show_runnables: None,
@@ -10930,6 +10939,17 @@ impl Editor {
 
     pub fn disable_mouse_wheel_zoom(&mut self) {
         self.enable_mouse_wheel_zoom = false;
+    }
+
+    /// Follow the cursor in the surrounding scroll container by revealing ONLY
+    /// the cursor's line, with no surrounding context. See
+    /// [`Editor::container_autoscroll_reveals_context`].
+    pub fn set_minimal_container_autoscroll(&mut self) {
+        self.container_autoscroll_reveals_context = false;
+    }
+
+    pub(crate) fn container_autoscroll_reveals_context(&self) -> bool {
+        self.container_autoscroll_reveals_context
     }
 
     fn update_data_on_scroll(

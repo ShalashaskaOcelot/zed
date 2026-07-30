@@ -1105,26 +1105,38 @@ impl EditorElement {
                         ));
 
                         if autoscroll_containing_element {
+                            // How much context around the cursor the container
+                            // is asked to reveal. Editors that fill their own
+                            // scroll area want a few lines of lead; one laid
+                            // out inside a container (a notebook cell) wants
+                            // only its own line, or clicking an already-visible
+                            // line scrolls the container and a click-drag near
+                            // an edge feeds itself into selecting everything.
+                            let (lead, trail) = if editor.container_autoscroll_reveals_context() {
+                                (3., 4.)
+                            } else {
+                                (0., 1.)
+                            };
                             let top = text_hitbox.origin.y
-                                + ((cursor_position.row().as_f64() - scroll_position.y - 3.)
+                                + ((cursor_position.row().as_f64() - scroll_position.y - lead)
                                     .max(0.)
                                     * ScrollPixelOffset::from(line_height))
                                 .into();
                             let left = text_hitbox.origin.x
                                 + ((cursor_position.column() as ScrollOffset
                                     - scroll_position.x
-                                    - 3.)
+                                    - lead)
                                     .max(0.)
                                     * ScrollPixelOffset::from(em_width))
                                 .into();
 
                             let bottom = text_hitbox.origin.y
-                                + ((cursor_position.row().as_f64() - scroll_position.y + 4.)
+                                + ((cursor_position.row().as_f64() - scroll_position.y + trail)
                                     * ScrollPixelOffset::from(line_height))
                                 .into();
                             let right = text_hitbox.origin.x
                                 + ((cursor_position.column() as ScrollOffset - scroll_position.x
-                                    + 4.)
+                                    + trail)
                                     * ScrollPixelOffset::from(em_width))
                                 .into();
 

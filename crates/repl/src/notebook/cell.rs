@@ -502,6 +502,12 @@ impl MarkdownCell {
             editor.set_show_gutter(false, cx);
             editor.set_use_modal_editing(true);
             editor.disable_mouse_wheel_zoom();
+            // Cells are laid out inside the notebook's list, so following the
+            // cursor scrolls the LIST. Reveal only the cursor's own line: with
+            // the default few-line lead, clicking an already-visible line jumps
+            // the viewport, and a click-drag near an edge keeps scrolling under
+            // the held pointer until the whole cell is selected.
+            editor.set_minimal_container_autoscroll();
             editor.disable_scrollbars_and_minimap(window, cx);
             editor
         });
@@ -834,6 +840,12 @@ impl CodeCell {
             );
 
             editor.disable_mouse_wheel_zoom();
+            // Cells are laid out inside the notebook's list, so following the
+            // cursor scrolls the LIST. Reveal only the cursor's own line: with
+            // the default few-line lead, clicking an already-visible line jumps
+            // the viewport, and a click-drag near an edge keeps scrolling under
+            // the held pointer until the whole cell is selected.
+            editor.set_minimal_container_autoscroll();
             editor.disable_scrollbars_and_minimap(window, cx);
             // The buffer was CREATED with `source` above — setting the text
             // again would record a real edit, making every cell buffer (and
