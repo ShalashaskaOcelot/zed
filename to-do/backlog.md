@@ -109,3 +109,62 @@ high → low within each group.
   (tables, wide text). Relates to bug #53 (text output too narrow) but is the
   opposite end — this is about outputs that are TOO wide to fit. Investigate the
   output container sizing in `crates/repl/src/outputs/` and `notebook/cell.rs`.
+
+- Notebook-aware copy/paste with a separate notebook clipboard (user 2026-07-30):
+  copying cells should paste as FULL CELLS (structure, types, outputs) into
+  another notebook, but as PLAIN CODE — no JSON — into a normal text file or
+  outside Zed. VS Code does this with two clipboards: an internal notebook
+  clipboard holding the rich cell data, and the system clipboard holding just
+  the code. Mirror that: keep the existing rich snapshot for notebook→notebook
+  (phase 7/27 machinery) and additionally put a plain-text rendering on the
+  SYSTEM clipboard. **Improvement over VS Code the user specifically wants:**
+  when producing that plain-text form, prefix every line of a MARKDOWN cell with
+  `# ` so pasting a mix of code and markdown cells into a `.py` yields valid
+  Python with the prose as comments. (VS Code leaves markdown uncommented, so
+  any non-heading markdown becomes a syntax error.)
+- Setting to swap the right control sidebar for a VS Code-style TOP control bar
+  (user 2026-07-30). Requirements the user gave:
+  * A top version of the control bar, which ABSORBS the existing top-right
+    kernel cluster (so there aren't two kernel indicators in the same place) and
+    makes the sidebar's kernel selector redundant — remove it in this mode
+    (note: that sidebar selector is also the one that crashes, bug #54).
+  * Remove the right sidebar entirely in this mode.
+  * With the sidebar gone, the cell-list scrollbar moves to the true right edge
+    and renders properly (relates to bug #57 — the scrollbar currently overlaps
+    the cell margin because the sidebar occupies that space).
+  * A setting to choose between the two layouts.
+
+- Accurate notebook scrollbar via full measurement (user 2026-07-30). The
+  scrollbar thumb is wrong on open and SHRINKS as you scroll: a notebook that
+  looked ~3 viewports long read as ~20+ once scrolled to the end.
+  **Cause (confirmed):** the cell list is virtualized and an UNMEASURED item
+  contributes `px(0.)` to the height tree (`gpui/src/elements/list.rs`,
+  `ListItem::Unmeasured` summary). Total content height is therefore massively
+  underestimated until items are laid out, and grows as you scroll — so the
+  thumb shrinks. This is the SAME root cause as bug #45 (End landing short), and
+  the user's diagnosis of that bug was right: End was effectively jumping to the
+  end of the MEASURED content, then further each press as more got measured.
+  (#45 itself is fixed — End now uses the index-anchored `scroll_to_end`, which
+  walks backwards from the last item and so is immune to heights. This item is
+  only about the SCROLLBAR being honest.)
+  **Lever that already exists:** `ListState::measure_all()` — its own doc says
+  "useful for ensuring that the scrollbar size is correct instead of based on
+  only rendered elements". Already used by csv_preview, settings_ui and pickers.
+  Applying it to the notebook's `cell_list` should give a correct thumb.
+  **Cost / the setting the user suggested:** `measure_all` LAYS OUT every item
+  on first layout (it does not paint them all), so it is O(cells) work on open —
+  noticeable for a large notebook with heavy outputs, but much cheaper than full
+  rendering. Do it as the user proposed: measure everything by DEFAULT, with a
+  setting (e.g. `notebook_dynamic_render`, default off) to fall back to
+  measure-as-you-scroll on low-power machines. Verify open time on the user's
+  large Rust notebooks before settling the default.
+- Notebook control buttons should focus the notebook (user 2026-07-30). Bug #51
+  made the sidebar buttons act on their own notebook regardless of focus, but
+  focus itself stays wherever it was (e.g. the project panel), so keyboard
+  shortcuts still don't go to the notebook afterwards. Clicking Run All /
+  Restart / Stop / etc. should ALSO move focus to that notebook, exactly as
+  clicking a cell or a per-cell run button does. Small: focus the notebook's
+  focus handle in the control-button listeners (`render_notebook_controls`).
+- Kernel picker "Creating <name>…" row polish (user 2026-07-30): the row works
+  but "could look a little better" visually. (The separate defect — it not
+  refreshing live when the build completes — is bug #58.)

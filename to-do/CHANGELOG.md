@@ -179,6 +179,11 @@ entry rather than archiving it.
   (Deserialize robustness against a vanished restore path is tracked as bug #50,
   not this phase.)
 
+- Phase 49 — Kernel picker shows an env being created as a greyed,
+  non-selectable "Creating <name>…" row at the top, checkmarked as the pending
+  selection. Confirmed working 2026-07-30 (live refresh on completion filed as
+  bug #58; visual polish backlogged).
+
 ## Fixed bugs (confirmed)
 
 - #1 — Restart kernel killed the kernel but the relaunch failed. `7bd5b5a`
@@ -235,6 +240,13 @@ entry rather than archiving it.
   bottom-pinned it (a gpui `ListState::scroll_to_reveal_item` index-vs-pixel
   guard); the reveal now compares pixel offsets and only scrolls to reveal an
   off-screen edge. Confirmed 2026-07-16.
+- #46 — Interrupting the Rust kernel made the next run prompt for a kernel
+  instead of relaunching the selected one. Confirmed 2026-07-30.
+- #51 — Run All (and the other notebook control buttons) silently did nothing
+  until the notebook had focus: the buttons used `window.dispatch_action`, which
+  routes to the FOCUSED element, so opening a notebook from the project panel
+  left the action going to the panel. The buttons now call their own
+  NotebookEditor's methods via `cx.listener`. `a925b8b`. Confirmed 2026-07-30.
 - #45 — End and "Go to running cell" landed short in large notebooks: the
   cumulative-height reveal derived the scroll offset from the summed height of
   cells above the target, which is wrong when those cells are unmeasured

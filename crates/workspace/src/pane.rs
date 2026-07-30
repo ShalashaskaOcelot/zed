@@ -2484,9 +2484,20 @@ impl Pane {
                     })
                     .ok()
                     .flatten();
+                // Held until the save completes. An out-of-project save-as
+                // creates an INVISIBLE worktree, which the worktree store keeps
+                // only WEAKLY (`worktree_store.rs`, `WorktreeStore::add`), so it
+                // stays alive only while someone holds a strong handle. Letting
+                // this drop when the block below ends would destroy the worktree
+                // before the (async) save opens a buffer in it, failing the save
+                // with "no such worktree" — and, because that error short-
+                // circuits the rest of `save_as`, leaving the item still marked
+                // untitled even though the bytes reached disk.
+                let created_worktree;
                 let save_task = if let Some(project_path) = project_path {
                     let (worktree, path) = project_path.await?;
                     let worktree_id = worktree.read_with(cx, |worktree, _| worktree.id());
+                    created_worktree = Some(worktree);
                     let new_path = ProjectPath { worktree_id, path };
 
                     pane.update_in(cx, |pane, window, cx| {
@@ -2501,6 +2512,8 @@ impl Pane {
                 };
 
                 save_task.await?;
+                // The saved buffer's `File` now holds the worktree, so ours can go.
+                drop(created_worktree);
                 if should_format {
                     pane.update_in(cx, |pane, window, cx| {
                         pane.unpreview_item_if_preview(item.item_id());

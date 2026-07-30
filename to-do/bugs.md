@@ -400,33 +400,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 - **Fix attempted:** none
 - **Tested:** n/a
 
-## 46. Interrupting the Rust kernel makes the next run prompt for a kernel instead of relaunching
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-21, Rust/evcxr kernel) Run a cell, then interrupt
-  the kernel. The kernel indicator turns red / "Error" (a KERNEL error, not a
-  cell error). Now click Run All or run any cell: the kernel PICKER pops up
-  asking which kernel to use, even though a kernel is already selected. Expected:
-  just relaunch the selected kernel and run. Not seen with ipykernel, and not
-  seen when continuing to run a kernel that was NOT interrupted — only from the
-  errored state, which (for evcxr) is only reached by interrupting.
-- **Analysis (code inspection):** unlike ipykernel (which handles SIGINT and
-  stays alive), the evcxr process EXITS when interrupted. The process-status
-  task then calls `kernel_errored` (`notebook_ui.rs:5146`), which sets
-  `Kernel::ErroredLaunch`. `execute_cell` treated ALL `ErroredLaunch` as a
-  failed launch → `Disposition::Prompt` (opens the picker) — a guard added for
-  bug #31 so a spec that can't start doesn't relaunch-loop. But a kernel that
-  DIED after running is different from one whose launch never connected.
-- **Fix attempted:** added `kernel_reached_running: bool` to `NotebookEditor`
-  (true once a launch connects at `:1642`, false when a launch begins at
-  `:1683`). In `execute_cell`, `Kernel::ErroredLaunch` now relaunches the
-  remembered spec (`Disposition::Queued { launch: true }`, like `Shutdown`)
-  when `kernel_reached_running && has_remembered_kernel`, else still prompts.
-  So a died-after-running kernel relaunches on next run; a launch that never
-  connected still prompts (bug #31 preserved), and a vanished env still prompts
-  (phase 42 filter makes `has_remembered_kernel` false).
-- **Tested:** untested — see `awaiting_testing.md`.
-
 ## 47. Notebook tab title stays "Untitled" after saving it outside the workspace
 
 - **Status:** fix attempted - untested
@@ -445,30 +418,26 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   which is `None` on the empty relative path → "Untitled". (The plain text
   editor is unaffected: it titles from the buffer's file, which falls back to
   the worktree root name.)
-- **Fix attempted:** derive the tab label from the ABSOLUTE `path` (always set
-  on save/open; `None` only when genuinely untitled) instead of the relative
-  path (`notebook_ui.rs` tab_content_text). Commit `ae75857da4`.
-- **Tested:** untested — see `awaiting_testing.md`.
-
-## 48. A notebook saved outside the workspace reopens as raw JSON (not the notebook UI)
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-21) After saving a notebook outside the workspace,
-  clicking it in the project panel opens the raw `.ipynb` JSON in a text editor
-  instead of rendering the notebook. In-workspace notebooks render fine.
-  Reproduces with a fresh notebook, no restart (not session restore).
-- **Analysis (workflow investigation, high confidence):** same single-file
-  worktree quirk as #47 — the external file's worktree-relative path is empty
-  and its name lives in the worktree `root_name`, so the relative path stays
-  empty permanently. `NotebookItem::try_open` (`notebook_ui.rs:4715`) gated the
-  `.ipynb` match on `path.path.extension()`, which is `None` on the empty
-  relative path → `try_open` returns `None` → the `ProjectItemRegistry` open
-  loop (`workspace.rs`) falls through to the universal text `Editor` → raw JSON.
-- **Fix attempted:** accept `.ipynb` by the ABSOLUTE path when the relative
-  path has no extension (`notebook_ui.rs` `NotebookItem::try_open`); the
-  relative check stays the fast path so in-workspace opens are unchanged. Commit
-  `ae75857da4`.
-- **Tested:** untested — see `awaiting_testing.md`.
+- **Fix attempted (1):** derive the tab label from the ABSOLUTE `path` (always
+  set on save/open) instead of the relative path (`notebook_ui.rs`
+  tab_content_text). Commit `ae75857da4`. NOT SUFFICIENT — see below.
+- **Real root cause (found 2026-07-30 from the user's "no such worktree"
+  report):** the title fix could never take effect because the SAVE ITSELF was
+  failing partway. Phase 53 changed out-of-project save-as to create an
+  INVISIBLE worktree, and `WorktreeStore::add` keeps an invisible worktree with
+  only a WEAK handle (`worktree_store.rs`, `push_strong_handle`). In
+  `Pane::save_item` the strong `worktree` binding lived inside the `if let`
+  block, so it was dropped BEFORE `save_task.await` — killing the just-created
+  worktree mid-save. The notebook's `save_as` writes the file first
+  (`fs.atomic_write` — which is why the file DID appear on the Desktop) and then
+  calls `project.open_buffer(path)`, which failed with "no such worktree"; the
+  `?` then skipped the block that sets `item.path` / `item.project_path`, so the
+  item stayed untitled and detached from the file it had just written.
+- **Fix attempted (2, 2026-07-30):** hold the created worktree alive across the
+  save in `Pane::save_item` (bind it outside the `if let` and drop it after
+  `save_task.await`, by which point the saved buffer's `File` holds it).
+- **Tested:** no — see `awaiting_testing.md`. This should fix the "Failed to
+  save / no such worktree" dialog AND the "Untitled" title together.
 
 ## 49. Files opened/saved outside the workspace aren't removed from the panel when deleted externally
 
@@ -549,39 +518,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   because a restored workspace rejoins the current session (so it's not GC'd).
 - **Tested:** unit test passes; runtime untested — see `awaiting_testing.md`.
 
-## 51. Run All intermittently does nothing
-
-- **Status:** fix attempted - untested. (NOT the search loop — that was fixed in
-  `45cb601`; and NOT the kernel-state race I first hypothesised.)
-- **Symptom:** (user 2026-07-30) Run All does nothing right after opening a
-  notebook, even with a ready (green) kernel — repeated clicks do nothing. It
-  starts working the moment the notebook gains focus: after clicking a cell /
-  clicking a cell's gutter / restarting the kernel, Run All works. When the user
-  had already "clicked around in the notebook" before Run All, it worked first
-  time.
-- **Root cause (user diagnosis, confirmed in code):** the notebook control-
-  sidebar buttons dispatched their actions with
-  `window.dispatch_action(Box::new(RunAll), cx)` (and the same for RunCellsAbove,
-  RunCellAndBelow, ClearOutputs, GoToRunningCell, ToggleFollowRunningCell,
-  MoveCellUp/Down, AddMarkdown/CodeBlock). `dispatch_action` routes to the
-  FOCUSED element's dispatch tree. Opening a notebook from the project panel
-  leaves focus on the PANEL (Zed's single-click preview convention — arrow keys
-  still drive the file list), so the `RunAll` action was dispatched into the
-  project panel, which doesn't handle it → silent no-op. Clicking a cell focuses
-  the notebook, so the action then routes correctly. This is why it was
-  "intermittent" — it depended entirely on whether the notebook had focus.
-- **Fix attempted (`<pending commit>`):** the control buttons now call the
-  notebook's methods DIRECTLY via `cx.listener(|this, _, window, cx| this.<m>())`
-  (e.g. `this.run_cells(window, cx)`), like the sidebar's other buttons already
-  did (`notebook_ui.rs:4255+`). A button belongs to a specific `NotebookEditor`
-  instance, so it now acts on THAT notebook regardless of focus — also fixing the
-  multi-open-notebook case (each sidebar controls only its own notebook). Not
-  auto-focusing on open: that's Zed's standard single-click-preview behaviour and
-  isn't notebook-specific; keyboard shortcuts still require focusing the notebook
-  first (click it / double-click to open non-preview), same as any editor.
-- **Tested:** no — user to confirm Run All (and the other sidebar buttons) work
-  immediately after opening a notebook, without first clicking into it.
-
 ## 52. Pane nav buttons (new / split / zoom) flicker at times
 
 - **Status:** open
@@ -613,5 +549,106 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   (stream/plain-text renderer) or the cell output container in
   `notebook/cell.rs`. Compare against the DataFrame/rich renderer which fills
   the width.
+- **Fix attempted:** none
+- **Tested:** n/a
+
+## 54. Crash: clicking the sidebar kernel selector double-leases the notebook
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-07-30, full backtrace supplied) Clicking the kernel
+  selector button at the bottom of the notebook's right control sidebar aborts
+  the app: `cannot update repl::notebook::notebook_ui::NotebookEditor while it
+  is already being updated`, then `panic in a function that cannot unwind` →
+  `thread caused non-unwinding panic. aborting.`
+- **Root cause (confirmed from the trace):** the button's `cx.listener` already
+  holds a lease on `NotebookEditor`, and it called
+  `kernel_picker_handle.toggle(window, cx)` INLINE. `toggle` → `show`
+  synchronously fires the picker's `with_on_open` callback
+  (`notebook_ui.rs`, render_kernel_strip), which does `view.update(cx, ...)` on
+  the same entity → double lease → abort. PRE-EXISTING (the button dates from
+  phase 24); not introduced by the phase-57/#51 work. Identical in shape to the
+  earlier run-with-no-kernel double-lease, which was fixed with `window.defer`.
+- **Fix attempted (2026-07-30):** defer the toggle via `window.defer` so it runs
+  with no entity lease held (NOT `cx.defer_in`, which re-wraps the closure in
+  another `NotebookEditor` update and reintroduces the nesting). Applied the
+  same treatment to `launch_kernel`'s `show` — currently unreachable (that
+  branch requires no remembered kernel, which routes elsewhere) but the same
+  latent hazard.
+- **Tested:** no — see `awaiting_testing.md`.
+
+## 55. Workspace venvs unavailable to notebooks opened from outside the workspace
+
+- **Status:** open
+- **Symptom:** (user 2026-07-30) With a workspace open that contains a `.venv`,
+  open a notebook from OUTSIDE that workspace (e.g. dragged in from the
+  Desktop). The kernel picker offers only "global" interpreters — the
+  workspace's `.venv` is missing, even though that workspace is open.
+- **Expected:** any venv in the currently-open workspace should be selectable
+  for any open notebook, regardless of where the notebook file lives.
+- **Analysis (to investigate):** kernel/toolchain discovery appears to be scoped
+  to the notebook's OWN worktree. A notebook opened from outside the project
+  gets its own (invisible, single-file) worktree whose root is the file's
+  directory, so a `.venv` in the real project worktree is out of scope. Look at
+  how `repl::kernels` enumerates Python toolchains (the `Preparing Python kernel
+  for toolchain` path) and which worktree/project it queries; it likely needs to
+  consider ALL visible project worktrees rather than just the notebook's.
+- **Fix attempted:** none
+- **Tested:** n/a
+
+## 56. Kernel fails to start for a notebook opened outside the workspace
+
+- **Status:** open
+- **Symptom:** (user 2026-07-30) A notebook opened from outside the workspace
+  cannot start a kernel — red error indicator. Log:
+  `Kernel failed to start: failed to spawn command
+  "C:\Users\SamKirby\Dev\venvs\test2\Scripts\python.exe" ...
+  Caused by: The directory name is invalid. (os error 267)`
+- **Analysis (to investigate):** os error 267 (ERROR_DIRECTORY) on Windows from
+  `spawn` almost always means the child's WORKING DIRECTORY is invalid — not the
+  executable path. The kernel is presumably spawned with the notebook's
+  worktree root as cwd; for a notebook opened outside the project that root is
+  the FILE itself (single-file worktree), and a file path is not a valid cwd →
+  ERROR_DIRECTORY. Check where `repl::kernels` sets the working directory for a
+  local kernel and make it use the file's PARENT directory (or the project root)
+  when the worktree root is a single file. Likely the same root cause family as
+  #55 (single-file worktree assumptions).
+- **Fix attempted:** none
+- **Tested:** n/a
+
+## 57. Notebook scrollbar overlaps the cell's left margin gutter
+
+- **Status:** open
+- **Symptom:** (user 2026-07-30, screenshot) The cell-list scrollbar (phase 56)
+  is drawn over the cell's left margin, so that margin can no longer be clicked
+  to select the cell in command mode. Two related notes: (a) clicking the OTHER
+  margins doesn't select the cell either (user expected it would — may be
+  pre-existing/by design, confirm); (b) clicking far down the scrollbar track
+  does not jump the view there the way a normal scrollbar does.
+- **Analysis (to investigate):** the scrollbar is attached to the cell-list
+  column, whose right edge apparently sits over the cell's margin rather than
+  outside it. Either inset the list content by the scrollbar's reserved width,
+  or move the scrollbar outside the cell's margin. The track-click-to-jump
+  behaviour is a `ui::Scrollbars` feature (`ScrollbarStyle::Editor` reserves the
+  track) — check whether the notebook's list needs a reserved track for the
+  track-click hit area to exist.
+- **Fix attempted:** none (user: "happy with the shape, it's just weirdly
+  positioned")
+- **Tested:** n/a
+
+## 58. Kernel picker's "Creating…" row doesn't refresh when the build finishes
+
+- **Status:** open
+- **Symptom:** (user 2026-07-30, phase 49 testing) While an environment is being
+  created the picker correctly shows a greyed "Creating <name>…" row. When the
+  build COMPLETES, that row does not update in place — it stays as "Creating…"
+  until the picker is closed and reopened, at which point the real kernel entry
+  appears.
+- **Analysis (to investigate):** phase 49's design intended the row to be
+  replaced live ("Leaving the picker open across completion updates it
+  correctly"). The picker's list is presumably built once when opened and not
+  re-rendered on the notebook's completion notification. Look at how
+  `KernelPickerDelegate` gets its entries and whether the notebook's
+  build-completion path notifies/refreshes the open picker (vs only updating the
+  notebook itself).
 - **Fix attempted:** none
 - **Tested:** n/a

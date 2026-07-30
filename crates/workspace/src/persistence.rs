@@ -5004,7 +5004,7 @@ mod tests {
         let all_gone_id = db.next_id().await.unwrap();
         db.save_workspace(SerializedWorkspace {
             id: all_gone_id,
-            paths: PathList::new(&[missing.clone()]),
+            paths: PathList::new(std::slice::from_ref(&missing)),
             identity_paths: None,
             location: SerializedWorkspaceLocation::Local,
             center_group: Default::default(),

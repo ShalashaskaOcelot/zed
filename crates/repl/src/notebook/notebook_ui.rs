@@ -739,8 +739,13 @@ impl NotebookEditor {
         } else {
             // Nothing selected or remembered: prompt the user to choose a
             // kernel. Any cell that triggered this is already queued and will
-            // run once a kernel is picked and ready.
-            self.kernel_picker_handle.show(window, cx);
+            // run once a kernel is picked and ready. Deferred because `show`
+            // fires the picker's `on_open`, which updates this notebook — and
+            // this runs inside an update already (see the same fix elsewhere).
+            let kernel_picker_handle = self.kernel_picker_handle.clone();
+            window.defer(cx, move |window, cx| {
+                kernel_picker_handle.show(window, cx);
+            });
         }
     }
 
@@ -4283,7 +4288,18 @@ impl NotebookEditor {
                                 ))(window, cx)
                             })
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.kernel_picker_handle.toggle(window, cx);
+                                // Deferred: `toggle` synchronously fires the
+                                // picker's `on_open`, which updates this
+                                // notebook — re-entering the update this
+                                // listener already holds and aborting with a
+                                // double-lease panic. `window.defer` (NOT
+                                // `cx.defer_in`, which re-wraps in another
+                                // NotebookEditor update) runs it with no lease
+                                // held. Same fix as the run-with-no-kernel path.
+                                let kernel_picker_handle = this.kernel_picker_handle.clone();
+                                window.defer(cx, move |window, cx| {
+                                    kernel_picker_handle.toggle(window, cx);
+                                });
                             }))
                     })),
             )

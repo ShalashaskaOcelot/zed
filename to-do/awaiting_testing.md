@@ -35,31 +35,19 @@ listed here.
       notebooks normally over a few sessions; the same file should never
       end up open in two tabs again. (Cause found by inspection: stale
       entry id after save defeated the already-open dedup.)
-- [ ] Bug #51 — Open a notebook from the project panel and, WITHOUT clicking
-      into it first, click Run All (and the other sidebar buttons) → they should
-      work immediately (previously did nothing until the notebook was focused).
-      With several notebooks open, each sidebar should control only its own.
-- [ ] Bug #46 — Rust kernel: run a cell, interrupt the kernel (indicator goes
-      red/Error), then Run All or run a cell → it should relaunch the SELECTED
-      kernel and run, NOT pop up the kernel picker. Also confirm a genuine
-      launch failure (e.g. pick a broken/removed env) still prompts rather than
-      relaunch-looping.
-- [ ] Bug #47 — Save a notebook to a path OUTSIDE the workspace (e.g. Desktop):
-      the tab should show the real filename, not "Untitled". (In-workspace saves
-      should still show the correct name.)
-- [ ] Bug #48 — After saving a notebook outside the workspace, click it in the
-      project panel → it should render as a notebook, NOT open as raw JSON.
-      (In-workspace notebooks should still render.)
+- [ ] Bug #47 + the "Failed to save / no such worktree" dialog — Save a
+      notebook (and separately a plain text file) to a path OUTSIDE the
+      workspace, e.g. the Desktop. There should be NO error dialog; the tab
+      should switch from "Untitled" to the real filename; Ctrl-S should re-save
+      with no dialog; and it should NOT appear as a root in the project panel.
+      Saving INSIDE the workspace must still work and still show in the panel.
+- [ ] Bug #54 — Click the kernel selector at the BOTTOM of the notebook's right
+      control sidebar → the picker opens instead of the app crashing.
 - [ ] Bug #50 — Open a workspace folder, then (a) also have another root that
       you delete, or (b) create an UNSAVED notebook/buffer and then delete the
       whole workspace folder. Quit and relaunch → the session should restore:
       surviving roots come back, and unsaved items are recovered even if their
       folder is gone (no more whole-session loss over a deleted path).
-- [ ] Phase 53 — Save a new buffer (text) AND a notebook to a path OUTSIDE the
-      project (e.g. Desktop): each stays open and re-saveable (Ctrl-S, no dialog)
-      but does NOT appear as a root in the project panel; saving a new file INTO
-      a workspace folder DOES still appear.
-
 ## Phase 44 — Build the user-level Windows installer locally
 
 Kind: new feature (fork release engineering). Implementation (the three
@@ -76,22 +64,6 @@ file it in `bugs.md`, annotate the failing line, and tick it here.
       warning is the expected cost (note what it looks like).
 - [ ] The installed fork build opens and runs a Jupyter notebook end-to-end;
       uninstall from per-user Apps & Features cleans up.
-
-## Phase 49 — Creating kernel shown as a greyed entry in the picker
-
-Kind: new feature (finishes phase 48's picker side) — once confirmed present
-and basically working, refinements/defects become new items.
-
-- [ ] While an env is being created (Create Python/Conda Environment, with the
-      build in progress), open the kernel picker: a greyed, non-selectable
-      "Creating <name>…" row appears at the top, shown as the current
-      selection (checkmark on it, NOT on the previously selected kernel). You
-      cannot click/keyboard-select it, but you CAN still pick a different real
-      kernel (which supersedes the build — phase 48).
-- [ ] When the build finishes, the greyed row is replaced by the real,
-      selectable kernel entry (now the checkmarked selection); on failure it
-      disappears and the prior kernel's checkmark returns. Leaving the picker
-      open across completion updates it correctly (no stale "Creating" row).
 
 ## Phase 48 — Select a newly-created kernel immediately
 
