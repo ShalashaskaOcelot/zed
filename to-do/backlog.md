@@ -39,23 +39,36 @@ high → low within each group.
   `run_queue`. So the notebook ALREADY knows exactly which cell failed; nothing
   surfaces it as a navigation target.
   **What to add:**
-  * An action to jump to the failing cell — select it and scroll it into view
-    (reuse the top-aligned reveal used by the existing cell navigation), with a
-    keybinding.
+  * An action to jump to the failing cell, with a keybinding.
   * Next/previous-error navigation when a run produced more than one failure
-    (possible when stop-on-error is off or cells are run individually): cycle
-    through cells at `Failed`, wrapping at the ends.
+    (possible when cells are run individually): cycle through cells at
+    `Failed`, wrapping at the ends.
   * A way to reach it without knowing the shortcut — the natural hook is the
     top kernel strip (a failure indicator that is clickable → jumps to the
     error), since it is pinned and visible at any scroll position. Pairs well
     with the "global kernel busy/idle indicator" item below.
-  **Decisions to settle at implementation:** whether "the error" means the most
-  recent failure or the first failure in document order (VS Code jumps to the
-  one that halted the run — i.e. most recent); whether Failed statuses from a
-  PREVIOUS run should remain navigable or only failures from the current
-  session (relates to the run-scoped-accumulator problem in the runtime-timer
-  item below); and whether to also scroll the cell's error output into view
-  rather than just the cell top when the output is long.
+  **Reveal target — the ERROR, not the cell top (user 2026-07-31):** the
+  informational part is the traceback, so do NOT reuse the top-aligned cell
+  reveal. Land so the BOTTOM of the cell's source is visible (enough to see
+  which code raised) with as much of the error output as will fit below it.
+  Same underlying complaint as the "follow running cell" item below — landing
+  at a cell's top shows you the least useful part.
+  **Two questions settled up front (user 2026-07-31), do not re-litigate:**
+  * *Most-recent vs first-in-document-order is a non-question.* Stop-on-error
+    means nothing after the failure runs, so an unhandled error is ALWAYS the
+    most recent. Handled errors never reach `Failed` at all unless the handler
+    re-raises.
+  * *No run-scoping is needed — `Failed` is accurate by construction.* Walking
+    the cases: a cell re-run this session either raised again (a NEW error, not
+    a stale one) or succeeded (status is no longer `Failed`); a cell queued but
+    not yet reached is `Pending`, not `Failed`, even though it may still be
+    displaying last run's output. The only cell retaining a `Failed` status
+    from a previous run is one neither re-run nor queued — and that status is
+    still truthful. So just navigate `Failed` cells; no session accumulator.
+  **Out of scope (worth stating so it isn't mistaken for a bug):** an exception
+  CAUGHT by the user's code and printed with `traceback.print_exc()` is stderr
+  stream output, and the cell legitimately succeeds (green tick). Go-to-error
+  keys on execution status, so it will not — and should not — find those.
 
 ## Medium priority (cont.)
 
@@ -188,6 +201,26 @@ high → low within each group.
   setting (e.g. `notebook_dynamic_render`, default off) to fall back to
   measure-as-you-scroll on low-power machines. Verify open time on the user's
   large Rust notebooks before settling the default.
+- Alternative "follow running cell" modes (user 2026-07-31). Follow mode
+  currently pins each cell near the TOP of the viewport as it starts
+  (`follow_scroll_to`, called from `advance_run_queue` in `notebook_ui.rs`),
+  which means you watch the cell's SOURCE — the part you already wrote and the
+  least informative part while it runs. What you actually want to watch is the
+  execution status and the output being produced. Investigate alternate follow
+  behaviours and pick a default (or offer a setting):
+  * Follow the BOTTOM of the running cell — keep its status line and output
+    region in view rather than its first line, so text appears where you are
+    looking. Needs a decision on what happens while output is still empty (a
+    cell with no output yet has nothing below its source to show).
+  * Follow the output tail — track the newest output as it streams, i.e. keep
+    the growing edge pinned, closer to how a terminal follows.
+  * Keep the top-aligned behaviour for cells that fit entirely in the viewport
+    (where the distinction is moot) and only switch strategy for cells taller
+    than the viewport.
+  Same underlying complaint as the reveal-target note in the cell-error
+  navigation item above — whatever is chosen here should inform that, since
+  both are "scroll so the USEFUL part is on screen". Worth prototyping before
+  committing to a setting; a single better default may be enough.
 - Notebook control buttons should focus the notebook (user 2026-07-30). Bug #51
   made the sidebar buttons act on their own notebook regardless of focus, but
   focus itself stays wherever it was (e.g. the project panel), so keyboard
