@@ -3843,7 +3843,17 @@ impl NotebookEditor {
             } else {
                 index + 1
             };
-            self.set_selected_index(ix, true, window, cx);
+            // Command-mode cell navigation (`SelectOnly`) reveals the whole
+            // cell, top-aligned — you are choosing a CELL, so showing as much
+            // of it as possible is what you want. Crossing a cell boundary
+            // while EDITING (`SelectAndMove`) is different: you are following a
+            // LINE, so snapping the new cell to the top throws away your place
+            // for no reason. Skip the reveal there and let the cursor move
+            // below emit `SelectionsChanged`, which runs the ordinary
+            // minimal follow — it scrolls only if the line being moved to is
+            // actually out of view, and only far enough to show it.
+            let reveal_whole_cell = selection_mode == SelectionMode::SelectOnly;
+            self.set_selected_index(ix, reveal_whole_cell, window, cx);
 
             if selection_mode == SelectionMode::SelectAndMove
                 && let Some(cell) = self.get_selected_cell()
@@ -3866,7 +3876,17 @@ impl NotebookEditor {
         if count > 0 {
             let index = self.selected_index();
             let ix = if index == 0 { 0 } else { index - 1 };
-            self.set_selected_index(ix, true, window, cx);
+            // Command-mode cell navigation (`SelectOnly`) reveals the whole
+            // cell, top-aligned — you are choosing a CELL, so showing as much
+            // of it as possible is what you want. Crossing a cell boundary
+            // while EDITING (`SelectAndMove`) is different: you are following a
+            // LINE, so snapping the new cell to the top throws away your place
+            // for no reason. Skip the reveal there and let the cursor move
+            // below emit `SelectionsChanged`, which runs the ordinary
+            // minimal follow — it scrolls only if the line being moved to is
+            // actually out of view, and only far enough to show it.
+            let reveal_whole_cell = selection_mode == SelectionMode::SelectOnly;
+            self.set_selected_index(ix, reveal_whole_cell, window, cx);
 
             if selection_mode == SelectionMode::SelectAndMove
                 && let Some(cell) = self.get_selected_cell()

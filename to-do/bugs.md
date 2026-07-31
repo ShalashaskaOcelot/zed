@@ -678,82 +678,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 - **Fix attempted:** none
 - **Tested:** n/a
 
-## 60. Cursor-follow scrolls the notebook viewport too eagerly
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-30, screenshots) Clicking a line that is ALREADY
-  fully visible shifts the notebook viewport to reveal ~4 more lines beyond it,
-  at both the top and bottom edges. Worse, when click-DRAGGING to select text
-  near an edge the viewport keeps shifting under the held pointer — the pointer
-  stays at the same screen position, so it lands on newly revealed lines and the
-  scroll feeds itself, ending with the whole cell selected. Also happens on
-  arrow-key / newline cursor movement. Expected: the viewport should move ONLY
-  when the cursor would actually leave the view, and then only far enough to
-  bring that one line fully in.
-- **Root cause (CONFIRMED — TWO independent mechanisms):**
-  1. **The dominant one, for mouse input.** A cell editor sits inside the
-     notebook's gpui `List`, which consumes `Window::take_autoscroll`
-     (`list.rs`). `EditorElement` sets `autoscroll_containing_element =
-     autoscroll_request.is_some() || editor.has_pending_selection()`
-     (`element.rs`) — i.e. it is ON WHILE THE MOUSE IS HELD — and then asks the
-     container to reveal `cursor_row - 3 ..= cursor_row + 4` (`element.rs`).
-     That hard-coded ±3/4-line lead is exactly the ~4 lines observed, fires on
-     click/drag, and is what makes a drag run away.
-  2. **The keyboard path.** `follow_cursor_in_cell` (`notebook_ui.rs`) used a
-     `px(24.)` margin AND estimated the cursor's Y by interpolating its row
-     across the whole cell height — which includes non-editor chrome, so the
-     estimate can be several lines out, scrolling even for a visible cursor.
-- **Fix attempted (2026-07-30):**
-  1. New `Editor::set_minimal_container_autoscroll()` (field
-     `container_autoscroll_reveals_context`, default TRUE so every other editor
-     is unchanged) switches the container-autoscroll lead from `(3, 4)` to
-     `(0, 1)` — reveal the cursor's own line only. Notebook cell editors opt in
-     (`cell.rs`, both code and markdown).
-  2. `follow_cursor_in_cell` now uses the editor's EXACT reported cursor
-     position (`pixel_position_of_cursor`, the centre of the cursor's line in
-     window coordinates), keeping the old interpolation only as a fallback for
-     a not-yet-painted editor, and uses ZERO margin — it scrolls only once the
-     cursor is actually outside the viewport.
-- **Known nuance:** the exact position is the CENTRE of the cursor's line, so a
-  line more than half off-screen scrolls until its centre reaches the edge; a
-  sliver can remain clipped. If that proves annoying, the follow needs the line
-  height to add a half-line allowance (not currently reachable there without
-  threading `window` into the cell-editor subscription).
-- **Follow-up (user 2026-07-30, after confirming the click behaviour):** mouse
-  behaviour confirmed PERFECT — a line even slightly out of view scrolls fully
-  in, a fully visible line never moves the viewport. Two ARROW-KEY problems
-  remained, both now addressed:
-  1. *Arrow keys let the cursor leave the viewport and then never recover.*
-     TWO WRONG DIAGNOSES were tried first and are recorded here so they are not
-     repeated: (a) "the painted position is one frame stale, defer to the next
-     frame" — disproved by the user pressing DOWN 30 times with no movement at
-     all, and by the follow being correct (not lagging) when it did work;
-     (b) the `window.on_next_frame` deferral that theory motivated, which also
-     did not help (and `on_next_frame` does not itself request a frame, so it is
-     not even a reliable "after paint" hook).
-     REAL CAUSE: `pixel_position_of_cursor` only exists for a cursor that was
-     PAINTED. Once the cursor scrolled out of the viewport there was no painted
-     position, so the stale one — still inside the viewport — was used, the
-     follow concluded "nothing to do", and it stayed dead no matter how many
-     more arrow presses arrived. This matches every reported symptom: a
-     partially-visible line still scrolled (that row was painted), the next
-     fully-out-of-view line did not, and pressing LEFT/RIGHT recovered it (the
-     editor's own autoscroll request path, which is independent of this).
-     FIX: derive the cursor's position geometrically from `Editor::last_bounds()`
-     (set during LAYOUT, so valid whether or not the row is on screen) and the
-     cursor's row — cell editors are `SizeByContent`, so their height is exactly
-     their rows and the row maps linearly onto those bounds. This also yields
-     the line height, so the check is now a true "is this line fully visible"
-     test rather than a centre-point approximation, and the deferral and its
-     pending flag are gone.
-  2. *Holding an arrow key stuttered, then jumped several lines at once.* Every
-     selection change built a full `display_snapshot` just to compute a fallback
-     that was almost never used, and did a follow per keystroke. The snapshot is
-     now built ONLY when there is no painted position, and a `cursor_follow_pending`
-     flag collapses a burst of changes into one follow per frame. (A debug build
-     amplifies this; re-check on release.)
-- **Tested:** no — see `awaiting_testing.md`.
-
 ## 61. A cell's stream output is split into many separate output blocks
 
 - **Status:** fix attempted - untested
@@ -783,4 +707,33 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   interleaves them the way a console would. If stdout/stderr ever need separate
   blocks (see the backlog item about evcxr writing build logs to stderr),
   `Output::Stream` will need to carry the stream name and the merge gated on it.
+- **Tested:** no — see `awaiting_testing.md`.
+
+## 62. Edit-mode cursor movement across a cell boundary snaps the viewport
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-07-30, screenshots 3-5) Three cells, the first two
+  fully visible and the third partly cut off. Pressing DOWN in EDIT mode to move
+  the cursor from cell 2 into cell 3 snaps the viewport so cell 3 is top-aligned
+  — even though the line being moved to was already visible and needed no
+  scrolling at all. Expected: the viewport holds still, exactly as it does when
+  moving between lines WITHIN a cell.
+- **Wanted behaviour (user's distinction):** COMMAND-mode cell navigation should
+  keep revealing the whole cell top-aligned — you are choosing a cell, so seeing
+  as much of it as possible is right. EDIT-mode movement is following a LINE, so
+  it should shift the viewport as little as possible: only when the target line
+  is out of view, and only far enough to bring it in.
+- **Analysis:** `select_next`/`select_previous` always passed
+  `jump_to_index = true` to `set_selected_index`, which calls `jump_to_cell` →
+  `scroll_to_reveal_item_top_aligned`. Both callers hit it, but they are already
+  distinguishable: command-mode navigation passes `SelectionMode::SelectOnly`
+  and edit-mode boundary crossing passes `SelectAndMove`.
+- **Fix attempted (2026-07-30):** reveal the whole cell only for `SelectOnly`.
+  For `SelectAndMove` the reveal is skipped; the cursor move that follows emits
+  `SelectionsChanged`, which runs the ordinary minimal follow (bug #60) and so
+  scrolls only if the target line is genuinely out of view.
+- **Known gap:** if the target cell is entirely outside the laid-out range,
+  `bounds_for_item` returns `None` and the follow still falls back to the
+  top-aligned reveal. With the list's overdraw an adjacent cell is normally laid
+  out, so this should be rare; revisit if a big jump feels wrong.
 - **Tested:** no — see `awaiting_testing.md`.

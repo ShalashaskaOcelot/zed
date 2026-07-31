@@ -35,17 +35,12 @@ listed here.
       Desktop) and start a kernel → it should launch instead of failing with
       "The directory name is invalid. (os error 267)". The kernel's working
       directory is now the file's folder. In-project notebooks unchanged.
-- [ ] Bug #60 — In a notebook cell: (a) click a line that is already fully
-      visible near the top/bottom edge → the viewport must NOT move; (b) click
-      a partly-cut-off line at an edge → it scrolls only enough to show it, not
-      several extra lines; (c) click-drag to select text down to the bottom
-      edge → it scrolls one line at a time and does NOT run away into selecting
-      the whole cell; (d) same with arrow keys / pressing Enter at the edges.
-      Regular (non-notebook) editors must be unchanged.
-      FOLLOW-UP (mouse already confirmed good): with ARROW KEYS, the cursor
-      should never slide off screen — the viewport follows every time, not
-      intermittently; and HOLDING up/down should scroll steadily line by line
-      rather than stuttering and then jumping several lines at once.
+- [ ] Bug #62 — With three cells where the first two fit the viewport and the
+      third is partly cut off: in EDIT mode, arrow down from cell 2 into cell 3
+      → the viewport must NOT snap the new cell to the top; it should stay put
+      if the line being moved to is already visible, and otherwise shift only
+      enough to show that line. In COMMAND mode, cell navigation should still
+      reveal the whole cell top-aligned as before.
 - [ ] Bug #61 — Run a cell that prints repeatedly inside a loop (with a little
       work between prints, e.g. a sleep) → all the printed lines should appear
       in ONE output block with a single copy button, and a click-drag should

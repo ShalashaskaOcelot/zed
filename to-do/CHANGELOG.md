@@ -212,6 +212,18 @@ entry rather than archiving it.
 
 ## Fixed bugs (confirmed)
 
+- #60 — The notebook viewport chased the cursor: clicking an already-visible
+  line jumped it several lines, a click-drag near an edge scrolled under the
+  held pointer until the whole cell was selected, and arrow keys could walk the
+  cursor out of view after which the follow never recovered. Two causes: the
+  editor asks its container to reveal `cursor_row-3..+4` whenever a selection is
+  pending (narrowed to the cursor's own line for notebook cells via
+  `Editor::set_minimal_container_autoscroll`, default off elsewhere), and the
+  notebook's own follow used a margin plus a position taken from PAINT — absent
+  once the cursor left the viewport. The follow is now derived from
+  `Editor::last_bounds()` (layout, not paint) with no margin.
+  `79f116f` `324c165` `a12c539`. Confirmed 2026-07-30.
+
 - #1 — Restart kernel killed the kernel but the relaunch failed. `7bd5b5a`
 - #2 — Running a cell with a dead/shutdown kernel didn't start the kernel. `7bd5b5a`
 - #3 — Interrupt / stop button didn't interrupt a running cell (OS-level
