@@ -762,15 +762,14 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 - **Immediate workaround for the user:** raise `"max_lines"` in settings (up to
   256). That setting was designed for the INLINE REPL, where a short window is
   reasonable; it is a poor default for notebook cells.
-- **Options to decide between (this is a design choice, not a pure defect):**
-  1. Make the output block SCROLLABLE, so the whole scrollback is reachable
-     inline (pairs with the backlog item for a horizontal scrollbar on wide
-     outputs — this is the vertical counterpart).
-  2. Show the HEAD plus a truncation notice with an "open in buffer" affordance,
-     which is what VS Code does and is the Jupyter convention (the beginning of
-     an output is usually the informative part).
-  3. Give notebooks their own, much larger line limit separate from the inline
-     REPL's `max_lines`.
-  (1)+(2) together would match VS Code most closely.
-- **Fix attempted:** none — awaiting the user's preference.
+- **Decision (user 2026-07-30):** truncate like VS Code — show the HEAD with a
+  truncation notice, keeping `max_lines` at 32 ("actually a fine default"). The
+  existing open-in-buffer covers seeing everything. A "view as a scrollable
+  element" affordance may come later, but outputs must NOT capture the
+  scrollwheel by default. Scheduled as **phase 59**.
+- **Also noted (user 2026-07-30):** outputs CAN already be scrolled by dragging
+  a selection, "but it doesn't work properly" — highlighting and dragging up
+  selects everything and moves the view. Not addressed by phase 59; file
+  separately if it still grates once truncation lands.
+- **Fix attempted:** none yet — see phase 59.
 - **Tested:** n/a
