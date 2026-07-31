@@ -41,6 +41,11 @@ listed here.
       if the line being moved to is already visible, and otherwise shift only
       enough to show that line. In COMMAND mode, cell navigation should still
       reveal the whole cell top-aligned as before.
+- [ ] Bug #53 — Print a long single line (or a wide repr) in a cell → the text
+      should wrap at the output block's actual right edge, not roughly halfway
+      with a gap. Widen/narrow the window and re-run: wrapping should follow the
+      new width. The INLINE REPL (running code in a .py file) should be
+      unchanged, still capped at `max_columns`.
 - [ ] Bug #61 — Run a cell that prints repeatedly inside a loop (with a little
       work between prints, e.g. a sleep) → all the printed lines should appear
       in ONE output block with a single copy button, and a click-drag should

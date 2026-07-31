@@ -514,6 +514,18 @@ impl Render for TerminalOutput {
                     if needs_sync {
                         let mut terminal_bounds = terminal_size(window, cx);
                         terminal_bounds.bounds.origin = bounds.origin;
+                        // Wrap at the width this output is ACTUALLY laid out
+                        // at. `terminal_size` sizes to `max_columns`, so
+                        // adopting only the origin left the terminal wrapping
+                        // at a fixed 128 columns however wide the block was —
+                        // notebook outputs (which span their cell's full width
+                        // since phase 40) wrapped early and left a gap. The
+                        // inline REPL is unaffected: its container is already
+                        // capped to `max_columns` wide, so the laid-out width
+                        // it reports here is that same cap.
+                        if bounds.size.width > Pixels::ZERO {
+                            terminal_bounds.bounds.size.width = bounds.size.width;
+                        }
                         terminal.update(cx, |terminal, cx| {
                             terminal.set_size(terminal_bounds);
                             terminal.sync(window, cx);

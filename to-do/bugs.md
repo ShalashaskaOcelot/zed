@@ -535,22 +535,30 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ## 53. Notebook text output is narrower than the available width (wraps early)
 
-- **Status:** open
-- **Symptom:** (user 2026-07-30, fourth screenshot) Stream/text output in a
-  notebook wraps well before the edge of the available space — e.g. a single
-  "Sample master files:" line, and the "Volume totals:" / "Area totals:" lines,
-  wrap roughly halfway across even though they'd nearly fit on one line. By
-  contrast a rich DataFrame output (fifth screenshot) DOES stretch the full
-  width (but has its own problem — it clips outside the viewport with no
-  horizontal scrollbar; see backlog).
-- **Analysis (to investigate):** the text/stream output container appears to be
-  laid out narrower than the cell/viewport width — likely a max-width or a
-  non-`full`/shrink sizing on the output block in `crates/repl/src/outputs/`
-  (stream/plain-text renderer) or the cell output container in
-  `notebook/cell.rs`. Compare against the DataFrame/rich renderer which fills
-  the width.
-- **Fix attempted:** none
-- **Tested:** n/a
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-07-30) Stream/text output wraps well before the edge
+  of the available space — a single line that would nearly fit on one row wraps
+  roughly halfway across, leaving an obvious empty gap on the right. Selecting
+  the output makes it plain: the highlight stops at a consistent column, well
+  short of the block's right edge.
+- **Root cause (CONFIRMED):** phase 40 widened the output CONTAINER for
+  notebooks (`outputs.rs`: `max_columns` now only caps the inline REPL) but the
+  TERMINAL INSIDE it was still sized to `max_columns`. In the canvas sync
+  (`outputs/plain.rs`) the code took `terminal_size(window, cx)` — whose width
+  is `max_columns * cell_width`, i.e. 128 columns — and then adopted only the
+  ORIGIN from the element's real bounds, never the width. So the emulator kept
+  wrapping at 128 columns however wide the block was laid out. Phase 40 fixed
+  half the problem.
+- **Fix attempted (2026-07-30):** adopt the element's real laid-out WIDTH as
+  well as its origin when syncing the terminal's bounds. No flag is needed to
+  keep the inline REPL correct: its container is already capped to
+  `max_columns` wide, so the laid-out width it reports is that same cap, while
+  a notebook output reports its cell's full width. Height is untouched (that is
+  the `max_lines` viewport — see phase 59).
+- **Tested:** clippy clean; `cargo test -p repl --lib outputs` passes (36),
+  including `test_initial_text_uses_repl_terminal_size` (unaffected — it covers
+  the CONSTRUCTION size, before any paint). Runtime untested — see
+  `awaiting_testing.md`.
 
 ## 54. Crash: clicking the sidebar kernel selector double-leases the notebook
 
