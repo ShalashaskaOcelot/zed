@@ -27,6 +27,36 @@ high → low within each group.
   and/or a kernel-language-aware filter for known-benign evcxr stderr
   patterns, may be enough. Confirm evcxr's actual message shapes first.
 
+- Cell error detection + "go to error" navigation (user 2026-07-31), VS Code
+  style: when a cell errors and stops execution, let the user jump straight to
+  it instead of hunting by scrolling. Especially valuable after a Run All on a
+  long notebook, where the failing cell can be far off-screen.
+  **What already exists (do NOT re-implement):** the detection half is done.
+  `CellExecutionStatus::Failed` is set on a raised cell and drawn as a red ✕
+  (`notebook/cell.rs`), errors are a distinct `Output::ErrorOutput(ErrorView)`
+  (`outputs.rs`), and stop-on-error already halts a batch — the
+  `ReplyStatus::Error | Aborted` arm in `notebook_ui.rs` cancels the rest of
+  `run_queue`. So the notebook ALREADY knows exactly which cell failed; nothing
+  surfaces it as a navigation target.
+  **What to add:**
+  * An action to jump to the failing cell — select it and scroll it into view
+    (reuse the top-aligned reveal used by the existing cell navigation), with a
+    keybinding.
+  * Next/previous-error navigation when a run produced more than one failure
+    (possible when stop-on-error is off or cells are run individually): cycle
+    through cells at `Failed`, wrapping at the ends.
+  * A way to reach it without knowing the shortcut — the natural hook is the
+    top kernel strip (a failure indicator that is clickable → jumps to the
+    error), since it is pinned and visible at any scroll position. Pairs well
+    with the "global kernel busy/idle indicator" item below.
+  **Decisions to settle at implementation:** whether "the error" means the most
+  recent failure or the first failure in document order (VS Code jumps to the
+  one that halted the run — i.e. most recent); whether Failed statuses from a
+  PREVIOUS run should remain navigable or only failures from the current
+  session (relates to the run-scoped-accumulator problem in the runtime-timer
+  item below); and whether to also scroll the cell's error output into view
+  rather than just the cell top when the output is long.
+
 ## Medium priority (cont.)
 
 - Global-search result opens raw JSON, not the notebook (user 2026-07-16,
