@@ -54,14 +54,16 @@
 //! # Display the DataFrame
 //! display(df)
 //! ```
-use gpui::{AnyElement, ClipboardItem, Entity, FontWeight, TextRun};
+use gpui::{AnyElement, ClipboardItem, Entity, FontWeight, ScrollHandle, TextRun};
 use language::Buffer;
 use runtimelib::datatable::{FieldType, TableSchema, TableSchemaField};
 use runtimelib::media::datatable::TabularDataResource;
 use serde_json::Value;
 use settings::Settings;
 use theme_settings::ThemeSettings;
-use ui::{IntoElement, Styled, div, prelude::*, v_flex};
+use ui::{
+    IntoElement, ScrollAxes, Scrollbars, Styled, WithScrollbar, div, prelude::*, v_flex,
+};
 use util::markdown::MarkdownEscaped;
 
 use crate::outputs::OutputContent;
@@ -74,6 +76,10 @@ pub struct TableView {
     pub table: TabularDataResource,
     pub widths: Vec<Pixels>,
     cached_clipboard_content: ClipboardItem,
+    /// Tracks the table's own horizontal scroll so a scrollbar can be drawn for
+    /// it. A wide table scrolls WITHIN its output block rather than making the
+    /// whole notebook scroll sideways.
+    scroll_handle: ScrollHandle,
 }
 
 fn cell_content(row: &Value, field: &str) -> String {
@@ -256,7 +262,20 @@ impl TableView {
             table: table.clone(),
             widths,
             cached_clipboard_content: ClipboardItem::new_string(cached_clipboard_content),
+            scroll_handle: ScrollHandle::new(),
         }
+    }
+
+    /// The table's natural width: every column's measured width plus the same
+    /// border/padding fudge the cells add. Rows are laid out at this width, so
+    /// the bordered frame around them must be at least this wide too — left to
+    /// stretch to the container instead, its `overflow_hidden` (which rounds
+    /// the corners) CLIPPED the overhanging columns, and clipped content can't
+    /// be scrolled to.
+    fn total_width(&self) -> Pixels {
+        self.widths
+            .iter()
+            .fold(px(0.), |total, width| total + *width + px(22.))
     }
 
     fn create_clipboard_content(table: &TabularDataResource) -> String {
@@ -371,11 +390,8 @@ impl TableView {
             })
             .collect::<Vec<_>>();
 
-        let mut total_width = px(0.);
-        for width in self.widths.iter() {
-            // Width fudge factor: border + 2 (heading), padding
-            total_width += *width + px(22.);
-        }
+        // Width fudge factor: border + 2 (heading), padding — see `total_width`.
+        let total_width = self.total_width();
 
         let row_element = if fill_width {
             h_flex().w_full().min_w(total_width).children(row_cells)
@@ -433,6 +449,7 @@ impl Render for TableView {
         v_flex()
             .id("table")
             .overflow_x_scroll()
+            .track_scroll(&self.scroll_handle)
             .w_full()
             // Cell text must render in the same font the column widths were
             // MEASURED in (`TableView::new` uses the buffer font) — an
@@ -445,6 +462,11 @@ impl Render for TableView {
                     .border_1()
                     .border_color(cx.theme().colors().border)
                     .overflow_hidden()
+                    // Size the frame to the ROWS, not to the container: as a
+                    // stretched child it clipped everything past the output's
+                    // right edge, so a wide table looked cut off with nothing
+                    // to scroll.
+                    .min_w(self.total_width())
                     .child(header)
                     .children(body),
             )
@@ -460,6 +482,16 @@ impl Render for TableView {
                         )),
                 )
             })
+            // Horizontal only: the table must never capture vertical scrolling,
+            // which belongs to the notebook (the bug-#63 decision). Visibility
+            // follows the user's editor scrollbar setting, as elsewhere.
+            .custom_scrollbars(
+                Scrollbars::for_settings::<editor::EditorSettingsScrollbarProxy>()
+                    .show_along(ScrollAxes::Horizontal)
+                    .tracked_scroll_handle(&self.scroll_handle),
+                window,
+                cx,
+            )
             .into_any_element()
     }
 }

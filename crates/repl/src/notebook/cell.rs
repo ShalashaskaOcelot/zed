@@ -2052,6 +2052,21 @@ impl Render for CodeCell {
                                                     ))
                                                     .w_full()
                                                     .overflow_x_scroll()
+                                                    // Pressing anywhere in the
+                                                    // output selects the cell,
+                                                    // like the gutter does. On
+                                                    // mouse DOWN and without
+                                                    // consuming the event, so a
+                                                    // press-and-drag still
+                                                    // selects output text.
+                                                    .on_mouse_down(
+                                                        gpui::MouseButton::Left,
+                                                        cx.listener(|this, _event, _window, cx| {
+                                                            cx.emit(CellEvent::PlainClick {
+                                                                id: this.id.clone(),
+                                                            });
+                                                        }),
+                                                    )
                                                     .when_some(
                                                         output_max_height,
                                                         |div, max_height| {

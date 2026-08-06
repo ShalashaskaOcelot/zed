@@ -152,3 +152,20 @@ behaves as before, say so and it gets fixed in place rather than refiled.
 - [ ] Creating an env still works and the "Creating…" row looks tidier — it now
       matches the kernel rows' layout with a spinning icon. (Its failure to
       refresh live when the build finishes is still bug #58.)
+
+## Phase 63 — Wide notebook outputs and output-body interaction
+
+Kind: mixed — the wide-output part is a change to existing behaviour (say so if
+it still clips), the click-to-select part is a new affordance.
+
+- [ ] Display a pandas DataFrame far wider than the pane: it is no longer cut
+      off at the right edge — it scrolls sideways WITHIN its output block, with
+      a horizontal scrollbar, and the notebook itself never scrolls sideways.
+- [ ] Scrolling the wheel over a wide table still scrolls the NOTEBOOK
+      vertically.
+- [ ] Clicking anywhere on an output selects that cell (gutter highlights,
+      command mode), so keyboard shortcuts then act on it — and dragging across
+      output text still selects the text rather than just selecting the cell.
+- [ ] Narrow tables and ordinary text output are unchanged: no scrollbar, no
+      layout shift, same widths as before.
+

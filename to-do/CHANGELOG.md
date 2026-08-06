@@ -273,6 +273,20 @@ entry rather than archiving it.
   unless focus is already inside it, so shortcuts work right after a click.
   AWAITING USER TESTING.
 
+- Phase 63 — Wide notebook outputs and output-body interaction: a wide table
+  (a pandas DataFrame arrives as HTML → markdown → `TableView`) was clipped,
+  not merely unscrollable — its container already scrolled horizontally and its
+  rows were already laid out at their natural width, but the bordered frame
+  between them stretched to the container and its `overflow_hidden` cut off
+  everything past the right edge. Sizing the frame to the rows
+  (`min_w(total_width)`) makes the overflow real, and a tracked `ScrollHandle`
+  gives it a horizontal-only scrollbar following the editor scrollbar setting.
+  Plain text can never overflow (the terminal wraps at `max_columns`), which is
+  why this lives on the table rather than on every cell's output block. Also:
+  pressing anywhere in an output now selects its cell, on mouse-DOWN and
+  without consuming the event, so drag-to-select-text still works.
+  AWAITING USER TESTING.
+
 ## Fixed bugs (confirmed)
 
 - #63 — Long text output showed only its LAST ~32 lines: the terminal emulator
