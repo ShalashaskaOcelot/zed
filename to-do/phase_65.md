@@ -32,26 +32,67 @@ error-styled entries that are not errors.
   anything is changed** — a fix aimed at the wrong layer will either do nothing
   or swallow real errors.
 
+## FINDING (2026-08-06) — the flood is in the LOG, not in cell output
+
+Established from evcxr's own source plus this repo's code; no guessing was
+needed after all.
+
+**What evcxr sends** (`evcxr_jupyter/src/core.rs`): build chatter goes out as
+ordinary `stream` messages — `pass_output_line` sends `{"name": "stdout" |
+"stderr", "text": …}` — and errors go out ONLY via `emit_errors`, as `error`
+messages with a hardcoded `ename: "Error"`. It does NOT send progress or
+warnings as errors. So the premise "evcxr's stderr arrives as error messages"
+is false.
+
+**What Zed does with them.** Cell output never styled stderr as an error:
+`StreamContent` is appended to the cell's `TerminalOutput` regardless of the
+stream name, and only `ErrorOutput` / an `ExecuteReply` with `status: error`
+produce the red treatment and the failed-cell marker. Now pinned by
+`test_push_message_stderr_is_not_an_error`.
+
+**Where `ERROR:` really came from.** The kernel PROCESS reader in
+`native_kernel.rs` tagged every stderr line `log::Level::Error` and logged it
+as `ERROR kernel: …`. For evcxr — which puts all build output on stderr — a
+perfectly successful run wrote a screenful of ERROR lines into Zed's log. That
+matches "floods with `ERROR: compiling {crate}`" exactly, including the shape
+of the text. Fixed: stderr is logged at INFO as `kernel stderr: …`, and the
+death-diagnostics tail now keys off the STREAM the line arrived on rather than
+its log level (so a dead kernel still quotes its last words). Genuine failures
+still log at ERROR from the process-exit path.
+
+## OPEN QUESTION for the user (blocks the rest)
+
+Where were the `ERROR:` entries you saw — Zed's **log** (`zed: open log`), or
+inside a **cell's output block**? Everything above fixes the log. If they were
+in cell output, then something is producing `ErrorOutput` messages that this
+analysis says shouldn't exist, and a screenshot of one Rust cell (plus
+`zed: open log` around that run) would pin it down. Do not add a
+pattern-matching filter before that is answered — a filter aimed at the wrong
+layer either does nothing or swallows real errors.
+
 ## Tasks
 
-- [ ] Capture what evcxr actually sends for a plain Rust cell (log every
+- [x] Capture what evcxr actually sends for a plain Rust cell (log every
       `JupyterMessageContent` variant + `stream.name` for one run, or read
       evcxr's source) and record the finding in this file. Everything below
       depends on it.
-- [ ] Gate the error styling on the message TYPE / reply status rather than on
+- [x] Gate the error styling on the message TYPE / reply status rather than on
       anything stderr-shaped, so ordinary build chatter renders as normal
-      output.
+      output. (Cell output already did; the process logger did not, and now
+      does.)
 - [ ] If (and only if) evcxr really does send errors for progress lines, add a
       narrowly-scoped, kernel-language-aware filter for known-benign evcxr
-      patterns (`Compiling …`, `Finished …`, `warning: …` notes) — documented
-      as an evcxr workaround, not a general stderr rule, and never applied to
-      other kernels.
+      patterns — documented as an evcxr workaround, not a general stderr rule,
+      and never applied to other kernels. **Evidence says NOT needed**; resolve
+      this line (do it or drop it) once the open question above is answered.
 - [ ] Make sure a genuine Rust error (type error, panic) still renders as an
       error with its traceback, and that the cell still goes red / counts
-      toward phase 60's failure indicator.
-- [ ] Unit-test the classification (message shape → error vs normal output) so
+      toward phase 60's failure indicator. (True by construction — errors key
+      off `ErrorOutput` / `ExecuteReply`, untouched by this phase — but it
+      needs one runtime check on a machine with evcxr.)
+- [x] Unit-test the classification (message shape → error vs normal output) so
       the rule is pinned down without needing a Rust kernel in CI.
-- [ ] `./script/clippy` clean and `cargo test -p repl` passes.
+- [x] `./script/clippy` clean and `cargo test -p repl` passes (53).
 
 ## User tests (runtime)
 

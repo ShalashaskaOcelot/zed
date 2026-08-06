@@ -285,32 +285,37 @@ impl NativeRunningKernel {
                 async move |_cx| {
                     use futures::future::Either;
 
+                    // A kernel writing to stderr is NOT a kernel reporting an
+                    // error: the Jupyter convention is that stdout carries the
+                    // user program's output while stderr carries diagnostics,
+                    // and evcxr (Rust) puts EVERYTHING there — `Compiling
+                    // {crate}` progress, warnings, notes. Logging each of those
+                    // lines at ERROR filled the log with failures for runs that
+                    // succeeded. Real failures are reported by the process-exit
+                    // path below, which logs at ERROR and quotes `stderr_tail`.
                     let stderr_lines = match stderr {
-                        Some(s) => Either::Left(
-                            BufReader::new(s)
-                                .lines()
-                                .map(|line| (log::Level::Error, line)),
-                        ),
+                        Some(s) => Either::Left(BufReader::new(s).lines().map(|line| (true, line))),
                         None => Either::Right(futures::stream::empty()),
                     };
                     let stdout_lines = match stdout {
-                        Some(s) => Either::Left(
-                            BufReader::new(s)
-                                .lines()
-                                .map(|line| (log::Level::Info, line)),
-                        ),
+                        Some(s) => Either::Left(BufReader::new(s).lines().map(|line| (false, line))),
                         None => Either::Right(futures::stream::empty()),
                     };
                     let mut lines = futures::stream::select(stderr_lines, stdout_lines);
-                    while let Some((level, Ok(line))) = lines.next().await {
-                        log::log!(level, "kernel: {}", line);
-                        if level == log::Level::Error
-                            && let Ok(mut tail) = stderr_tail.lock()
-                        {
-                            if tail.len() >= STDERR_TAIL_LINES {
-                                tail.pop_front();
+                    while let Some((is_stderr, Ok(line))) = lines.next().await {
+                        if is_stderr {
+                            log::info!("kernel stderr: {}", line);
+                            // Tracked by the STREAM the line arrived on, not by
+                            // its log level, so the death-diagnostics tail is
+                            // unaffected by how loudly stderr is logged.
+                            if let Ok(mut tail) = stderr_tail.lock() {
+                                if tail.len() >= STDERR_TAIL_LINES {
+                                    tail.pop_front();
+                                }
+                                tail.push_back(line);
                             }
-                            tail.push_back(line);
+                        } else {
+                            log::info!("kernel: {}", line);
                         }
                     }
                 }

@@ -1049,6 +1049,44 @@ mod tests {
         });
     }
 
+    /// Stream content is classified by MESSAGE TYPE, never by stream name: a
+    /// kernel writing to stderr is reporting diagnostics, not failing. evcxr
+    /// (Rust) puts all of its build chatter — `Compiling {crate}`, warnings —
+    /// on stderr, so styling stderr as an error would paint every successful
+    /// Rust run red. Real errors arrive as `ErrorOutput` (see
+    /// `test_push_message_error_output`), which is what the red treatment and
+    /// the cell's failure marker key off.
+    #[gpui::test]
+    async fn test_push_message_stderr_is_not_an_error(cx: &mut TestAppContext) {
+        let (mut cx, workspace) = init_test(cx).await;
+        let execution_view = create_execution_view(&mut cx, workspace);
+
+        cx.update(|window, cx| {
+            execution_view.update(cx, |view, cx| {
+                let message = JupyterMessageContent::StreamContent(StreamContent {
+                    name: Stdio::Stderr,
+                    text: "   Compiling serde v1.0.0\nwarning: unused variable\n".to_string(),
+                });
+                view.push_message(&message, window, cx);
+            });
+        });
+
+        cx.update(|_, cx| {
+            let view = execution_view.read(cx);
+            assert_eq!(view.outputs.len(), 1);
+            assert!(
+                matches!(view.outputs[0], Output::Stream { .. }),
+                "stderr must render as ordinary stream output, not an error view"
+            );
+            let text = view.output_as_stream_text(cx);
+            assert!(
+                text.as_ref()
+                    .is_some_and(|text| text.contains("Compiling serde")),
+                "the build chatter itself must still be shown"
+            );
+        });
+    }
+
     #[gpui::test]
     async fn test_push_message_stream_appends(cx: &mut TestAppContext) {
         let (mut cx, workspace) = init_test(cx).await;
