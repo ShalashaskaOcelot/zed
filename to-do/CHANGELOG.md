@@ -235,6 +235,17 @@ entry rather than archiving it.
   nothing for the user (→ bug #64), and the short-cell reveal wasn't
   specifically exercised.
 
+- Phase 61 — Notebook runtime timers in the kernel strip: two opt-in timers
+  (`repl.notebook_show_execution_time`, `repl.notebook_show_kernel_uptime`).
+  The execution total is an ACCUMULATOR, not a sum of the cells' recorded
+  durations — time is banked when a run ends, so it pauses between cells and a
+  re-run notebook's stale per-cell durations can't inflate it; both timers are
+  scoped to a kernel session and reset on launch/restart/switch, and a stopped
+  kernel's uptime freezes rather than disappearing. `Cell::format_duration` was
+  extracted into a shared `format_duration` (plus an hours tier) so the strip
+  and the cell footers can't drift. The 100 ms tick is started from `render`
+  and ends itself when no live timer is on screen. AWAITING USER TESTING.
+
 ## Fixed bugs (confirmed)
 
 - #63 — Long text output showed only its LAST ~32 lines: the terminal emulator

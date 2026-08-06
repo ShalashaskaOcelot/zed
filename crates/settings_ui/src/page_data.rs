@@ -7377,7 +7377,7 @@ fn terminal_page() -> SettingsPage {
 }
 
 fn repl_page() -> SettingsPage {
-    fn notebook_section() -> [SettingsPageItem; 4] {
+    fn notebook_section() -> [SettingsPageItem; 6] {
         [
             SettingsPageItem::SectionHeader("Notebook"),
             SettingsPageItem::SettingItem(SettingItem {
@@ -7444,6 +7444,52 @@ fn repl_page() -> SettingsPage {
                             .repl
                             .get_or_insert_default()
                             .notebook_autostart_kernel = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Show Execution Time",
+                description: "Show a running total of the time this notebook's cells have spent executing, next to the kernel status. Pauses between cells and resets when the kernel starts or restarts.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("repl.notebook_show_execution_time"),
+                    pick: |settings_content| {
+                        settings_content
+                            .repl
+                            .as_ref()?
+                            .notebook_show_execution_time
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .repl
+                            .get_or_insert_default()
+                            .notebook_show_execution_time = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Show Kernel Uptime",
+                description: "Show how long the kernel has been running, next to the kernel status. Freezes when the kernel is stopped and resets on restart.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("repl.notebook_show_kernel_uptime"),
+                    pick: |settings_content| {
+                        settings_content
+                            .repl
+                            .as_ref()?
+                            .notebook_show_kernel_uptime
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .repl
+                            .get_or_insert_default()
+                            .notebook_show_kernel_uptime = value;
                     },
                 }),
                 metadata: None,

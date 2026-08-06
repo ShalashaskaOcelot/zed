@@ -43,6 +43,16 @@ pub struct ReplSettings {
     ///
     /// Default: false
     pub notebook_autostart_kernel: bool,
+    /// Whether to show a running total of time spent executing cells next to
+    /// the kernel status.
+    ///
+    /// Default: false
+    pub notebook_show_execution_time: bool,
+    /// Whether to show how long the kernel has been running next to the kernel
+    /// status.
+    ///
+    /// Default: false
+    pub notebook_show_kernel_uptime: bool,
 }
 
 impl Settings for ReplSettings {
@@ -58,6 +68,8 @@ impl Settings for ReplSettings {
             notebook_run_landing_mode: repl.notebook_run_landing_mode.unwrap_or_default(),
             notebook_show_last_executed: repl.notebook_show_last_executed.unwrap_or(true),
             notebook_autostart_kernel: repl.notebook_autostart_kernel.unwrap_or(false),
+            notebook_show_execution_time: repl.notebook_show_execution_time.unwrap_or(false),
+            notebook_show_kernel_uptime: repl.notebook_show_kernel_uptime.unwrap_or(false),
         }
     }
 }

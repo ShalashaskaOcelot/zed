@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::ops::Range;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Context as _, Result, anyhow};
@@ -33,7 +33,7 @@ use crate::notebook::persistence::{NotebookDb, SerializedNotebook};
 
 use super::{
     Cell, CellEvent, CellExecutionStatus, CellPosition, CellToolbarAction, MarkdownCellEvent,
-    RenderableCell,
+    RenderableCell, format_duration,
 };
 
 use nbformat::v4::CellId;
@@ -284,6 +284,25 @@ pub struct NotebookEditor {
     /// The fixed end of a shift-range selection (the cell selection started
     /// from). `None` means the anchor is the primary cell.
     selection_anchor: Option<usize>,
+    /// Execution time already banked this kernel session. Time is banked when a
+    /// run ENDS, so the tally pauses between cells instead of counting the time
+    /// spent writing the next one. Summing the cells' own recorded durations
+    /// would not work: a re-run notebook's completed cells still carry their
+    /// previous run's durations.
+    execution_time_banked: Duration,
+    /// Set while a cell is executing; its elapsed time is added on top of
+    /// `execution_time_banked` for display and banked when the run ends.
+    execution_time_started_at: Option<Instant>,
+    /// When the current kernel came up, for the uptime timer.
+    kernel_started_at: Option<Instant>,
+    /// The final uptime of a kernel that has stopped, kept on screen until a
+    /// kernel starts again.
+    kernel_uptime_frozen: Option<Duration>,
+    /// Repeating notify that keeps the kernel strip's timers ticking. Ends
+    /// itself once no timer is visible, so an idle notebook holds no wake-up
+    /// loop; `runtime_timer_ticking` says whether it is still alive.
+    _runtime_timer: Option<Task<()>>,
+    runtime_timer_ticking: bool,
 }
 
 impl NotebookEditor {
@@ -473,6 +492,12 @@ impl NotebookEditor {
             resume_run_queue_on_idle: false,
             selected_indices: BTreeSet::new(),
             selection_anchor: None,
+            execution_time_banked: Duration::ZERO,
+            execution_time_started_at: None,
+            kernel_started_at: None,
+            kernel_uptime_frozen: None,
+            _runtime_timer: None,
+            runtime_timer_ticking: false,
         };
         // Lazy start: don't launch a kernel on open. Show the remembered
         // kernel's name if we can resolve one now (a real launch happens on
@@ -1635,6 +1660,9 @@ impl NotebookEditor {
         // the kernel process) alive after the tab closes (bug #35).
         let view = cx.entity().downgrade();
 
+        // Both runtime timers are scoped to a kernel session, so a launch
+        // (including a restart or a switch to another kernel) starts them over.
+        self.reset_runtime_timers();
         self.kernel_specification = Some(spec.clone());
 
         self.notebook_item.update(cx, |item, cx| {
@@ -1702,6 +1730,10 @@ impl NotebookEditor {
                         this.update_in(cx, |editor, window, cx| {
                             editor.kernel = Kernel::RunningKernel(kernel);
                             editor.kernel_reached_running = true;
+                            // Uptime counts from the kernel actually being up,
+                            // not from the launch request.
+                            editor.kernel_started_at = Some(Instant::now());
+                            editor.kernel_uptime_frozen = None;
                             cx.notify();
                             let queued = std::mem::take(&mut editor.pending_executions);
                             log::debug!(
@@ -1805,6 +1837,11 @@ impl NotebookEditor {
             return;
         };
 
+        // A restart is a new session: zero the timers now rather than when the
+        // relaunch lands, so the old kernel's uptime doesn't keep climbing
+        // through the shutdown wait.
+        self.reset_runtime_timers();
+
         let kernel = std::mem::replace(&mut self.kernel, Kernel::Restarting);
         self.execution_requests.clear();
         self.cancel_run_queue(cx);
@@ -1884,6 +1921,9 @@ impl NotebookEditor {
                 });
             }
         }
+        // A cancelled cell still spent the time it ran for; bank it now rather
+        // than letting the clock run on with nothing executing.
+        self.sync_execution_clock(cx);
     }
 
     fn interrupt_kernel(
@@ -2262,6 +2302,101 @@ impl NotebookEditor {
         let viewport_height = self.cell_list.viewport_bounds().size.height;
         let margin = (viewport_height * 0.12).max(px(40.)).min(px(96.));
         self.cell_list.scroll_to_item_near_top(index, margin);
+    }
+
+    /// Reconcile the execution clock with whether a cell is running right now.
+    /// Called at every run start/finish as well as on the display tick, so the
+    /// banked total is exact rather than quantised to the tick interval — and
+    /// so it stays correct while the timer is switched off in settings (no tick
+    /// runs then).
+    fn sync_execution_clock(&mut self, cx: &App) {
+        match (
+            self.running_cell_index(cx).is_some(),
+            self.execution_time_started_at,
+        ) {
+            (true, None) => self.execution_time_started_at = Some(Instant::now()),
+            (false, Some(started_at)) => {
+                self.execution_time_banked += started_at.elapsed();
+                self.execution_time_started_at = None;
+            }
+            _ => {}
+        }
+    }
+
+    /// Time this kernel session has spent executing cells, including the cell
+    /// running right now.
+    fn execution_time_total(&self) -> Duration {
+        self.execution_time_banked
+            + self
+                .execution_time_started_at
+                .map_or(Duration::ZERO, |started_at| started_at.elapsed())
+    }
+
+    /// How long the kernel has been up — live while it runs, frozen at its
+    /// final value once it stops, `None` before any kernel has started.
+    fn kernel_uptime(&self) -> Option<Duration> {
+        self.kernel_started_at
+            .map(|started_at| started_at.elapsed())
+            .or(self.kernel_uptime_frozen)
+    }
+
+    /// A new kernel session begins: both timers measure THIS session, so they
+    /// start from zero on a launch, restart or kernel switch.
+    fn reset_runtime_timers(&mut self) {
+        self.execution_time_banked = Duration::ZERO;
+        self.execution_time_started_at = None;
+        self.kernel_started_at = None;
+        self.kernel_uptime_frozen = None;
+    }
+
+    /// The kernel stopped: keep its final uptime on screen instead of dropping
+    /// back to nothing, until a kernel starts again.
+    fn freeze_kernel_uptime(&mut self) {
+        if let Some(started_at) = self.kernel_started_at.take() {
+            self.kernel_uptime_frozen = Some(started_at.elapsed());
+        }
+    }
+
+    /// Whether a timer that CHANGES over time is on screen. A frozen uptime and
+    /// a paused execution total are static, so they need no ticking.
+    fn has_live_timer(&self, cx: &App) -> bool {
+        let settings = ReplSettings::get_global(cx);
+        (settings.notebook_show_execution_time && self.execution_time_started_at.is_some())
+            || (settings.notebook_show_kernel_uptime && self.kernel_started_at.is_some())
+    }
+
+    /// Keep the strip's timers redrawing while one of them is live. Driven from
+    /// `render`, so it covers a run starting, a kernel coming up and the
+    /// settings being switched on mid-session alike; the task ends itself as
+    /// soon as nothing is live, so an idle notebook holds no wake-up loop.
+    fn ensure_runtime_timer(&mut self, cx: &mut Context<Self>) {
+        if self.runtime_timer_ticking || !self.has_live_timer(cx) {
+            return;
+        }
+        self.runtime_timer_ticking = true;
+        self._runtime_timer = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(100))
+                    .await;
+                let still_live = this
+                    .update(cx, |this, cx| {
+                        this.sync_execution_clock(cx);
+                        let live = this.has_live_timer(cx);
+                        if !live {
+                            this.runtime_timer_ticking = false;
+                        }
+                        // Notify either way: the tick that finds the timer no
+                        // longer live is the one that paints its final value.
+                        cx.notify();
+                        live
+                    })
+                    .unwrap_or(false);
+                if !still_live {
+                    break;
+                }
+            }
+        }));
     }
 
     /// The index (in `cell_order`) of the cell currently executing, if any.
@@ -4480,6 +4615,18 @@ impl NotebookEditor {
         // the cell that stopped it is usually off-screen.
         let failed_count = self.failed_cell_indices(cx).len();
 
+        let settings = ReplSettings::get_global(cx);
+        // Both timers are opt-in and share the strip with the failure count and
+        // the kernel selector, so they render as short muted labels with the
+        // full name in a tooltip rather than spelling it out inline.
+        let execution_time = settings
+            .notebook_show_execution_time
+            .then(|| format_duration(self.execution_time_total()));
+        let kernel_uptime = settings
+            .notebook_show_kernel_uptime
+            .then(|| self.kernel_uptime().map(format_duration))
+            .flatten();
+
         // No background band: the strip reads as dead space at the top of the
         // notebook with just the kernel cluster in the corner (user 2026-07-14).
         h_flex()
@@ -4490,6 +4637,32 @@ impl NotebookEditor {
             .gap_2()
             .items_center()
             .justify_end()
+            .when_some(execution_time, |el, elapsed| {
+                el.child(
+                    div()
+                        .id("notebook-execution-time")
+                        .child(
+                            Label::new(format!("Exec {elapsed}"))
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                        )
+                        .tooltip(Tooltip::text(
+                            "Time this kernel session has spent executing cells",
+                        )),
+                )
+            })
+            .when_some(kernel_uptime, |el, uptime| {
+                el.child(
+                    div()
+                        .id("notebook-kernel-uptime")
+                        .child(
+                            Label::new(format!("Up {uptime}"))
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                        )
+                        .tooltip(Tooltip::text("How long the kernel has been running")),
+                )
+            })
             .when(failed_count > 0, |el| {
                 el.child(
                     Button::new(
@@ -4645,6 +4818,8 @@ impl NotebookEditor {
 
 impl Render for NotebookEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.ensure_runtime_timer(cx);
+
         let mut key_context = KeyContext::new_with_defaults();
         key_context.add("NotebookEditor");
         key_context.set(
@@ -5824,6 +5999,11 @@ impl KernelSession for NotebookEditor {
                 }
             }
         }
+
+        // Cell statuses have just been updated from this message, so this is
+        // where a cell starts or stops running as far as the notebook is
+        // concerned — keep the execution clock in step with it.
+        self.sync_execution_clock(cx);
     }
 
     fn kernel_errored(&mut self, error_message: String, cx: &mut Context<Self>) {
@@ -5837,6 +6017,7 @@ impl KernelSession for NotebookEditor {
         self.execution_requests.clear();
         self.cancel_run_queue(cx);
         self.stop_executing_cells(cx);
+        self.freeze_kernel_uptime();
         cx.notify();
     }
 
@@ -5848,6 +6029,7 @@ impl KernelSession for NotebookEditor {
         self.execution_requests.clear();
         self.cancel_run_queue(cx);
         self.stop_executing_cells(cx);
+        self.freeze_kernel_uptime();
         cx.notify();
     }
 }
@@ -5864,6 +6046,21 @@ mod tests {
     use settings::SettingsStore;
     use util::path;
     use util::rel_path::rel_path;
+
+    #[test]
+    fn test_format_duration_tiers() {
+        assert_eq!(format_duration(Duration::from_millis(0)), "0ms");
+        assert_eq!(format_duration(Duration::from_millis(142)), "142ms");
+        assert_eq!(format_duration(Duration::from_millis(999)), "999ms");
+        assert_eq!(format_duration(Duration::from_millis(1000)), "1.0s");
+        assert_eq!(format_duration(Duration::from_millis(1830)), "1.8s");
+        assert_eq!(format_duration(Duration::from_secs(59)), "59.0s");
+        assert_eq!(format_duration(Duration::from_secs(60)), "1m 0.0s");
+        assert_eq!(format_duration(Duration::from_millis(184_200)), "3m 4.2s");
+        assert_eq!(format_duration(Duration::from_secs(3599)), "59m 59.0s");
+        assert_eq!(format_duration(Duration::from_secs(3600)), "1h 0m 0.0s");
+        assert_eq!(format_duration(Duration::from_secs(9163)), "2h 32m 43.0s");
+    }
 
     #[test]
     fn test_error_navigation_wraps_in_document_order() {

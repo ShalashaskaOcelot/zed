@@ -25,6 +25,29 @@ use crate::{
     repl_settings::ReplSettings,
 };
 
+/// Render a duration for the notebook's timers: sub-second in whole
+/// milliseconds, then seconds, minutes and hours, each keeping one decimal on
+/// the seconds. Shared by the per-cell status line and the kernel strip's
+/// runtime timers so the two can never drift apart.
+pub fn format_duration(duration: Duration) -> String {
+    const SECS_PER_MINUTE: f64 = 60.;
+    const SECS_PER_HOUR: f64 = 3600.;
+
+    let total_secs = duration.as_secs_f64();
+    if total_secs < 1. {
+        format!("{}ms", duration.as_millis())
+    } else if total_secs < SECS_PER_MINUTE {
+        format!("{:.1}s", total_secs)
+    } else if total_secs < SECS_PER_HOUR {
+        let minutes = (total_secs / SECS_PER_MINUTE) as u64;
+        format!("{}m {:.1}s", minutes, total_secs % SECS_PER_MINUTE)
+    } else {
+        let hours = (total_secs / SECS_PER_HOUR) as u64;
+        let minutes = ((total_secs % SECS_PER_HOUR) / SECS_PER_MINUTE) as u64;
+        format!("{}h {}m {:.1}s", hours, minutes, total_secs % SECS_PER_MINUTE)
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, PartialOrd)]
 pub enum CellPosition {
     First,
@@ -1354,7 +1377,7 @@ impl CodeCell {
                 // Live elapsed time, kept ticking by `_run_timer`'s notifies.
                 let running_label = match self.execution_start_time {
                     Some(start_time) => {
-                        format!("Running... {}", Self::format_duration(start_time.elapsed()))
+                        format!("Running... {}", format_duration(start_time.elapsed()))
                     }
                     None => "Running...".to_string(),
                 };
@@ -1378,7 +1401,7 @@ impl CodeCell {
                         .color(Color::Success),
                 )
                 .when_some(
-                    self.execution_duration.map(Self::format_duration),
+                    self.execution_duration.map(format_duration),
                     |this, duration_text| this.child(label(duration_text, cx)),
                 )
                 .when_some(self.last_executed_label(cx), |this, timestamp_text| {
@@ -1393,7 +1416,7 @@ impl CodeCell {
                         .color(Color::Error),
                 )
                 .when_some(
-                    self.execution_duration.map(Self::format_duration),
+                    self.execution_duration.map(format_duration),
                     |this, duration_text| this.child(label(duration_text, cx)),
                 )
                 .when_some(self.last_executed_label(cx), |this, timestamp_text| {
@@ -1426,19 +1449,6 @@ impl CodeCell {
             local.format("· %Y-%m-%d %H:%M").to_string()
         };
         Some(text)
-    }
-
-    fn format_duration(duration: Duration) -> String {
-        let total_secs = duration.as_secs_f64();
-        if total_secs < 1.0 {
-            format!("{:.0}ms", duration.as_millis())
-        } else if total_secs < 60.0 {
-            format!("{:.1}s", total_secs)
-        } else {
-            let minutes = (total_secs / 60.0).floor() as u64;
-            let secs = total_secs % 60.0;
-            format!("{}m {:.1}s", minutes, secs)
-        }
     }
 
     /// A floating toolbar of the most common cell actions, shown in the cell's

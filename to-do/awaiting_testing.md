@@ -126,3 +126,25 @@ and defects become new backlog/bug items.
       error toast (instead of failing silently). (Needs a machine/session
       where `python3`/`python` isn't on PATH.)
 
+## Phase 61 — Notebook runtime timers in the kernel strip
+
+Kind: new feature — once confirmed present and basically working, archive it;
+refinements and defects become new backlog/bug items rather than reopening it.
+Both timers are OFF by default: turn them on in Settings → REPL & Notebooks
+("Show Execution Time" / "Show Kernel Uptime") or in `settings.json` under
+`repl.notebook_show_execution_time` / `repl.notebook_show_kernel_uptime`. They
+render as `Exec 12.3s` / `Up 4m 10.0s` in the top-right strip.
+
+- [ ] With both settings off (the default) the strip is unchanged.
+- [ ] Execution time on: Run All a notebook with a few slow cells — the number
+      climbs while a cell runs, HOLDS between cells, and ends at roughly the
+      sum of the cells' own durations.
+- [ ] Run cells one at a time with pauses in between: the total accumulates
+      across the runs and doesn't jump when a previously-run cell is re-run.
+- [ ] Restarting the kernel zeroes the execution total.
+- [ ] Kernel uptime on: counts from the kernel coming up, keeps counting while
+      idle, freezes at its final value when the kernel stops, resets on
+      restart.
+- [ ] Neither timer keeps the CPU busy when the notebook sits idle (the tick
+      only runs while a timer is visible AND live).
+

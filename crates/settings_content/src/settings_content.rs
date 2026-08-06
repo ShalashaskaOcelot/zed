@@ -1338,6 +1338,19 @@ pub struct ReplSettingsContent {
     ///
     /// Default: false
     pub notebook_autostart_kernel: Option<bool>,
+    /// Whether to show a running total of the time a notebook's cells have
+    /// spent EXECUTING, next to the kernel status. The tally counts only while
+    /// a cell is running (it pauses between cells) and resets when the kernel
+    /// starts, restarts or is changed.
+    ///
+    /// Default: false
+    pub notebook_show_execution_time: Option<bool>,
+    /// Whether to show how long a notebook's kernel has been running, next to
+    /// the kernel status. Counts from kernel startup, freezes when the kernel
+    /// is stopped, and resets on restart.
+    ///
+    /// Default: false
+    pub notebook_show_kernel_uptime: Option<bool>,
 }
 
 /// Which mode a notebook lands in after running a cell.
