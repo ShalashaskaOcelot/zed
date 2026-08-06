@@ -18,7 +18,9 @@ use language::{Buffer, Language, LanguageRegistry};
 use log;
 use project::{Project, ProjectEntryId, ProjectPath};
 use settings::{NotebookRunLandingMode, SeedQuerySetting, Settings as _};
-use ui::{ScrollAxes, ScrollbarStyle, Scrollbars, Tooltip, WithScrollbar, prelude::*};
+use ui::{
+    CommonAnimationExt, ScrollAxes, ScrollbarStyle, Scrollbars, Tooltip, WithScrollbar, prelude::*,
+};
 use workspace::item::{SaveOptions, TabContentParams};
 use workspace::notifications::NotificationId;
 use workspace::searchable::{
@@ -4595,12 +4597,34 @@ impl NotebookEditor {
 
         let (status_icon, status_color) = match &kernel_status {
             KernelStatus::Idle => (IconName::Circle, Color::Success),
-            KernelStatus::Busy => (IconName::ArrowCircle, Color::Warning),
+            KernelStatus::Busy => (IconName::ArrowCircle, Color::Info),
             KernelStatus::Starting => (IconName::ArrowCircle, Color::Muted),
             KernelStatus::Error => (IconName::XCircle, Color::Error),
             KernelStatus::ShuttingDown => (IconName::ArrowCircle, Color::Muted),
             KernelStatus::Shutdown => (IconName::Circle, Color::Muted),
             KernelStatus::Restarting => (IconName::ArrowCircle, Color::Warning),
+        };
+        // "Something is happening" states spin; every settled state (including
+        // every terminal one) is static, so the animation can never outlive the
+        // work it stands for. Derived from the CURRENT status each render — no
+        // latched flag to get stuck on.
+        let kernel_working = matches!(
+            kernel_status,
+            KernelStatus::Busy
+                | KernelStatus::Starting
+                | KernelStatus::Restarting
+                | KernelStatus::ShuttingDown
+        );
+        let status_icon = Icon::new(status_icon)
+            .size(IconSize::Small)
+            .color(status_color);
+        // The strip is pinned above the cells, so this doubles as the notebook's
+        // global busy/idle indicator: a static icon alone was too easy to miss
+        // from across the screen, hence the motion and the spelled-out state.
+        let status_indicator = if kernel_working {
+            status_icon.with_rotate_animation(2).into_any_element()
+        } else {
+            status_icon.into_any_element()
         };
 
         let worktree_id = self.worktree_id;
@@ -4690,6 +4714,22 @@ impl NotebookEditor {
                 )
             })
             .child(
+                h_flex()
+                    .id("notebook-kernel-status")
+                    .gap_1()
+                    .items_center()
+                    .child(status_indicator)
+                    .child(
+                        Label::new(kernel_status.to_string())
+                            .size(LabelSize::Small)
+                            .color(status_color),
+                    )
+                    .tooltip(Tooltip::text(format!(
+                        "Kernel {kernel_name} is {}",
+                        kernel_status.to_string()
+                    ))),
+            )
+            .child(
                 KernelSelector::new(
                     Box::new(move |spec: KernelSpecification, window, cx| {
                         if let Some(view) = view.upgrade() {
@@ -4699,13 +4739,10 @@ impl NotebookEditor {
                         }
                     }),
                     worktree_id,
-                    Button::new("kernel-selector", kernel_name.clone())
-                        .label_size(LabelSize::Small)
-                        .start_icon(
-                            Icon::new(status_icon)
-                                .size(IconSize::Small)
-                                .color(status_color),
-                        ),
+                    // No status icon on the button: the animated indicator to
+                    // its left carries the status now, and two icons for one
+                    // state read as two different things.
+                    Button::new("kernel-selector", kernel_name.clone()).label_size(LabelSize::Small),
                     Tooltip::text(format!(
                         "Kernel: {} ({}). Click to change.",
                         kernel_name,

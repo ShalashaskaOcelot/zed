@@ -148,3 +148,23 @@ render as `Exec 12.3s` / `Up 4m 10.0s` in the top-right strip.
 - [ ] Neither timer keeps the CPU busy when the notebook sits idle (the tick
       only runs while a timer is visible AND live).
 
+## Phase 62 — Global kernel busy/idle indicator
+
+Kind: change to existing behaviour (the indicator existed but was easy to
+miss) — if it still reads the same as before, say so and it gets fixed in
+place rather than archived-and-refiled. The status icon now sits in its own
+cluster left of the kernel name, spins while the kernel is working, and is
+labelled with the state; the kernel-selector button no longer carries a second
+copy of the icon.
+
+- [ ] Run a long cell: the strip shows a spinning icon and "Busy", readable
+      from anywhere in the notebook, and returns to "Idle" when it finishes.
+- [ ] Scroll far down mid-run — the indicator is still visible and still
+      moving (the strip is pinned above the cells).
+- [ ] Stop/restart the kernel, and provoke a kernel error: the animation stops
+      in every settled state (no perpetual spinner), and the label matches
+      ("Restarting", "Shutdown", "Error").
+- [ ] Creating a new environment shows the animated "Starting" state.
+- [ ] At a narrow pane width the strip still fits: status icon + label +
+      failure count + kernel name, no wrap or clipping.
+

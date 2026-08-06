@@ -246,6 +246,15 @@ entry rather than archiving it.
   and the cell footers can't drift. The 100 ms tick is started from `render`
   and ends itself when no live timer is on screen. AWAITING USER TESTING.
 
+- Phase 62 — Global kernel busy/idle indicator: the pinned kernel strip's
+  status icon moved out of the kernel-selector button into its own cluster,
+  spins (`with_rotate_animation`) while the kernel is Busy/Starting/Restarting/
+  Shutting Down, and is labelled with the state so busy vs idle is readable
+  from across the screen at any scroll position. The animation is derived from
+  the current `KernelStatus` every render — no latched flag — so it always
+  stops in a settled state, including the env-creation `Starting` override.
+  AWAITING USER TESTING.
+
 ## Fixed bugs (confirmed)
 
 - #63 — Long text output showed only its LAST ~32 lines: the terminal emulator
