@@ -27,6 +27,20 @@ here, add a one-line entry to `CHANGELOG.md`, and delete the bug's `bugs.md`
 entry. If a fix failed, leave the bug open with the new finding and keep it
 listed here.
 
+- [ ] Bug #7 — Run a cell, restart the kernel, then run again: no output from
+      the pre-restart execution should land on a cell, and no stale execution
+      request should be left behind.
+- [ ] Bug #15 — Soak test: use command-mode shortcuts across focus changes
+      (click away to another pane/panel and back, close and reopen a notebook).
+      Shortcuts should never stop responding. The on_focus part was already
+      reported working 2026-07-09; this is the remaining desync watch.
+- [ ] Bug #20 — Start the app fresh and open the kernel picker as the FIRST
+      action: it should list kernels rather than come up empty.
+- [ ] Bug #63 — A cell printing far more than `max_lines` (32) lines shows the
+      FIRST ~32 with a muted "Output is truncated" notice naming the hidden
+      line count; open-in-buffer still yields the WHOLE output; short outputs
+      are unchanged with no notice; the INLINE REPL (running code in a .py)
+      still follows the tail as before. `2f2cd24`
 - [ ] Bug #34 — soak test (no direct repro known): create/save/reopen
       notebooks normally over a few sessions; the same file should never
       end up open in two tabs again. (Cause found by inspection: stale
@@ -113,3 +127,38 @@ and defects become new backlog/bug items.
 - [ ] No Python on PATH: clicking "Create Python Environment" shows a clear
       error toast (instead of failing silently). (Needs a machine/session
       where `python3`/`python` isn't on PATH.)
+
+## Phase 59 — Truncate long cell output from the TOP, VS Code style
+
+Kind: change to existing behaviour — if the new behaviour didn't take effect,
+say so and it gets fixed in place (not archived-and-refiled). Implementation
+`2f2cd24`. The behaviour itself is bug #63, listed above; this section covers
+the phase's own acceptance test.
+
+- [ ] A cell printing far more than 32 lines shows the FIRST ~32 with a
+      truncation notice; open-in-buffer still yields the whole output; short
+      outputs are unchanged with no notice; the inline REPL still follows the
+      tail.
+- [ ] Check it composes with phase 60: jumping to an error whose traceback is
+      longer than 32 lines shows the truncated HEAD plus the notice, not a
+      blank or mis-scrolled output.
+
+## Phase 60 — Cell error detection and "go to error" navigation
+
+Kind: new feature — once confirmed present and basically working, archive it;
+refinements and defects become new backlog/bug items rather than reopening it.
+Implementation `5e4ca4b`.
+
+- [ ] Run All a notebook whose MIDDLE cell raises: the top kernel strip shows a
+      red "1 cell failed" button, and clicking it jumps to that cell with the
+      traceback in view rather than the cell's first line.
+- [ ] `f8` / `shift-f8` (command mode) cycle failed cells in document order and
+      wrap at the ends. With several individually-run failures, both directions
+      reach every one of them.
+- [ ] With nothing failed, no indicator shows and the actions do nothing (no
+      error, no jump).
+- [ ] A cell SHORTER than the viewport still reveals normally — the
+      bottom-alignment must not shove a small cell around unnecessarily.
+- [ ] Not a failure: a cell whose code CATCHES its exception and prints the
+      traceback keeps its green tick and is correctly NOT counted or navigated
+      to (this is by design — confirmed 2026-07-31).

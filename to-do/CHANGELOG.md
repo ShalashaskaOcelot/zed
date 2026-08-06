@@ -210,6 +210,25 @@ entry rather than archiving it.
   and activating one selects + reveals the owning cell. `2915bbd` (+ `45cb601`
   fixing an invalidation loop). Confirmed working 2026-07-30.
 
+- Phase 59 — Truncate long cell output from the TOP (VS Code style): an opt-in
+  pin-to-top mode on `TerminalOutput` keeps the viewport at the START of the
+  content instead of following the tail, so a long output shows its head plus a
+  muted notice naming the hidden line count. The terminal is still fed
+  everything, so scrollback — and hence `full_text` / open-in-buffer — stays
+  complete; only the viewport changes. The pin is re-applied after each append
+  and after the canvas resize (a scroll is a queued event, and a resize reflows
+  the grid and drops the display offset). Off by default, so the inline REPL
+  keeps the console behaviour. Fixes bug #63. `2f2cd24`. AWAITING USER TESTING.
+- Phase 60 — Cell error detection and "go to error" navigation: `GoToError`
+  plus `NextError`/`PreviousError` (`f8`/`shift-f8`) over failed cells in
+  document order with wrapping, and a clickable failure count in the pinned
+  kernel strip. The reveal lands on the ERROR, not the cell top — new gpui
+  `ListState::scroll_to_item_bottom_aligned` puts the item's bottom at the
+  viewport bottom so a tall cell shows its traceback, degrading to the plain
+  reveal when the cell already fits. Detection itself already existed
+  (`CellExecutionStatus::Failed`); this phase is navigation and affordance
+  only. `5e4ca4b`. AWAITING USER TESTING.
+
 ## Fixed bugs (confirmed)
 
 - #53 — Notebook text output wrapped at a fixed 128 columns, well short of the
@@ -223,7 +242,7 @@ entry rather than archiving it.
   ("The directory name is invalid", os error 267). The kernel's cwd came from
   the notebook's worktree, and a single-file worktree's `abs_path()` is the FILE
   — so a file was passed as a directory. Uses the file's parent directory now.
-  `c199273`. Confirmed 2026-07-31. (The related limitation — workspace venvs not
+  `c199237`. Confirmed 2026-07-31. (The related limitation — workspace venvs not
   offered to such notebooks — remains open as bug #55.)
 - #61 — A cell's stream output was split into one block per flush, each with its
   own copy button and selection boundary, so a print loop produced dozens of

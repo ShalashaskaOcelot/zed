@@ -400,45 +400,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 - **Fix attempted:** none
 - **Tested:** n/a
 
-## 47. Notebook tab title stays "Untitled" after saving it outside the workspace
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-21) Save a notebook (untitled or otherwise) to a
-  path OUTSIDE the current workspace (e.g. the Desktop). The tab keeps showing
-  "Untitled" even though the file is saved and named (Ctrl-S shows no dialog and
-  there's no dirty dot — the path IS attached; only the title is wrong). Saving
-  INSIDE the workspace shows the correct name. Reproduces without any restart,
-  so unrelated to session restore (phase 52).
-- **Analysis (workflow investigation, high confidence):** saving to a path in no
-  existing worktree makes the shared save flow
-  `project.find_or_create_worktree(new_path, /*visible=*/true)` create a NEW
-  single-file worktree rooted AT the file; its worktree-relative path is
-  `RelPath::empty_arc()` (`worktree_store.rs:436`). `tab_content_text`
-  (`notebook_ui.rs:4856`) derived the label from `project_path.path.file_name()`,
-  which is `None` on the empty relative path → "Untitled". (The plain text
-  editor is unaffected: it titles from the buffer's file, which falls back to
-  the worktree root name.)
-- **Fix attempted (1):** derive the tab label from the ABSOLUTE `path` (always
-  set on save/open) instead of the relative path (`notebook_ui.rs`
-  tab_content_text). Commit `ae75857da4`. NOT SUFFICIENT — see below.
-- **Real root cause (found 2026-07-30 from the user's "no such worktree"
-  report):** the title fix could never take effect because the SAVE ITSELF was
-  failing partway. Phase 53 changed out-of-project save-as to create an
-  INVISIBLE worktree, and `WorktreeStore::add` keeps an invisible worktree with
-  only a WEAK handle (`worktree_store.rs`, `push_strong_handle`). In
-  `Pane::save_item` the strong `worktree` binding lived inside the `if let`
-  block, so it was dropped BEFORE `save_task.await` — killing the just-created
-  worktree mid-save. The notebook's `save_as` writes the file first
-  (`fs.atomic_write` — which is why the file DID appear on the Desktop) and then
-  calls `project.open_buffer(path)`, which failed with "no such worktree"; the
-  `?` then skipped the block that sets `item.path` / `item.project_path`, so the
-  item stayed untitled and detached from the file it had just written.
-- **Fix attempted (2, 2026-07-30):** hold the created worktree alive across the
-  save in `Pane::save_item` (bind it outside the `if let` and drop it after
-  `save_task.await`, by which point the saved buffer's `File` holds it).
-- **Tested:** no — see `awaiting_testing.md`. This should fix the "Failed to
-  save / no such worktree" dialog AND the "Untitled" title together.
-
 ## 49. Files opened/saved outside the workspace aren't removed from the panel when deleted externally
 
 - **Status:** open (low priority — user-facing symptom resolved by phase 53;
@@ -533,30 +494,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 - **Fix attempted:** none
 - **Tested:** n/a
 
-## 54. Crash: clicking the sidebar kernel selector double-leases the notebook
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-30, full backtrace supplied) Clicking the kernel
-  selector button at the bottom of the notebook's right control sidebar aborts
-  the app: `cannot update repl::notebook::notebook_ui::NotebookEditor while it
-  is already being updated`, then `panic in a function that cannot unwind` →
-  `thread caused non-unwinding panic. aborting.`
-- **Root cause (confirmed from the trace):** the button's `cx.listener` already
-  holds a lease on `NotebookEditor`, and it called
-  `kernel_picker_handle.toggle(window, cx)` INLINE. `toggle` → `show`
-  synchronously fires the picker's `with_on_open` callback
-  (`notebook_ui.rs`, render_kernel_strip), which does `view.update(cx, ...)` on
-  the same entity → double lease → abort. PRE-EXISTING (the button dates from
-  phase 24); not introduced by the phase-57/#51 work. Identical in shape to the
-  earlier run-with-no-kernel double-lease, which was fixed with `window.defer`.
-- **Fix attempted (2026-07-30):** defer the toggle via `window.defer` so it runs
-  with no entity lease held (NOT `cx.defer_in`, which re-wraps the closure in
-  another `NotebookEditor` update and reintroduces the nesting). Applied the
-  same treatment to `launch_kernel`'s `show` — currently unreachable (that
-  branch requires no remembered kernel, which routes elsewhere) but the same
-  latent hazard.
-- **Tested:** no — see `awaiting_testing.md`.
-
 ## 55. Workspace venvs unavailable to notebooks opened from outside the workspace
 
 - **Status:** open
@@ -640,7 +577,7 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ## 63. Long text output shows only its last ~32 lines (the head is cut off)
 
-- **Status:** open — needs a decision on the wanted behaviour before fixing.
+- **Status:** fix attempted - untested
 - **Symptom:** (user 2026-07-30, screenshots) A cell whose output is a large
   text repr (a JSON-ish API response) displays only the TAIL in Zed — the user
   sees the `meta`/warnings section and the beginning (`jsonapi`, `links`,
@@ -671,5 +608,11 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   a selection, "but it doesn't work properly" — highlighting and dragging up
   selects everything and moves the view. Not addressed by phase 59; file
   separately if it still grates once truncation lands.
-- **Fix attempted:** none yet — see phase 59.
-- **Tested:** n/a
+- **Fix attempted (2026-07-31, phase 59):** an opt-in pin-to-top mode on
+  `TerminalOutput` keeps the viewport at the START of the content, so the HEAD
+  is shown; the terminal is still fed everything, so scrollback (and hence
+  `full_text` / open-in-buffer) stays complete. A truncated output renders a
+  muted notice naming the hidden line count. Off by default, so the inline REPL
+  still follows the tail. `2f2cd24`
+- **Tested:** clippy clean, `cargo test -p repl` passes (51). Runtime untested —
+  see `awaiting_testing.md`.
