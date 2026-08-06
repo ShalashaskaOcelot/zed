@@ -215,6 +215,36 @@ impl Output {
 }
 
 impl Output {
+    /// Show this output's text from its START rather than following the tail
+    /// (phase 59). Notebook cells opt in; the inline REPL keeps the console
+    /// behaviour of keeping the newest line in view. No-op for rich outputs,
+    /// which aren't rendered through a terminal and can't overflow this way.
+    pub fn pin_text_to_top(&self, cx: &mut App) {
+        match self {
+            Output::Plain { content, .. } | Output::Stream { content } => {
+                content.update(cx, |content, _| content.set_pin_to_top(true));
+            }
+            Output::ErrorOutput(error_view) => {
+                error_view
+                    .traceback
+                    .update(cx, |traceback, _| traceback.set_pin_to_top(true));
+            }
+            _ => {}
+        }
+    }
+
+    /// Lines of this output that have scrolled out of the visible viewport,
+    /// i.e. how much is hidden by the `max_lines` cap. Zero when it all fits.
+    pub fn hidden_line_count(&self, cx: &App) -> usize {
+        match self {
+            Output::Plain { content, .. } | Output::Stream { content } => {
+                content.read(cx).hidden_line_count(cx)
+            }
+            Output::ErrorOutput(error_view) => error_view.traceback.read(cx).hidden_line_count(cx),
+            _ => 0,
+        }
+    }
+
     fn render_output_controls<V: OutputContent + 'static>(
         v: Entity<V>,
         workspace: WeakEntity<Workspace>,
@@ -317,6 +347,19 @@ impl Output {
         };
         let content = self.content(window, cx);
 
+        // Output pinned to its top (notebook cells) shows only the first
+        // `max_lines`; say so, since silently dropping the rest is exactly the
+        // confusion this replaced.
+        let hidden_lines = self.hidden_line_count(cx);
+        let truncation_notice = (hidden_lines > 0).then(|| {
+            Label::new(format!(
+                "Output is truncated — {hidden_lines} more line{} not shown. Open in buffer for the full output.",
+                if hidden_lines == 1 { "" } else { "s" }
+            ))
+            .size(LabelSize::Small)
+            .color(Color::Muted)
+        });
+
         let needs_horizontal_scroll = matches!(self, Self::Table { .. });
 
         h_flex()
@@ -337,7 +380,7 @@ impl Output {
                         |el| el.flex_1().w_full().overflow_x_hidden(),
                     )
                     .when_some(max_width, |el, max_width| el.max_w(max_width))
-                    .children(content),
+                    .child(v_flex().w_full().children(content).children(truncation_notice)),
             )
             .children(match self {
                 Self::Plain { content, .. } => {

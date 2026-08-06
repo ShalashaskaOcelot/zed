@@ -54,6 +54,14 @@ pub struct TerminalOutput {
     /// Window-space bounds adopted by the terminal at the last sync, so idle
     /// outputs (no selection activity, unmoved) skip the per-frame sync.
     last_synced_bounds: Option<Bounds<Pixels>>,
+    /// Show the START of the content rather than following the tail. Opt-in
+    /// (notebook cells) because the inline REPL wants the console behaviour of
+    /// keeping the newest output in view.
+    pin_to_top: bool,
+    /// A `scroll_to_top` is queued on the terminal and needs a `sync` to be
+    /// applied. Scroll events are only drained by `Terminal::sync`, which the
+    /// canvas otherwise skips for an idle output.
+    pending_scroll_pin: bool,
 }
 
 /// Returns the default text style for the terminal output.
@@ -161,7 +169,29 @@ impl TerminalOutput {
             full_buffer: None,
             selecting: false,
             last_synced_bounds: None,
+            pin_to_top: false,
+            pending_scroll_pin: false,
         }
+    }
+
+    /// Keep the viewport at the START of the content as more is appended, so a
+    /// long output shows its beginning instead of its last `max_lines` lines.
+    /// Everything is still fed to the terminal, so the scrollback — and hence
+    /// `full_text` / "open in buffer" — remains complete.
+    pub fn set_pin_to_top(&mut self, pin_to_top: bool) {
+        self.pin_to_top = pin_to_top;
+        if pin_to_top {
+            self.pending_scroll_pin = true;
+        }
+    }
+
+    /// How many lines have scrolled out of the viewport into scrollback, i.e.
+    /// how much of this output is not currently visible.
+    pub fn hidden_line_count(&self, cx: &App) -> usize {
+        let terminal = self.terminal.read(cx);
+        terminal
+            .total_lines()
+            .saturating_sub(terminal.viewport_lines())
     }
 
     /// Creates a new `TerminalOutput` instance with initial content.
@@ -209,9 +239,19 @@ impl TerminalOutput {
     ///
     /// * `text` - A string slice containing the text to be appended.
     pub fn append_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        let pin_to_top = self.pin_to_top;
         self.terminal.update(cx, |terminal, cx| {
             terminal.write_output(text.as_bytes(), cx);
+            // Re-pin after every append: the first overflow pushes the viewport
+            // off the top, and a scroll is only a queued event, so it has to be
+            // requeued rather than set once.
+            if pin_to_top {
+                terminal.scroll_to_top();
+            }
         });
+        if pin_to_top {
+            self.pending_scroll_pin = true;
+        }
 
         // This will keep the buffer up to date, though with some terminal codes it won't be perfect
         if let Some(buffer) = self.full_buffer.as_ref() {
@@ -431,6 +471,57 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_hidden_line_count_zero_when_output_fits(cx: &mut TestAppContext) {
+        let cx = init_test(cx);
+        let hidden = cx.update(|window, cx| {
+            let output = cx.new(|cx| TerminalOutput::from("one\ntwo\nthree\n", window, cx));
+            output.read(cx).hidden_line_count(cx)
+        });
+
+        assert_eq!(hidden, 0);
+    }
+
+    #[gpui::test]
+    fn test_hidden_line_count_reports_overflow(cx: &mut TestAppContext) {
+        let cx = init_test(cx);
+        let (hidden, max_lines) = cx.update(|window, cx| {
+            let max_lines = ReplSettings::get_global(cx).max_lines;
+            let input = (0..max_lines + 10)
+                .map(|line| format!("line-{line}\n"))
+                .collect::<String>();
+            let output = cx.new(|cx| TerminalOutput::from(&input, window, cx));
+            (output.read(cx).hidden_line_count(cx), max_lines)
+        });
+
+        assert!(
+            hidden >= 10,
+            "expected at least the 10 lines past the {max_lines}-line viewport to be hidden, got {hidden}"
+        );
+    }
+
+    /// Pinning changes only the VIEWPORT — everything written must still reach
+    /// the terminal, since `full_text` (and so "open in buffer") reads it.
+    #[gpui::test]
+    fn test_pin_to_top_keeps_full_text(cx: &mut TestAppContext) {
+        let cx = init_test(cx);
+        let (text, expected) = cx.update(|window, cx| {
+            let max_lines = ReplSettings::get_global(cx).max_lines;
+            let input = (0..max_lines + 10)
+                .map(|line| format!("line-{line}\n"))
+                .collect::<String>();
+            let output = cx.new(|cx| {
+                let mut output = TerminalOutput::new(window, cx);
+                output.set_pin_to_top(true);
+                output.append_text(&input, cx);
+                output
+            });
+            (output.read(cx).full_text(cx), input)
+        });
+
+        assert_eq!(text, expected);
+    }
+
+    #[gpui::test]
     fn test_repl_history_ignores_terminal_scrollback_setting(cx: &mut TestAppContext) {
         let cx = init_test(cx);
         let (text, expected) = cx.update(|window, cx| {
@@ -510,6 +601,7 @@ impl Render for TerminalOutput {
                     // support existed.
                     let needs_sync = this.read(cx).selecting
                         || this.read(cx).last_synced_bounds != Some(bounds)
+                        || this.read(cx).pending_scroll_pin
                         || terminal.read(cx).last_content.selection.is_some();
                     if needs_sync {
                         let mut terminal_bounds = terminal_size(window, cx);
@@ -526,11 +618,21 @@ impl Render for TerminalOutput {
                         if bounds.size.width > Pixels::ZERO {
                             terminal_bounds.bounds.size.width = bounds.size.width;
                         }
+                        let pin_to_top = this.read(cx).pin_to_top;
                         terminal.update(cx, |terminal, cx| {
                             terminal.set_size(terminal_bounds);
+                            // After the resize, not before: a resize reflows the
+                            // grid and drops the display offset, so a scroll
+                            // queued earlier would be undone by it.
+                            if pin_to_top {
+                                terminal.scroll_to_top();
+                            }
                             terminal.sync(window, cx);
                         });
-                        this.update(cx, |this, _| this.last_synced_bounds = Some(bounds));
+                        this.update(cx, |this, _| {
+                            this.last_synced_bounds = Some(bounds);
+                            this.pending_scroll_pin = false;
+                        });
                     }
 
                     let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);

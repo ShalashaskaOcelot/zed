@@ -176,22 +176,26 @@ fn convert_outputs(
 ) -> Vec<Output> {
     outputs
         .iter()
-        .map(|output| match output {
-            nbformat::v4::Output::Stream { text, .. } => Output::Stream {
-                content: cx.new(|cx| TerminalOutput::from(&text.0, window, cx)),
-            },
-            nbformat::v4::Output::DisplayData(display_data) => {
-                Output::new(&display_data.data, None, window, cx)
-            }
-            nbformat::v4::Output::ExecuteResult(execute_result) => {
-                Output::new(&execute_result.data, None, window, cx)
-            }
-            nbformat::v4::Output::Error(error) => Output::ErrorOutput(ErrorView {
-                ename: error.ename.clone(),
-                evalue: error.evalue.clone(),
-                traceback: cx
-                    .new(|cx| TerminalOutput::from(&error.traceback.join("\n"), window, cx)),
-            }),
+        .map(|output| {
+            let output = match output {
+                nbformat::v4::Output::Stream { text, .. } => Output::Stream {
+                    content: cx.new(|cx| TerminalOutput::from(&text.0, window, cx)),
+                },
+                nbformat::v4::Output::DisplayData(display_data) => {
+                    Output::new(&display_data.data, None, window, cx)
+                }
+                nbformat::v4::Output::ExecuteResult(execute_result) => {
+                    Output::new(&execute_result.data, None, window, cx)
+                }
+                nbformat::v4::Output::Error(error) => Output::ErrorOutput(ErrorView {
+                    ename: error.ename.clone(),
+                    evalue: error.evalue.clone(),
+                    traceback: cx
+                        .new(|cx| TerminalOutput::from(&error.traceback.join("\n"), window, cx)),
+                }),
+            };
+            output.pin_text_to_top(cx);
+            output
         })
         .collect()
 }
@@ -1279,6 +1283,14 @@ impl CodeCell {
         self.execution_count = None;
     }
 
+    /// Adds an output to this cell. Every notebook output goes through here so
+    /// its text is pinned to the top (phase 59) — a long output shows its
+    /// beginning rather than only its last `max_lines` lines.
+    fn push_output(&mut self, output: Output, cx: &mut App) {
+        output.pin_text_to_top(cx);
+        self.outputs.push(output);
+    }
+
     /// Displays a kernel-level failure (e.g. the kernel failed to launch because
     /// Python is not installed) as an error output on this cell, so the user gets
     /// feedback instead of a spinner that never resolves.
@@ -1288,11 +1300,14 @@ impl CodeCell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.outputs.push(Output::ErrorOutput(ErrorView {
-            ename: "Kernel Error".to_string(),
-            evalue: "cell could not be executed".to_string(),
-            traceback: cx.new(|cx| TerminalOutput::from(error_message, window, cx)),
-        }));
+        self.push_output(
+            Output::ErrorOutput(ErrorView {
+                ename: "Kernel Error".to_string(),
+                evalue: "cell could not be executed".to_string(),
+                traceback: cx.new(|cx| TerminalOutput::from(error_message, window, cx)),
+            }),
+            cx,
+        );
         self.execution_start_time = None;
         self.submitted_at = None;
         // A kernel failure is an ERROR, not a user cancellation (bug #38):
@@ -1521,18 +1536,19 @@ impl CodeCell {
                         cx.notify();
                     });
                 } else {
-                    self.outputs.push(Output::Stream {
-                        content: cx.new(|cx| TerminalOutput::from(&stream.text, window, cx)),
-                    });
+                    self.push_output(
+                        Output::Stream {
+                            content: cx.new(|cx| TerminalOutput::from(&stream.text, window, cx)),
+                        },
+                        cx,
+                    );
                 }
             }
             JupyterMessageContent::DisplayData(display_data) => {
-                self.outputs
-                    .push(Output::new(&display_data.data, None, window, cx));
+                self.push_output(Output::new(&display_data.data, None, window, cx), cx);
             }
             JupyterMessageContent::ExecuteResult(execute_result) => {
-                self.outputs
-                    .push(Output::new(&execute_result.data, None, window, cx));
+                self.push_output(Output::new(&execute_result.data, None, window, cx), cx);
             }
             JupyterMessageContent::ExecuteInput(input) => {
                 // The kernel started executing THIS cell: only now does it
@@ -1579,12 +1595,15 @@ impl CodeCell {
                 if error.ename == "KeyboardInterrupt" {
                     self.cancel_execution();
                 }
-                self.outputs.push(Output::ErrorOutput(ErrorView {
-                    ename: error.ename.clone(),
-                    evalue: error.evalue.clone(),
-                    traceback: cx
-                        .new(|cx| TerminalOutput::from(&error.traceback.join("\n"), window, cx)),
-                }));
+                self.push_output(
+                    Output::ErrorOutput(ErrorView {
+                        ename: error.ename.clone(),
+                        evalue: error.evalue.clone(),
+                        traceback: cx
+                            .new(|cx| TerminalOutput::from(&error.traceback.join("\n"), window, cx)),
+                    }),
+                    cx,
+                );
             }
             _ => {}
         }

@@ -30,21 +30,21 @@ the lack of any indication that there are more.
 
 ## Tasks
 
-- [ ] Add an opt-in "pin to top" mode to `TerminalOutput` (default OFF, so the
+- [x] Add an opt-in "pin to top" mode to `TerminalOutput` (default OFF, so the
       inline REPL is untouched): after `append_text`, keep the viewport at the
       start of the content via `Terminal::scroll_to_top()`.
-- [ ] Track whether the content exceeds the viewport (a line counter in
+- [x] Track whether the content exceeds the viewport (a line counter in
       `append_text` compared against the configured `max_lines`, or the
       terminal's own total-lines vs rows) so the notebook can tell when output
       has been truncated, and by how much.
-- [ ] Notebook cell outputs opt in (`notebook/cell.rs`, where the cell's
+- [x] Notebook cell outputs opt in (`notebook/cell.rs`, where the cell's
       `Output::Stream` / plain outputs are built).
-- [ ] Render a truncation notice under a truncated output — VS Code's wording is
+- [x] Render a truncation notice under a truncated output — VS Code's wording is
       "Output is truncated. View as a scrollable element or open in a text
       editor." Ours should say the output is truncated and offer the EXISTING
       open-in-buffer action (already implemented; it yields the full text
       including scrollback). Keep it unobtrusive — one muted line.
-- [ ] `./script/clippy` clean; `cargo test -p repl` passes.
+- [x] `./script/clippy` clean; `cargo test -p repl` passes.
 - [ ] **User test:** a cell printing far more than 32 lines shows the FIRST ~32
       with a truncation notice; open-in-buffer still yields the whole output;
       short outputs are unchanged with no notice; the INLINE REPL still follows
