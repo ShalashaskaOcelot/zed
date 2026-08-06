@@ -87,23 +87,6 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
   `run_cell_batch`, which is shared with Run Above / Run Below / multi-select
   run, none of which mean "the whole notebook". See the low-priority per-cell
   item for the alternative model this competes with.
-- Save-as dialog for notebooks (user 2026-07-16): default the file-type
-  filter to something sensible (not "all files") and make sure the `.ipynb`
-  extension is applied/autofilled rather than left off.
-- Global-search result opens raw JSON, not the notebook (user 2026-07-16,
-  DEFECT): Ctrl-Shift-F does include notebook content, but clicking a notebook
-  result opens the `.ipynb` as raw JSON text instead of the `NotebookEditor`.
-  Root cause (research 2026-07-16): clicking a project-search excerpt goes
-  through `Editor::open_buffers_in_workspace` →
-  `workspace.open_project_item::<Editor>` (`crates/editor/src/editor.rs:10111`),
-  which uses the TYPE registry (hardcoded to text `Editor`) and bypasses the
-  PATH registry that maps `.ipynb` → `NotebookEditor` (used by the file tree
-  via `open_path`). Quick-win fix: when the buffer's file has a non-`Editor`
-  path opener registered, route the open through `workspace.open_path` (opens
-  the real notebook; loses the intra-file match jump — acceptable first cut).
-  Must be done generically (editor can't depend on repl). Bigger follow-ups
-  (separate items): jump to the matching cell; make search preview show cell
-  content instead of raw JSON.
 
 ## Low priority
 
