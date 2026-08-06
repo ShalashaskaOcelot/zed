@@ -206,21 +206,27 @@ high → low within each group.
   (`follow_scroll_to`, called from `advance_run_queue` in `notebook_ui.rs`),
   which means you watch the cell's SOURCE — the part you already wrote and the
   least informative part while it runs. What you actually want to watch is the
-  execution status and the output being produced. Investigate alternate follow
-  behaviours and pick a default (or offer a setting):
-  * Follow the BOTTOM of the running cell — keep its status line and output
-    region in view rather than its first line, so text appears where you are
-    looking. Needs a decision on what happens while output is still empty (a
-    cell with no output yet has nothing below its source to show).
-  * Follow the output tail — track the newest output as it streams, i.e. keep
-    the growing edge pinned, closer to how a terminal follows.
-  * Keep the top-aligned behaviour for cells that fit entirely in the viewport
-    (where the distinction is moot) and only switch strategy for cells taller
-    than the viewport.
+  execution status and the output being produced.
+  **The anchor is the STATUS LINE, not the output (user 2026-07-31, with
+  screenshots).** This is not a head-vs-tail-of-output question — the user
+  ruled that out. What the framing has to deliver is:
+  * that there IS output accumulating (the notebook is visibly working), and
+  * the cell's status/runtime footer — the `Running… 10.2s` / `✓ 51.9s` line
+    that sits between the source and the output — so you can tell a cell that
+    is still running with no output yet from one that has completed or failed.
+  The wanted framing is the bottom of the source, the status footer, and the
+  first chunk of output all on screen at once. Today's top-aligned framing
+  shows only source, giving no signal that the notebook is even still alive.
+  Implement by anchoring the reveal on the status footer rather than the cell
+  top (`follow_scroll_to`), leaving a little source above it and as much output
+  below as fits. Decide what to do when a cell is taller than the viewport —
+  the footer is the priority, source above it is the first thing to sacrifice.
   Same underlying complaint as the reveal-target note in the cell-error
-  navigation item above — whatever is chosen here should inform that, since
-  both are "scroll so the USEFUL part is on screen". Worth prototyping before
-  committing to a setting; a single better default may be enough.
+  navigation item above; whatever is chosen here should inform that, since both
+  are "scroll so the USEFUL part is on screen". The user notes the proposed
+  failure indicator in the top kernel strip would partly cover the
+  "is-it-still-running" gap, but not fully — this is still worth doing.
+  **Priority: explicitly deferred by the user (2026-07-31) — not needed now.**
 - Notebook control buttons should focus the notebook (user 2026-07-30). Bug #51
   made the sidebar buttons act on their own notebook regardless of focus, but
   focus itself stays wherever it was (e.g. the project panel), so keyboard
