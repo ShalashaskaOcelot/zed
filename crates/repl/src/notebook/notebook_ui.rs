@@ -63,12 +63,35 @@ use zed_actions::notebook::{
     AddCellAbove, AddCellBelow, AddCodeBlock, AddMarkdownBlock, ClearCellOutputs, ClearOutputs,
     ConvertToCode, ConvertToMarkdown, CopyCell, CutCell, DeleteCell, DuplicateCell,
     EnterCommandMode, EnterEditMode, ExtendSelectionDown, ExtendSelectionToEnd,
-    ExtendSelectionToStart, ExtendSelectionUp, GoToRunningCell, InterruptKernel, MoveCellDown,
-    MoveCellUp, JoinCells, NewNotebook, NotebookMoveDown, NotebookMoveUp, OpenNotebook, PasteCell,
-    PasteCellAbove, RedoCellOp, ReloadNotebook, RestartKernel, Run, RunAll, RunAndAdvance,
+    ExtendSelectionToStart, ExtendSelectionUp, GoToError, GoToRunningCell, InterruptKernel,
+    MoveCellDown,
+    MoveCellUp, JoinCells, NewNotebook, NextError, NotebookMoveDown, NotebookMoveUp, OpenNotebook,
+    PasteCell, PasteCellAbove, PreviousError, RedoCellOp, ReloadNotebook, RestartKernel, Run,
+    RunAll, RunAndAdvance,
     RunCellAndBelow, RunCellsAbove, SelectAllCells, SelectFirstCell, SelectLastCell, SplitCell,
     ToggleFollowRunningCell, UndoCellOp,
 };
+
+/// The failed-cell index to move to after `selected`, wrapping to the first
+/// once past the last. `failed` must be ascending. `None` when nothing failed.
+fn next_failed_index(failed: &[usize], selected: usize) -> Option<usize> {
+    failed
+        .iter()
+        .find(|&&index| index > selected)
+        .or_else(|| failed.first())
+        .copied()
+}
+
+/// The failed-cell index to move to before `selected`, wrapping to the last
+/// once past the first. `failed` must be ascending. `None` when nothing failed.
+fn previous_failed_index(failed: &[usize], selected: usize) -> Option<usize> {
+    failed
+        .iter()
+        .rev()
+        .find(|&&index| index < selected)
+        .or_else(|| failed.last())
+        .copied()
+}
 
 /// Probe PATH for a conda-compatible frontend, preferring the most standard.
 /// Returns the executable name to drive env creation with, or `None` when
@@ -2278,6 +2301,55 @@ impl NotebookEditor {
         }
     }
 
+    /// Indices (in `cell_order`) of every cell whose last execution failed.
+    /// No run-scoping is needed: a cell re-run this session either raised again
+    /// or is no longer `Failed`, and a cell queued behind one is `Pending`, so a
+    /// `Failed` status is always truthful about that cell's last run.
+    fn failed_cell_indices(&self, cx: &App) -> Vec<usize> {
+        self.cell_order
+            .iter()
+            .enumerate()
+            .filter_map(|(index, id)| match self.cell_map.get(id) {
+                Some(Cell::Code(cell)) if cell.read(cx).has_failed() => Some(index),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Reveal, select, and focus a failed cell, landing on its ERROR rather
+    /// than its first line — the traceback is the informative part, so the
+    /// cell's tail is what gets shown.
+    fn reveal_error_cell(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_selected_index(index, false, window, cx);
+        self.cell_list.scroll_to_item_bottom_aligned(index);
+        self.enter_command_mode(window, cx);
+        cx.notify();
+    }
+
+    /// Jump to the failed cell. Under stop-on-error a batch has exactly one, so
+    /// document order picks the cell that halted the run; `NextError` /
+    /// `PreviousError` cover the several-failures case. A no-op when nothing
+    /// has failed.
+    fn go_to_error(&mut self, _: &GoToError, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(&index) = self.failed_cell_indices(cx).first() {
+            self.reveal_error_cell(index, window, cx);
+        }
+    }
+
+    fn next_error(&mut self, _: &NextError, window: &mut Window, cx: &mut Context<Self>) {
+        let failed = self.failed_cell_indices(cx);
+        if let Some(index) = next_failed_index(&failed, self.selected_cell_index) {
+            self.reveal_error_cell(index, window, cx);
+        }
+    }
+
+    fn previous_error(&mut self, _: &PreviousError, window: &mut Window, cx: &mut Context<Self>) {
+        let failed = self.failed_cell_indices(cx);
+        if let Some(index) = previous_failed_index(&failed, self.selected_cell_index) {
+            self.reveal_error_cell(index, window, cx);
+        }
+    }
+
     fn toggle_follow_running_cell(
         &mut self,
         _: &ToggleFollowRunningCell,
@@ -4403,6 +4475,11 @@ impl NotebookEditor {
         let view_for_create = view.clone();
         let view_for_open = view.clone();
 
+        // The strip is pinned above the cells, so a failure shown here is
+        // readable at any scroll position — which is the point: after a Run All
+        // the cell that stopped it is usually off-screen.
+        let failed_count = self.failed_cell_indices(cx).len();
+
         // No background band: the strip reads as dead space at the top of the
         // notebook with just the kernel cluster in the corner (user 2026-07-14).
         h_flex()
@@ -4413,6 +4490,32 @@ impl NotebookEditor {
             .gap_2()
             .items_center()
             .justify_end()
+            .when(failed_count > 0, |el| {
+                el.child(
+                    Button::new(
+                        "go-to-error",
+                        if failed_count == 1 {
+                            "1 cell failed".to_string()
+                        } else {
+                            format!("{failed_count} cells failed")
+                        },
+                    )
+                    .start_icon(
+                        Icon::new(IconName::XCircle)
+                            .size(IconSize::Small)
+                            .color(Color::Error),
+                    )
+                    .label_size(LabelSize::Small)
+                    .style(ButtonStyle::Transparent)
+                    .tooltip(Tooltip::for_action_title(
+                        "Go to Error",
+                        &GoToError,
+                    ))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.go_to_error(&GoToError, window, cx);
+                    })),
+                )
+            })
             .child(
                 KernelSelector::new(
                     Box::new(move |spec: KernelSpecification, window, cx| {
@@ -4571,6 +4674,9 @@ impl Render for NotebookEditor {
             .on_action(cx.listener(|this, _: &RunAll, window, cx| this.run_cells(window, cx)))
             .on_action(cx.listener(Self::go_to_running_cell))
             .on_action(cx.listener(Self::toggle_follow_running_cell))
+            .on_action(cx.listener(Self::go_to_error))
+            .on_action(cx.listener(Self::next_error))
+            .on_action(cx.listener(Self::previous_error))
             .on_action(
                 cx.listener(|this, _: &MoveCellUp, window, cx| this.move_cell_up(window, cx)),
             )
@@ -5758,6 +5864,32 @@ mod tests {
     use settings::SettingsStore;
     use util::path;
     use util::rel_path::rel_path;
+
+    #[test]
+    fn test_error_navigation_wraps_in_document_order() {
+        let failed = [2usize, 5, 9];
+
+        assert_eq!(next_failed_index(&failed, 0), Some(2));
+        assert_eq!(next_failed_index(&failed, 2), Some(5));
+        assert_eq!(next_failed_index(&failed, 5), Some(9));
+        // Past the last failure, wrap to the first.
+        assert_eq!(next_failed_index(&failed, 9), Some(2));
+        assert_eq!(next_failed_index(&failed, 42), Some(2));
+
+        assert_eq!(previous_failed_index(&failed, 9), Some(5));
+        assert_eq!(previous_failed_index(&failed, 5), Some(2));
+        // Before the first failure, wrap to the last.
+        assert_eq!(previous_failed_index(&failed, 2), Some(9));
+        assert_eq!(previous_failed_index(&failed, 0), Some(9));
+
+        // A single failure is its own next and previous, so repeatedly
+        // pressing either key keeps landing on it rather than doing nothing.
+        assert_eq!(next_failed_index(&[4], 4), Some(4));
+        assert_eq!(previous_failed_index(&[4], 4), Some(4));
+
+        assert_eq!(next_failed_index(&[], 0), None);
+        assert_eq!(previous_failed_index(&[], 0), None);
+    }
 
     const NOTEBOOK_WITH_ONE_CODE_CELL: &str = r#"{
         "metadata": {

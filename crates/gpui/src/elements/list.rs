@@ -796,6 +796,54 @@ impl ListState {
         state.logical_scroll_top = Some(scroll_top);
     }
 
+    /// Scroll so the item's BOTTOM edge sits at the bottom of the viewport,
+    /// landing on the item's tail rather than its head. The notebook uses this
+    /// to jump to a cell's OUTPUT (which renders below its source) instead of
+    /// its first line.
+    ///
+    /// When the item already fits in the viewport this degrades to the plain
+    /// minimal reveal: the whole item is visible either way, so moving an
+    /// already-visible item would be gratuitous. Unmeasured items report zero
+    /// height and so take that path too.
+    pub fn scroll_to_item_bottom_aligned(&self, ix: usize) {
+        // Scope the cursor's immutable borrow so it ends before the mutable
+        // borrow taken to write the scroll position below.
+        let overflow = {
+            let state = &*self.0.borrow();
+            let viewport_height = state
+                .last_layout_bounds
+                .map_or(px(0.), |bounds| bounds.size.height);
+            let padding = state.last_padding.unwrap_or_default();
+            let available = (viewport_height - padding.top - padding.bottom).max(px(0.));
+
+            let mut cursor = state.items.cursor::<ListItemSummary>(());
+            cursor.seek(&Count(ix), Bias::Right);
+            let item_top = cursor.start().height;
+            cursor.seek(&Count(ix + 1), Bias::Right);
+            let item_height = cursor.start().height - item_top;
+
+            if available <= px(0.) || item_height <= available {
+                None
+            } else {
+                Some(item_height - available)
+            }
+        };
+
+        let Some(offset_in_item) = overflow else {
+            self.scroll_to_reveal_item(ix);
+            return;
+        };
+
+        let scroll_top = ListOffset {
+            item_ix: ix,
+            offset_in_item,
+        };
+        let state = &mut *self.0.borrow_mut();
+        state.cancel_smooth_scroll();
+        state.rebase_pending_scroll(scroll_top);
+        state.logical_scroll_top = Some(scroll_top);
+    }
+
     /// Get the bounds for the given item in window coordinates, if it's
     /// been rendered.
     pub fn bounds_for_item(&self, ix: usize) -> Option<Bounds<Pixels>> {

@@ -1264,6 +1264,13 @@ impl CodeCell {
         self.execution_status == CellExecutionStatus::Running
     }
 
+    /// This cell's last execution raised. Note that an exception the user's own
+    /// code CATCHES is not a failure — the cell completes normally and its
+    /// traceback, if printed, is ordinary stream output.
+    pub fn has_failed(&self) -> bool {
+        self.execution_status == CellExecutionStatus::Failed
+    }
+
     /// Running or queued: an execution is in flight for this cell.
     pub fn is_execution_in_flight(&self) -> bool {
         matches!(

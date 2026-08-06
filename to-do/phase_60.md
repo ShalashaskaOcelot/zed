@@ -36,29 +36,46 @@ a navigation target. This phase is navigation and affordance only.
 
 ## Tasks
 
-- [ ] Add a `GoToError` action that selects the failed cell and reveals it, plus
+- [x] Add a `GoToError` action that selects the failed cell and reveals it, plus
       `NextError` / `PreviousError` cycling `Failed` cells in document order
       (wrapping at the ends) for when cells were run individually and more than
       one failed. No-op quietly when there are no failed cells.
-- [ ] Reveal the ERROR, not the cell top. Land so the bottom of the cell's
+- [x] Reveal the ERROR, not the cell top. Land so the bottom of the cell's
       source and its status footer are visible with as much of the error output
       below as fits — the traceback is the informational part. This is the same
       requirement as the deferred follow-running-cell backlog item; if a shared
       helper falls out naturally, put it where both can use it, but do not
       implement follow mode here.
-- [ ] Make it reachable without knowing the shortcut: a failure indicator in the
+- [x] Make it reachable without knowing the shortcut: a failure indicator in the
       top kernel strip (`render_kernel_strip`) that is clickable → jumps to the
       error. The strip is pinned, so this doubles as the "did something fail?"
       signal at any scroll position.
-- [ ] Keybinding + command-palette entries, consistent with the existing cell
+- [x] Keybinding + command-palette entries, consistent with the existing cell
       navigation actions.
-- [ ] `./script/clippy` clean; `cargo test -p repl` passes. Add a test covering
+- [x] `./script/clippy` clean; `cargo test -p repl` passes. Add a test covering
       the `Failed`-cell selection order (next/previous/wrap) at the state level.
 - [ ] **User test:** Run All a notebook whose middle cell raises → the strip
       shows a failure indicator; the action (and clicking the indicator) jumps
       to that cell with the traceback in view, not the cell's first line. With
       several individually-run failures, next/previous cycles them and wraps.
       With no failures, the action does nothing and no indicator shows.
+
+## Implementation notes (2026-07-31)
+
+- `Cell::has_failed()` exposes the existing `CellExecutionStatus::Failed`.
+- The reveal uses a new `ListState::scroll_to_item_bottom_aligned` (gpui): it
+  puts the item's BOTTOM at the viewport bottom, so a cell taller than the
+  viewport lands on its output rather than its source. It degrades to the plain
+  minimal reveal when the cell already fits (or is unmeasured), since the whole
+  cell is visible either way and moving it would be gratuitous.
+- Next/previous wrap logic is factored into pure `next_failed_index` /
+  `previous_failed_index` helpers and unit-tested directly, which avoids
+  standing up a whole notebook entity to test the arithmetic.
+- Keybindings: `f8` / `shift-f8` (next/previous), mirroring the editor's
+  go-to-diagnostic pair. `GoToError` deliberately has NO keybinding —
+  `ctrl-shift-e` / `cmd-shift-e` is already project-panel focus, and shadowing
+  it inside a notebook would repeat the phase 24 `ctrl-shift-v` conflict. It is
+  reachable from the palette and the kernel-strip button.
 
 ## Explicitly NOT in this phase
 

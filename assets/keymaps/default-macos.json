@@ -1627,6 +1627,8 @@
       "cmd-shift-r": "notebook::RestartKernel",
       "ctrl-shift--": "notebook::SplitCell",
       "escape": "notebook::EnterCommandMode",
+      "f8": "notebook::NextError",
+      "shift-f8": "notebook::PreviousError",
     },
   },
   {

@@ -1000,6 +1000,12 @@ pub mod notebook {
             GoToRunningCell,
             /// Toggles auto-scrolling the viewport to the running cell as execution advances.
             ToggleFollowRunningCell,
+            /// Reveals, selects, and focuses the cell whose execution failed.
+            GoToError,
+            /// Moves to the next failed cell, wrapping at the end.
+            NextError,
+            /// Moves to the previous failed cell, wrapping at the start.
+            PreviousError,
         ]
     );
 }
