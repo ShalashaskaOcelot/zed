@@ -212,6 +212,30 @@ entry rather than archiving it.
 
 ## Fixed bugs (confirmed)
 
+- #53 — Notebook text output wrapped at a fixed 128 columns, well short of the
+  block's right edge. Phase 40 widened the output CONTAINER but the terminal
+  inside it was still sized from `max_columns`: the canvas sync took
+  `terminal_size()`'s width and adopted only the ORIGIN from the element's real
+  bounds. It now adopts the real laid-out width too; the inline REPL is
+  unaffected because its container is already capped at `max_columns`.
+  `e826b05`. Confirmed 2026-07-31.
+- #56 — A notebook opened outside the workspace couldn't start any kernel
+  ("The directory name is invalid", os error 267). The kernel's cwd came from
+  the notebook's worktree, and a single-file worktree's `abs_path()` is the FILE
+  — so a file was passed as a directory. Uses the file's parent directory now.
+  `c199273`. Confirmed 2026-07-31. (The related limitation — workspace venvs not
+  offered to such notebooks — remains open as bug #55.)
+- #61 — A cell's stream output was split into one block per flush, each with its
+  own copy button and selection boundary, so a print loop produced dozens of
+  blocks and no drag could select across them. Consecutive stream messages now
+  append to the trailing block, as Jupyter and the inline REPL already did.
+  `4deb715`. Confirmed 2026-07-31.
+- #62 — Edit-mode cursor movement across a cell boundary snapped the viewport,
+  yanking the newly-entered cell to the top even when the target line was
+  already visible. Edit-mode crossings now reveal only the destination line
+  (and only when off-screen); command-mode cell navigation still reveals the
+  whole cell top-aligned. `7f3906f`. Confirmed 2026-07-31.
+
 - #60 — The notebook viewport chased the cursor: clicking an already-visible
   line jumped it several lines, a click-drag near an edge scrolled under the
   held pointer until the whole cell was selected, and arrow keys could walk the

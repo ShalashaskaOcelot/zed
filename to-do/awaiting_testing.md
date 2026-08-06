@@ -31,27 +31,6 @@ listed here.
       notebooks normally over a few sessions; the same file should never
       end up open in two tabs again. (Cause found by inspection: stale
       entry id after save defeated the already-open dedup.)
-- [ ] Bug #56 — Open/save a notebook OUTSIDE the workspace (e.g. on the
-      Desktop) and start a kernel → it should launch instead of failing with
-      "The directory name is invalid. (os error 267)". The kernel's working
-      directory is now the file's folder. In-project notebooks unchanged.
-- [ ] Bug #62 — With three cells where the first two fit the viewport and the
-      third is partly cut off: in EDIT mode, arrow down from cell 2 into cell 3
-      → the viewport must NOT snap the new cell to the top; it should stay put
-      if the line being moved to is already visible, and otherwise shift only
-      enough to show that line. In COMMAND mode, cell navigation should still
-      reveal the whole cell top-aligned as before.
-- [ ] Bug #53 — Print a long single line (or a wide repr) in a cell → the text
-      should wrap at the output block's actual right edge, not roughly halfway
-      with a gap. Widen/narrow the window and re-run: wrapping should follow the
-      new width. The INLINE REPL (running code in a .py file) should be
-      unchanged, still capped at `max_columns`.
-- [ ] Bug #61 — Run a cell that prints repeatedly inside a loop (with a little
-      work between prints, e.g. a sleep) → all the printed lines should appear
-      in ONE output block with a single copy button, and a click-drag should
-      select across all of them. Separate outputs of DIFFERENT kinds (e.g. a
-      print followed by a DataFrame followed by another print) should still be
-      separate blocks.
 - [ ] Bug #50 — Open a workspace folder, then (a) also have another root that
       you delete, or (b) create an UNSAVED notebook/buffer and then delete the
       whole workspace folder. Quit and relaunch → the session should restore:

@@ -533,33 +533,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 - **Fix attempted:** none
 - **Tested:** n/a
 
-## 53. Notebook text output is narrower than the available width (wraps early)
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-30) Stream/text output wraps well before the edge
-  of the available space — a single line that would nearly fit on one row wraps
-  roughly halfway across, leaving an obvious empty gap on the right. Selecting
-  the output makes it plain: the highlight stops at a consistent column, well
-  short of the block's right edge.
-- **Root cause (CONFIRMED):** phase 40 widened the output CONTAINER for
-  notebooks (`outputs.rs`: `max_columns` now only caps the inline REPL) but the
-  TERMINAL INSIDE it was still sized to `max_columns`. In the canvas sync
-  (`outputs/plain.rs`) the code took `terminal_size(window, cx)` — whose width
-  is `max_columns * cell_width`, i.e. 128 columns — and then adopted only the
-  ORIGIN from the element's real bounds, never the width. So the emulator kept
-  wrapping at 128 columns however wide the block was laid out. Phase 40 fixed
-  half the problem.
-- **Fix attempted (2026-07-30):** adopt the element's real laid-out WIDTH as
-  well as its origin when syncing the terminal's bounds. No flag is needed to
-  keep the inline REPL correct: its container is already capped to
-  `max_columns` wide, so the laid-out width it reports is that same cap, while
-  a notebook output reports its cell's full width. Height is untouched (that is
-  the `max_lines` viewport — see phase 59).
-- **Tested:** clippy clean; `cargo test -p repl --lib outputs` passes (36),
-  including `test_initial_text_uses_repl_terminal_size` (unaffected — it covers
-  the CONSTRUCTION size, before any paint). Runtime untested — see
-  `awaiting_testing.md`.
-
 ## 54. Crash: clicking the sidebar kernel selector double-leases the notebook
 
 - **Status:** fix attempted - untested
@@ -602,27 +575,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   consider ALL visible project worktrees rather than just the notebook's.
 - **Fix attempted:** none
 - **Tested:** n/a
-
-## 56. Kernel fails to start for a notebook opened outside the workspace
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-30, still failing on `a2009b4`) A notebook opened
-  or saved outside the workspace cannot start ANY kernel — red error indicator.
-  Reproduced with several interpreters, e.g.
-  `Kernel failed to start: failed to spawn command
-  "...\cpython-3.11.15-...\python.exe" "-m" "ipykernel_launcher" ...
-  Caused by: The directory name is invalid. (os error 267)`
-- **Root cause (CONFIRMED in code):** `launch_kernel_with_spec`
-  (`notebook_ui.rs`) derived the kernel's working directory from the notebook's
-  worktree: `worktree_for_id(...).abs_path()`. A notebook outside the project
-  lives in a SINGLE-FILE worktree whose `abs_path()` is the FILE ITSELF, not a
-  directory — so the kernel was spawned with a *file* as its cwd. Windows
-  rejects that with ERROR_DIRECTORY (os error 267). Nothing to do with the
-  interpreter path (which is why every interpreter failed identically).
-- **Fix attempted (2026-07-30):** when the worktree `is_single_file()`, use the
-  file's PARENT directory as the kernel working directory (falling back to the
-  root if it somehow has no parent). Directory worktrees are unchanged.
-- **Tested:** no — see `awaiting_testing.md`.
 
 ## 59. External notebooks are not restored on restart (reopen as empty "Untitled")
 
@@ -685,66 +637,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   notebook itself).
 - **Fix attempted:** none
 - **Tested:** n/a
-
-## 61. A cell's stream output is split into many separate output blocks
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-30, screenshots) One cell's printed output appears
-  as SEVERAL separate output blocks — the screenshot shows 6 copy/open-in-buffer
-  button pairs for a single cell's 7 printed lines. Because each block is its
-  own selection region, a click-drag cannot select across them: the user could
-  select the first two lines together (they happened to share a block) but the
-  remaining five only one line at a time. Observed in cells whose prints happen
-  inside a `for` loop.
-- **Root cause (CONFIRMED):** `CodeCell::handle_message` (`notebook/cell.rs`)
-  pushed a NEW `Output::Stream` for every `StreamContent` message. ipykernel
-  flushes stdout periodically, so a loop that prints with work in between sends
-  one stream message per flush — hence one block per iteration, and hence why
-  two quick prints landing in the same flush shared a block. Jupyter's nbformat
-  merges CONSECUTIVE stream output instead of accumulating separate outputs.
-  The inline REPL already did the right thing (`ExecutionView::apply_terminal_text`,
-  `outputs.rs`: "Previous stream data will combine together") — only the
-  notebook path missed it.
-- **Fix attempted (2026-07-30):** when the cell's last output is already a
-  stream block, append the new text to it (`TerminalOutput::append_text`)
-  instead of pushing another block; otherwise create one as before. Mirrors the
-  inline REPL exactly.
-- **Nuance (matches the inline REPL, noted deliberately):** consecutive stream
-  output is merged without distinguishing stdout from stderr, because the
-  notebook renders both as `Output::Stream` today and the terminal renderer
-  interleaves them the way a console would. If stdout/stderr ever need separate
-  blocks (see the backlog item about evcxr writing build logs to stderr),
-  `Output::Stream` will need to carry the stream name and the merge gated on it.
-- **Tested:** no — see `awaiting_testing.md`.
-
-## 62. Edit-mode cursor movement across a cell boundary snaps the viewport
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-30, screenshots 3-5) Three cells, the first two
-  fully visible and the third partly cut off. Pressing DOWN in EDIT mode to move
-  the cursor from cell 2 into cell 3 snaps the viewport so cell 3 is top-aligned
-  — even though the line being moved to was already visible and needed no
-  scrolling at all. Expected: the viewport holds still, exactly as it does when
-  moving between lines WITHIN a cell.
-- **Wanted behaviour (user's distinction):** COMMAND-mode cell navigation should
-  keep revealing the whole cell top-aligned — you are choosing a cell, so seeing
-  as much of it as possible is right. EDIT-mode movement is following a LINE, so
-  it should shift the viewport as little as possible: only when the target line
-  is out of view, and only far enough to bring it in.
-- **Analysis:** `select_next`/`select_previous` always passed
-  `jump_to_index = true` to `set_selected_index`, which calls `jump_to_cell` →
-  `scroll_to_reveal_item_top_aligned`. Both callers hit it, but they are already
-  distinguishable: command-mode navigation passes `SelectionMode::SelectOnly`
-  and edit-mode boundary crossing passes `SelectAndMove`.
-- **Fix attempted (2026-07-30):** reveal the whole cell only for `SelectOnly`.
-  For `SelectAndMove` the reveal is skipped; the cursor move that follows emits
-  `SelectionsChanged`, which runs the ordinary minimal follow (bug #60) and so
-  scrolls only if the target line is genuinely out of view.
-- **Known gap:** if the target cell is entirely outside the laid-out range,
-  `bounds_for_item` returns `None` and the follow still falls back to the
-  top-aligned reveal. With the list's overdraw an adjacent cell is normally laid
-  out, so this should be rare; revisit if a big jump feels wrong.
-- **Tested:** no — see `awaiting_testing.md`.
 
 ## 63. Long text output shows only its last ~32 lines (the head is cut off)
 

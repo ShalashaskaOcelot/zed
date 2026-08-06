@@ -27,49 +27,6 @@ high → low within each group.
   and/or a kernel-language-aware filter for known-benign evcxr stderr
   patterns, may be enough. Confirm evcxr's actual message shapes first.
 
-- Cell error detection + "go to error" navigation (user 2026-07-31), VS Code
-  style: when a cell errors and stops execution, let the user jump straight to
-  it instead of hunting by scrolling. Especially valuable after a Run All on a
-  long notebook, where the failing cell can be far off-screen.
-  **What already exists (do NOT re-implement):** the detection half is done.
-  `CellExecutionStatus::Failed` is set on a raised cell and drawn as a red ✕
-  (`notebook/cell.rs`), errors are a distinct `Output::ErrorOutput(ErrorView)`
-  (`outputs.rs`), and stop-on-error already halts a batch — the
-  `ReplyStatus::Error | Aborted` arm in `notebook_ui.rs` cancels the rest of
-  `run_queue`. So the notebook ALREADY knows exactly which cell failed; nothing
-  surfaces it as a navigation target.
-  **What to add:**
-  * An action to jump to the failing cell, with a keybinding.
-  * Next/previous-error navigation when a run produced more than one failure
-    (possible when cells are run individually): cycle through cells at
-    `Failed`, wrapping at the ends.
-  * A way to reach it without knowing the shortcut — the natural hook is the
-    top kernel strip (a failure indicator that is clickable → jumps to the
-    error), since it is pinned and visible at any scroll position. Pairs well
-    with the "global kernel busy/idle indicator" item below.
-  **Reveal target — the ERROR, not the cell top (user 2026-07-31):** the
-  informational part is the traceback, so do NOT reuse the top-aligned cell
-  reveal. Land so the BOTTOM of the cell's source is visible (enough to see
-  which code raised) with as much of the error output as will fit below it.
-  Same underlying complaint as the "follow running cell" item below — landing
-  at a cell's top shows you the least useful part.
-  **Two questions settled up front (user 2026-07-31), do not re-litigate:**
-  * *Most-recent vs first-in-document-order is a non-question.* Stop-on-error
-    means nothing after the failure runs, so an unhandled error is ALWAYS the
-    most recent. Handled errors never reach `Failed` at all unless the handler
-    re-raises.
-  * *No run-scoping is needed — `Failed` is accurate by construction.* Walking
-    the cases: a cell re-run this session either raised again (a NEW error, not
-    a stale one) or succeeded (status is no longer `Failed`); a cell queued but
-    not yet reached is `Pending`, not `Failed`, even though it may still be
-    displaying last run's output. The only cell retaining a `Failed` status
-    from a previous run is one neither re-run nor queued — and that status is
-    still truthful. So just navigate `Failed` cells; no session accumulator.
-  **Out of scope (worth stating so it isn't mistaken for a bug):** an exception
-  CAUGHT by the user's code and printed with `traceback.print_exc()` is stderr
-  stream output, and the cell legitimately succeeds (green tick). Go-to-error
-  keys on execution status, so it will not — and should not — find those.
-
 ## Medium priority (cont.)
 
 - Global-search result opens raw JSON, not the notebook (user 2026-07-16,
