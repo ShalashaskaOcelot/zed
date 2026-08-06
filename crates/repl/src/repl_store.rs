@@ -41,6 +41,10 @@ pub struct ReplStore {
     active_python_toolchain_for_worktree: HashMap<WorktreeId, SharedString>,
     remote_worktrees: HashSet<WorktreeId>,
     fetching_python_kernelspecs: HashSet<WorktreeId>,
+    /// A global kernelspec refresh is in flight. Discovery is asynchronous, so
+    /// an empty kernel list means "not found yet" while this is set and "none
+    /// installed" once it clears — the picker needs to tell those apart.
+    fetching_kernelspecs: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -77,6 +81,7 @@ impl ReplStore {
             active_python_toolchain_for_worktree: HashMap::default(),
             remote_worktrees: HashSet::default(),
             fetching_python_kernelspecs: HashSet::default(),
+            fetching_kernelspecs: false,
         };
         this.on_enabled_changed(cx);
         this
@@ -93,6 +98,14 @@ impl ReplStore {
     pub fn has_python_kernelspecs(&self, worktree_id: WorktreeId) -> bool {
         self.kernel_specifications_for_worktree
             .contains_key(&worktree_id)
+    }
+
+    /// Whether kernel discovery is still running for this worktree. An empty
+    /// kernel list is only meaningful once this is false: before that, nothing
+    /// has been found YET (both sources are async), which is a different thing
+    /// from having no interpreters installed.
+    pub fn is_discovering_kernels(&self, worktree_id: WorktreeId) -> bool {
+        self.fetching_kernelspecs || self.fetching_python_kernelspecs.contains(&worktree_id)
     }
 
     pub fn kernel_specifications_for_worktree(
@@ -171,6 +184,9 @@ impl ReplStore {
         if !self.fetching_python_kernelspecs.insert(worktree_id) {
             return Task::ready(Ok(()));
         }
+        // See `refresh_kernelspecs`: lets an open picker show that discovery is
+        // still running instead of an empty list.
+        cx.notify();
 
         let is_remote = project.read(cx).is_remote();
         // WSL does require access to global kernel specs, so we only exclude remote worktrees that aren't WSL.
@@ -194,8 +210,9 @@ impl ReplStore {
         cx.spawn(async move |this, cx| {
             let kernel_specifications_res = kernel_specifications_task.await;
 
-            this.update(cx, |this, _cx| {
+            this.update(cx, |this, cx| {
                 this.fetching_python_kernelspecs.remove(&worktree_id);
+                cx.notify();
             })
             .ok();
 
@@ -259,6 +276,10 @@ impl ReplStore {
     }
 
     pub fn refresh_kernelspecs(&mut self, cx: &mut Context<Self>) -> Task<Result<()>> {
+        self.fetching_kernelspecs = true;
+        // So an already-open picker can switch to its "searching" state rather
+        // than showing "no matches" while discovery is still running.
+        cx.notify();
         let local_kernel_specifications = local_kernel_specifications(self.fs.clone());
         let wsl_kernel_specifications = wsl_kernel_specifications(cx.background_executor().clone());
         let remote_kernel_specifications = self.get_remote_kernel_specifications(cx);
@@ -298,13 +319,16 @@ impl ReplStore {
         cx.spawn(async move |this, cx| {
             let all_specs = all_specs.await;
 
-            if let Ok(specs) = all_specs {
-                this.update(cx, |this, cx| {
+            this.update(cx, |this, cx| {
+                // Cleared whether or not discovery succeeded: a failed refresh
+                // must not leave the picker saying "searching" forever.
+                this.fetching_kernelspecs = false;
+                if let Ok(specs) = all_specs {
                     this.kernel_specifications = specs;
-                    cx.notify();
-                })
-                .ok();
-            }
+                }
+                cx.notify();
+            })
+            .ok();
 
             anyhow::Ok(())
         })

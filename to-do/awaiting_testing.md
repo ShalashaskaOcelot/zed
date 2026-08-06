@@ -130,4 +130,25 @@ and defects become new backlog/bug items.
       error toast (instead of failing silently). (Needs a machine/session
       where `python3`/`python` isn't on PATH.)
 
+## Phase 64 — Kernel picker and notebook control polish
 
+Kind: mixed — mostly changes to existing behaviour, so if one of these still
+behaves as before, say so and it gets fixed in place rather than refiled.
+
+- [ ] Launch the app and open the kernel picker immediately: it says
+      "Searching for kernels…" and then fills in, instead of "No matches".
+      Once discovery has settled with nothing found, it does say "No matches".
+- [ ] Registered Jupyter kernelspec entries now show the INTERPRETER they
+      launch (`argv[0]`) as their second line, so two similarly-named venv
+      kernels are distinguishable. (Falls back to the kernelspec directory when
+      argv[0] isn't an absolute path.)
+- [ ] The right sidebar no longer has a kernel selector at the bottom; the
+      top-right strip still opens the picker normally.
+- [ ] Open a notebook from the project panel WITHOUT clicking into it, press
+      Run All in the sidebar, then use a keyboard shortcut (`escape`, arrows,
+      `shift-enter`) — it now acts on the notebook, because the button moved
+      focus there. Clicking a control WHILE editing a cell should NOT throw you
+      out of the cell.
+- [ ] Creating an env still works and the "Creating…" row looks tidier — it now
+      matches the kernel rows' layout with a spinning icon. (Its failure to
+      refresh live when the build finishes is still bug #58.)

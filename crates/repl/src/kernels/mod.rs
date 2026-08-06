@@ -397,6 +397,25 @@ impl KernelSpecification {
         })
     }
 
+    /// The environment a REGISTERED kernelspec actually runs: `argv[0]` is the
+    /// interpreter the kernel launches with, which is what identifies the venv
+    /// — `path()` only gives the directory the `kernel.json` lives in, and two
+    /// kernelspecs pointing at different venvs look identical without this.
+    /// `None` when the launch command is not an absolute path (a bare
+    /// `python`, or an argv that starts with something else), where showing it
+    /// would say nothing.
+    pub fn interpreter_path(&self) -> Option<SharedString> {
+        let argv = match self {
+            Self::Jupyter(spec) => &spec.kernelspec.argv,
+            Self::WslRemote(spec) => &spec.kernelspec.argv,
+            Self::PythonEnv(_) | Self::JupyterServer(_) | Self::SshRemote(_) => return None,
+        };
+        argv.first()
+            .map(std::path::Path::new)
+            .filter(|interpreter| interpreter.is_absolute())
+            .map(|interpreter| SharedString::from(interpreter.to_string_lossy().into_owned()))
+    }
+
     pub fn language(&self) -> SharedString {
         SharedString::from(match self {
             Self::Jupyter(spec) => spec.kernelspec.language.clone(),

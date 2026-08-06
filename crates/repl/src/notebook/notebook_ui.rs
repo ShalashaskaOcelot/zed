@@ -4289,6 +4289,7 @@ impl NotebookEditor {
                                     Tooltip::for_action("Execute all cells", &RunAll, cx)
                                 })
                                 .on_click(cx.listener(|this, _, window, cx| {
+                                    this.focus_notebook(window, cx);
                                     this.run_cells(window, cx);
                                 })),
                             )
@@ -4303,6 +4304,7 @@ impl NotebookEditor {
                                     Tooltip::for_action("Run cells above", &RunCellsAbove, cx)
                                 })
                                 .on_click(cx.listener(|this, _, window, cx| {
+                                    this.focus_notebook(window, cx);
                                     this.run_cells_above(&RunCellsAbove, window, cx);
                                 })),
                             )
@@ -4317,6 +4319,7 @@ impl NotebookEditor {
                                     Tooltip::for_action("Run cell and below", &RunCellAndBelow, cx)
                                 })
                                 .on_click(cx.listener(|this, _, window, cx| {
+                                    this.focus_notebook(window, cx);
                                     this.run_cell_and_below(&RunCellAndBelow, window, cx);
                                 })),
                             )
@@ -4332,6 +4335,7 @@ impl NotebookEditor {
                                     Tooltip::for_action("Clear all outputs", &ClearOutputs, cx)
                                 })
                                 .on_click(cx.listener(|this, _, window, cx| {
+                                    this.focus_notebook(window, cx);
                                     this.clear_outputs(window, cx);
                                 })),
                             ),
@@ -4354,6 +4358,7 @@ impl NotebookEditor {
                                     )
                                 })
                                 .on_click(cx.listener(|this, _, window, cx| {
+                                    this.focus_notebook(window, cx);
                                     this.go_to_running_cell(&GoToRunningCell, window, cx);
                                 })),
                             )
@@ -4373,6 +4378,7 @@ impl NotebookEditor {
                                     )
                                 })
                                 .on_click(cx.listener(|this, _, window, cx| {
+                                    this.focus_notebook(window, cx);
                                     this.toggle_follow_running_cell(
                                         &ToggleFollowRunningCell,
                                         window,
@@ -4394,6 +4400,7 @@ impl NotebookEditor {
                                     Tooltip::for_action("Move cell up", &MoveCellUp, cx)
                                 })
                                 .on_click(cx.listener(|this, _, window, cx| {
+                                    this.focus_notebook(window, cx);
                                     this.move_cell_up(window, cx);
                                 })),
                             )
@@ -4408,6 +4415,7 @@ impl NotebookEditor {
                                     Tooltip::for_action("Move cell down", &MoveCellDown, cx)
                                 })
                                 .on_click(cx.listener(|this, _, window, cx| {
+                                    this.focus_notebook(window, cx);
                                     this.move_cell_down(window, cx);
                                 })),
                             ),
@@ -4425,6 +4433,7 @@ impl NotebookEditor {
                                     Tooltip::for_action("Add markdown block", &AddMarkdownBlock, cx)
                                 })
                                 .on_click(cx.listener(|this, _, window, cx| {
+                                    this.focus_notebook(window, cx);
                                     this.add_markdown_block(window, cx);
                                 })),
                             )
@@ -4439,6 +4448,7 @@ impl NotebookEditor {
                                     Tooltip::for_action("Add code block", &AddCodeBlock, cx)
                                 })
                                 .on_click(cx.listener(|this, _, window, cx| {
+                                    this.focus_notebook(window, cx);
                                     this.add_code_block(window, cx);
                                 })),
                             ),
@@ -4506,6 +4516,7 @@ impl NotebookEditor {
                                     Tooltip::for_action("Restart Kernel", &RestartKernel, cx)
                                 })
                                 .on_click(cx.listener(|this, _, window, cx| {
+                                    this.focus_notebook(window, cx);
                                     this.restart_kernel(&RestartKernel, window, cx);
                                 })),
                             )
@@ -4521,51 +4532,29 @@ impl NotebookEditor {
                                     Tooltip::for_action("Interrupt Kernel", &InterruptKernel, cx)
                                 })
                                 .on_click(cx.listener(|this, _, window, cx| {
+                                    this.focus_notebook(window, cx);
                                     this.interrupt_kernel(&InterruptKernel, window, cx);
                                 })),
                             ),
-                    )
-                    .child(Self::button_group(window, cx).child({
-                        let kernel_status = self.kernel.status();
-                        let (icon, icon_color) = match &kernel_status {
-                            KernelStatus::Idle => (IconName::ReplNeutral, Color::Success),
-                            KernelStatus::Busy => (IconName::ReplNeutral, Color::Warning),
-                            KernelStatus::Starting => (IconName::ReplNeutral, Color::Muted),
-                            KernelStatus::Error => (IconName::ReplNeutral, Color::Error),
-                            KernelStatus::ShuttingDown => (IconName::ReplNeutral, Color::Muted),
-                            KernelStatus::Shutdown => (IconName::ReplNeutral, Color::Disabled),
-                            KernelStatus::Restarting => (IconName::ReplNeutral, Color::Warning),
-                        };
-                        let kernel_name = self
-                            .kernel_specification
-                            .as_ref()
-                            .map(|spec| spec.name().to_string())
-                            .unwrap_or_else(|| "Select Kernel".to_string());
-                        IconButton::new("repl", icon)
-                            .icon_color(icon_color)
-                            .tooltip(move |window, cx| {
-                                Tooltip::text(format!(
-                                    "{} ({}). Click to change kernel.",
-                                    kernel_name,
-                                    kernel_status.to_string()
-                                ))(window, cx)
-                            })
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                // Deferred: `toggle` synchronously fires the
-                                // picker's `on_open`, which updates this
-                                // notebook — re-entering the update this
-                                // listener already holds and aborting with a
-                                // double-lease panic. `window.defer` (NOT
-                                // `cx.defer_in`, which re-wraps in another
-                                // NotebookEditor update) runs it with no lease
-                                // held. Same fix as the run-with-no-kernel path.
-                                let kernel_picker_handle = this.kernel_picker_handle.clone();
-                                window.defer(cx, move |window, cx| {
-                                    kernel_picker_handle.toggle(window, cx);
-                                });
-                            }))
-                    })),
+                    ), // The sidebar's own kernel-picker trigger used to sit
+                       // here. It shared a single `PopoverMenuHandle` with the
+                       // top-right strip, so clicking it opened the popover
+                       // anchored at the OTHER trigger; the strip already shows
+                       // kernel name + status, so one entry point is enough.
             )
+    }
+
+    /// Sidebar controls already act on THIS notebook whatever has focus (bug
+    /// #51), but they must also MOVE focus here — otherwise the keyboard keeps
+    /// talking to whatever was focused before (typically the project panel the
+    /// notebook was opened from), so shortcuts silently do nothing right after
+    /// you clicked a notebook button. A click from INSIDE the notebook (a cell
+    /// editor has focus) is left alone, so pressing a control mid-edit doesn't
+    /// throw you out of the cell.
+    fn focus_notebook(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.focus_handle.contains_focused(window, cx) {
+            self.focus_handle.focus(window, cx);
+        }
     }
 
     /// Slim strip ABOVE the cells (phase 30): the kernel cluster — status

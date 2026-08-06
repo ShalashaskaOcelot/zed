@@ -260,6 +260,19 @@ entry rather than archiving it.
   the cluster stays pinned); the `Shutdown` label was then dropped at the
   user's request — the grey dot already says "not running".
 
+- Phase 64 — Kernel picker and notebook control polish, five small items: the
+  picker says "Searching for kernels…" while discovery is in flight (new
+  `ReplStore::is_discovering_kernels`, backed by an in-flight flag on both
+  refreshes) so "No matches" only appears once it is true; registered Jupyter
+  kernelspecs show the INTERPRETER they launch (`argv[0]`, new
+  `KernelSpecification::interpreter_path`) rather than nothing, since that is
+  what identifies the venv; the "Creating…" row adopts the kernel rows' layout
+  with a spinning icon; the sidebar's redundant kernel selector is gone (it
+  shared a `PopoverMenuHandle` with the strip, so it opened the popover at the
+  OTHER trigger); and every sidebar control now moves focus to the notebook
+  unless focus is already inside it, so shortcuts work right after a click.
+  AWAITING USER TESTING.
+
 ## Fixed bugs (confirmed)
 
 - #63 — Long text output showed only its LAST ~32 lines: the terminal emulator

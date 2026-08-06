@@ -6,7 +6,10 @@ use gpui::{AnyView, DismissEvent, FontWeight, SharedString, Task};
 use picker::{Picker, PickerDelegate};
 use project::WorktreeId;
 use std::sync::Arc;
-use ui::{ListItem, ListItemSpacing, PopoverMenu, PopoverMenuHandle, PopoverTrigger, prelude::*};
+use ui::{
+    CommonAnimationExt, ListItem, ListItemSpacing, PopoverMenu, PopoverMenuHandle, PopoverTrigger,
+    prelude::*,
+};
 
 type OnSelect = Box<dyn Fn(KernelSpecification, &mut Window, &mut App)>;
 type OnDismiss = Box<dyn Fn(&mut Window, &mut App)>;
@@ -188,6 +191,9 @@ pub struct KernelPickerDelegate {
     on_select: OnSelect,
     on_dismiss: Option<OnDismiss>,
     on_create_env: Option<OnCreateEnv>,
+    /// Which worktree's python discovery this picker's entries came from —
+    /// needed to tell "still discovering" from "nothing installed".
+    worktree_id: WorktreeId,
 }
 
 impl<T, TT> KernelSelector<T, TT>
@@ -331,6 +337,22 @@ impl PickerDelegate for KernelPickerDelegate {
         "Select a kernel...".into()
     }
 
+    /// Kernel discovery is asynchronous, so a picker opened right after launch
+    /// is legitimately empty for a moment. Saying "No matches" then reads as
+    /// "you have no interpreters"; say what is actually happening instead, and
+    /// keep "No matches" for when discovery has finished and really found
+    /// nothing (bug #20's remaining gap).
+    fn no_matches_text(&self, _window: &mut Window, cx: &mut App) -> Option<SharedString> {
+        if ReplStore::global(cx)
+            .read(cx)
+            .is_discovering_kernels(self.worktree_id)
+        {
+            Some("Searching for kernels…".into())
+        } else {
+            Some("No matches".into())
+        }
+    }
+
     fn update_matches(
         &mut self,
         query: String,
@@ -426,6 +448,10 @@ impl PickerDelegate for KernelPickerDelegate {
                             .color(Color::Muted),
                     ),
             ),
+            // Laid out exactly like a Kernel row — icon, then name above a
+            // muted second line — so the row it is standing in for doesn't
+            // jump when the build finishes. The spinner matches the kernel
+            // strip's "something is happening" language.
             KernelPickerEntry::Creating(name) => Some(
                 ListItem::new(ix)
                     .inset(true)
@@ -435,19 +461,27 @@ impl PickerDelegate for KernelPickerDelegate {
                         h_flex()
                             .w_full()
                             .gap_3()
-                            .opacity(0.5)
                             .child(
                                 Icon::new(IconName::ArrowCircle)
                                     .size(IconSize::Medium)
-                                    .color(Color::Muted),
+                                    .color(Color::Muted)
+                                    .with_rotate_animation(2),
                             )
                             .child(
-                                h_flex()
-                                    .gap_1()
-                                    .child(Label::new(name.clone()).weight(FontWeight::MEDIUM))
+                                v_flex()
+                                    .flex_grow_1()
+                                    .overflow_x_hidden()
+                                    .gap_0p5()
                                     .child(
-                                        Label::new("Creating…")
-                                            .size(LabelSize::XSmall)
+                                        div().overflow_x_hidden().text_ellipsis().child(
+                                            Label::new(name.clone())
+                                                .weight(FontWeight::MEDIUM)
+                                                .color(Color::Muted),
+                                        ),
+                                    )
+                                    .child(
+                                        Label::new("Creating environment…")
+                                            .size(LabelSize::Small)
                                             .color(Color::Muted),
                                     ),
                             ),
@@ -468,7 +502,16 @@ impl PickerDelegate for KernelPickerDelegate {
                 let has_ipykernel = spec.has_ipykernel();
 
                 let subtitle = match spec {
-                    KernelSpecification::Jupyter(_) => None,
+                    // A registered kernelspec is identified by the interpreter
+                    // it launches, not by where its kernel.json sits: two venv
+                    // kernels are otherwise indistinguishable in the list. Fall
+                    // back to the kernelspec directory when argv gives nothing
+                    // usable.
+                    KernelSpecification::Jupyter(_) => Some(
+                        spec.interpreter_path()
+                            .unwrap_or_else(|| spec.path())
+                            .to_string(),
+                    ),
                     KernelSpecification::WslRemote(_) => Some(spec.path().to_string()),
                     KernelSpecification::PythonEnv(_)
                     | KernelSpecification::JupyterServer(_)
@@ -635,6 +678,7 @@ where
             filtered_entries: all_entries,
             selected_kernelspec,
             selected_index,
+            worktree_id: self.worktree_id,
         };
 
         let worktree_id = self.worktree_id;
