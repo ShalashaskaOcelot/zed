@@ -244,7 +244,10 @@ entry rather than archiving it.
   kernel's uptime freezes rather than disappearing. `Cell::format_duration` was
   extracted into a shared `format_duration` (plus an hours tier) so the strip
   and the cell footers can't drift. The 100 ms tick is started from `render`
-  and ends itself when no live timer is on screen. AWAITING USER TESTING.
+  and ends itself when no live timer is on screen. Confirmed 2026-08-06:
+  restart zeroes both, Run All drives the exec total, it stops when the last
+  cell finishes while uptime keeps running, a re-run resumes it, and an
+  interrupt stops it. (Idle CPU cost not separately measured.)
 
 - Phase 62 — Global kernel busy/idle indicator: the pinned kernel strip's
   status icon moved out of the kernel-selector button into its own cluster,
@@ -253,7 +256,9 @@ entry rather than archiving it.
   from across the screen at any scroll position. The animation is derived from
   the current `KernelStatus` every render — no latched flag — so it always
   stops in a settled state, including the env-creation `Starting` override.
-  AWAITING USER TESTING.
+  Confirmed 2026-08-06 (Busy/Idle/Starting/Restarting all read correctly and
+  the cluster stays pinned); the `Shutdown` label was then dropped at the
+  user's request — the grey dot already says "not running".
 
 ## Fixed bugs (confirmed)
 

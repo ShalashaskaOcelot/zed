@@ -34,11 +34,15 @@ listed here.
       (click away to another pane/panel and back, close and reopen a notebook).
       Shortcuts should never stop responding. The on_focus part was already
       reported working 2026-07-09; this is the remaining desync watch.
-- [ ] Bug #64 — With a notebook cell FOCUSED FOR EDITING (cursor in the cell,
-      not command mode) and at least two failed cells, `f8` / `shift-f8` cycle
-      the failed cells instead of doing nothing. (With only ONE failed cell
-      already selected both keys re-reveal that same cell — by design, so it
-      will look like nothing happens; test with two or more failures.)
+- [ ] Bug #64 — `f8` / `shift-f8` cycle failed cells. To get two failures you
+      have to run cells INDIVIDUALLY: a batch stops at the first failure, but a
+      single-cell run is its own batch, so run a failing cell, then run a
+      second failing cell further down (ctrl-enter each) — both stay red and
+      the strip reads "2 cells failed". Then check `f8`/`shift-f8` move between
+      them BOTH in command mode and with the cursor inside a cell (edit mode is
+      what the fix addressed). With only ONE failure that is already selected,
+      both keys re-reveal that same cell — by design, so it looks like nothing
+      happens.
 - [ ] Bug #34 — soak test (no direct repro known): create/save/reopen
       notebooks normally over a few sessions; the same file should never
       end up open in two tabs again. (Cause found by inspection: stale
@@ -126,45 +130,4 @@ and defects become new backlog/bug items.
       error toast (instead of failing silently). (Needs a machine/session
       where `python3`/`python` isn't on PATH.)
 
-## Phase 61 — Notebook runtime timers in the kernel strip
-
-Kind: new feature — once confirmed present and basically working, archive it;
-refinements and defects become new backlog/bug items rather than reopening it.
-Both timers are OFF by default: turn them on in Settings → REPL & Notebooks
-("Show Execution Time" / "Show Kernel Uptime") or in `settings.json` under
-`repl.notebook_show_execution_time` / `repl.notebook_show_kernel_uptime`. They
-render as `Exec 12.3s` / `Up 4m 10.0s` in the top-right strip.
-
-- [ ] With both settings off (the default) the strip is unchanged.
-- [ ] Execution time on: Run All a notebook with a few slow cells — the number
-      climbs while a cell runs, HOLDS between cells, and ends at roughly the
-      sum of the cells' own durations.
-- [ ] Run cells one at a time with pauses in between: the total accumulates
-      across the runs and doesn't jump when a previously-run cell is re-run.
-- [ ] Restarting the kernel zeroes the execution total.
-- [ ] Kernel uptime on: counts from the kernel coming up, keeps counting while
-      idle, freezes at its final value when the kernel stops, resets on
-      restart.
-- [ ] Neither timer keeps the CPU busy when the notebook sits idle (the tick
-      only runs while a timer is visible AND live).
-
-## Phase 62 — Global kernel busy/idle indicator
-
-Kind: change to existing behaviour (the indicator existed but was easy to
-miss) — if it still reads the same as before, say so and it gets fixed in
-place rather than archived-and-refiled. The status icon now sits in its own
-cluster left of the kernel name, spins while the kernel is working, and is
-labelled with the state; the kernel-selector button no longer carries a second
-copy of the icon.
-
-- [ ] Run a long cell: the strip shows a spinning icon and "Busy", readable
-      from anywhere in the notebook, and returns to "Idle" when it finishes.
-- [ ] Scroll far down mid-run — the indicator is still visible and still
-      moving (the strip is pinned above the cells).
-- [ ] Stop/restart the kernel, and provoke a kernel error: the animation stops
-      in every settled state (no perpetual spinner), and the label matches
-      ("Restarting", "Shutdown", "Error").
-- [ ] Creating a new environment shows the animated "Starting" state.
-- [ ] At a narrow pane width the strip still fits: status icon + label +
-      failure count + kernel name, no wrap or clipping.
 

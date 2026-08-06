@@ -4626,6 +4626,13 @@ impl NotebookEditor {
         } else {
             status_icon.into_any_element()
         };
+        // A grey dot already reads as "not running", so spelling out "Shutdown"
+        // next to it is noise (user 2026-08-06). Every other state earns its
+        // label.
+        let status_label = match &kernel_status {
+            KernelStatus::Shutdown => None,
+            status => Some(status.to_string()),
+        };
 
         let worktree_id = self.worktree_id;
         let kernel_picker_handle = self.kernel_picker_handle.clone();
@@ -4719,11 +4726,9 @@ impl NotebookEditor {
                     .gap_1()
                     .items_center()
                     .child(status_indicator)
-                    .child(
-                        Label::new(kernel_status.to_string())
-                            .size(LabelSize::Small)
-                            .color(status_color),
-                    )
+                    .when_some(status_label, |el, label| {
+                        el.child(Label::new(label).size(LabelSize::Small).color(status_color))
+                    })
                     .tooltip(Tooltip::text(format!(
                         "Kernel {kernel_name} is {}",
                         kernel_status.to_string()
