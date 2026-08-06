@@ -77,33 +77,16 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
 
 ## Medium priority
 
-- Execution-timer scoping options (user 2026-08-06, after confirming phase 61).
-  Two ideas for what the `Exec` total should MEAN; they are alternatives more
-  than additions, so decide the model before implementing either.
-  **(a) "Run All resets the exec timer" — user says they definitely want this.**
-  A sub-option (own setting, requires the exec timer to be on): hitting Run All
-  zeroes the tally first, so the number is the wall-clock cost of that one
-  end-to-end pass regardless of what was run before. Cheap and self-contained:
-  reset `execution_time_banked`/`execution_time_started_at` in `run_cells`
-  (the RunAll action) BEFORE it calls `run_cell_batch` — not inside
+- Exec timer: "Run All resets the tally" sub-option (user 2026-08-06, after
+  confirming phase 61 — user wants this one). Its own setting, only meaningful
+  when `repl.notebook_show_execution_time` is on: hitting Run All zeroes the
+  tally first, so the number is the wall-clock cost of that ONE end-to-end pass
+  regardless of what was run before. Cheap and self-contained: reset
+  `execution_time_banked` / `execution_time_started_at` in `run_cells` (the
+  RunAll action) BEFORE it calls `run_cell_batch` — NOT inside
   `run_cell_batch`, which is shared with Run Above / Run Below / multi-select
-  run, none of which mean "the whole notebook".
-  **(b) "Re-running a cell replaces that cell's contribution".** Instead of one
-  accumulator, hold `HashMap<CellId, Duration>` of the last duration MEASURED
-  THIS SESSION per cell and display the sum (+ the live cell's elapsed). A
-  re-run overwrites that cell's entry rather than adding to it, so the total
-  stays "what it currently costs to produce this notebook". The user also
-  wanted deleted cells to stop counting — that falls out for free if the sum is
-  computed by iterating `cell_order` and looking each id up (prune-on-read), so
-  no delete/undo/cut bookkeeping is needed at all. Cheaper to build than the
-  user feared, BUT it changes what the number means: (a)/current = "time this
-  session spent computing", (b) = "cost to reproduce the notebook as it
-  stands". Note (b) makes (a) largely redundant — after a Run All the two agree
-  — so if (b) is ever built, prefer replacing the setting pair with ONE enum
-  (`session` | `notebook`) rather than stacking three booleans.
-  Recommendation: do (a) now; leave (b) until the user has lived with (a) —
-  its value is only in piecemeal-run workflows, and its cost is a permanent
-  change to a number they have just started trusting.
+  run, none of which mean "the whole notebook". See the low-priority per-cell
+  item for the alternative model this competes with.
 - Save-as dialog for notebooks (user 2026-07-16): default the file-type
   filter to something sensible (not "all files") and make sure the `.ipynb`
   extension is applied/autofilled rather than left off.
@@ -124,6 +107,23 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
 
 ## Low priority
 
+- Exec timer: per-cell accounting so a re-run REPLACES that cell's contribution
+  (user 2026-08-06). Instead of one accumulator, hold
+  `HashMap<CellId, Duration>` of the last duration MEASURED THIS SESSION per
+  cell and display the sum (+ the live cell's elapsed). Re-running a cell
+  overwrites its entry instead of adding to it, so the total stays "what it
+  currently costs to produce this notebook" after editing and re-running part
+  of it. The user also wanted deleted cells to stop counting: that falls out
+  for FREE if the sum is computed by walking `cell_order` and looking each id
+  up (prune-on-read) — no delete/undo/cut bookkeeping needed. Cheaper to build
+  than the user expected, but it redefines the number: today (and with the
+  Run-All-reset option) it means "time this session spent computing"; this
+  makes it "cost to reproduce the notebook as it stands". The two agree right
+  after a Run All, which is why this largely subsumes the Run-All-reset option
+  — if this is ever built, replace the setting pair with ONE enum
+  (`session` | `notebook`) rather than stacking a third boolean. User is
+  unsure it is worth it; parked here until the simpler option has been lived
+  with.
 - Arch Linux distribution (user 2026-07-16, explicitly deferred — "long
   finger"): proper pacman-managed install, i.e. a self-hosted pacman repo
   the user's machines can pull from, or an AUR package (paru-manageable).
