@@ -77,6 +77,33 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
 
 ## Medium priority
 
+- Line numbers per notebook cell (user 2026-08-06). Two settings, BOTH default
+  off — a global one for the whole notebook and a per-cell one — plus two
+  command-mode keybindings: `l` toggles line numbers on the FOCUSED cell,
+  `ctrl-l` toggles the notebook-wide setting.
+  **Binding check (done 2026-08-06):** `l` is free in
+  `NotebookEditor && notebook_mode == command` (the only `l` binding is
+  `menu::SelectNext` under the `Prompt` context, which can't be active there),
+  so it is safe. `ctrl-l` is NOT free in general: `editor::SelectLine` on Linux,
+  `editor::ScrollCursorCenter` on macOS (`cmd-l` is SelectLine there). Bound in
+  the command-mode context it wins, because focus is on the notebook rather
+  than a cell editor — but it must NOT be bound in the plain `NotebookEditor`
+  context, where the editor's own binding would shadow it while editing a cell
+  and it would silently do nothing (exactly the trap behind bug #64). Worth
+  considering Jupyter's own convention as an alternative that dodges the
+  conflict entirely: `L` for the cell, `shift-L` for all cells.
+  **Implementation note:** cell editors currently call
+  `editor.set_show_gutter(false, cx)` (`cell.rs:529`), so line numbers need the
+  gutter turned back ON, which also brings breakpoints / code actions /
+  runnables / git-diff markers with it — those need suppressing, or the gutter
+  needs a line-numbers-only mode. There is already a per-editor override,
+  `Editor::show_line_numbers: Option<bool>` with `line_numbers_enabled()`
+  falling back to `EditorSettings::gutter.line_numbers` (`editor/src/config.rs`),
+  which is exactly the shape needed for "cell overrides notebook overrides
+  global". Also note the notebook draws its OWN gutter to the left of each cell
+  (the accent bar + run button, `GUTTER_WIDTH`), so the layout of two adjacent
+  gutters needs a look — line numbers should not push the cell content around
+  or double the left margin.
 - Exec timer: "Run All resets the tally" sub-option (user 2026-08-06, after
   confirming phase 61 — user wants this one). Its own setting, only meaningful
   when `repl.notebook_show_execution_time` is on: hitting Run All zeroes the

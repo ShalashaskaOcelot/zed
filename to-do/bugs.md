@@ -576,3 +576,37 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   mode as well as command mode (same override pattern the existing `up`/`down`
   cross-cell bindings use there). Cause 2 is by design and left alone.
 - **Tested:** no — needs user confirmation
+
+## 65. Follow mode lands mid-cell on a very long cell
+
+- **Status:** open (not yet diagnosed — do NOT attempt a fix on a guess)
+- **Symptom:** (user 2026-08-06) With follow-running-cell on, a Run All mostly
+  follows correctly, but on one PARTICULARLY LONG cell the viewport ended up in
+  the MIDDLE of the cell — neither its top nor its bottom/status footer
+  visible. ~90% of cells were framed correctly.
+- **Note on what follow mode actually does:** it pins the running cell near the
+  TOP of the viewport (`follow_scroll_to` → `ListState::scroll_to_item_near_top`
+  with a viewport-scaled margin; phase 51 moved it there deliberately). It does
+  NOT anchor on the cell's bottom or its status footer — that idea is the
+  DEFERRED backlog item "Alternative follow running cell modes"; the
+  bottom-aligned reveal belongs to Go-to-error (phase 60). So "landed
+  mid-cell" is wrong against the top-pinning behaviour too, whichever framing
+  we eventually choose.
+- **Leading hypothesis (unverified):** the same unmeasured-height problem as
+  bug #45 and the scrollbar backlog item. `scroll_to_item_near_top` walks
+  BACKWARDS from the target while the accumulated height stays under `margin`,
+  to include a little preceding context. An unmeasured item contributes
+  `px(0.)` to the height tree, so during a Run All down a large notebook the
+  walk can pass over several zero-height neighbours and anchor much further up
+  (or, once those items are measured on the next layout, the anchor that was
+  chosen no longer means what it meant) — leaving the viewport somewhere other
+  than the running cell's top. A long cell is the most likely to expose it
+  because its own growth (streaming output) re-measures the tree mid-scroll.
+- **What would pin it down (ask the user for this before fixing):** does it
+  still happen if the notebook is scrolled top-to-bottom ONCE first (so every
+  cell is measured) and then Run All is used? If it stops reproducing, it is
+  the unmeasured-height cause; if it still happens on a fully measured
+  notebook, the anchor arithmetic itself is wrong for cells taller than the
+  viewport.
+- **Fix attempted:** none
+- **Tested:** n/a
