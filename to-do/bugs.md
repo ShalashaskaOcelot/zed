@@ -204,32 +204,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   follow-up defect noted → see bug #19 (an Overwrite save didn't dismiss the
   conflict toast). Otherwise confirmed.
 
-## 20. Kernel picker shows no kernels on a fresh app start
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-11) On a freshly-started app, the first
-  Execute-All prompts for a kernel but the picker is EMPTY ("No matches"),
-  even though two global Pythons (3.11.15, 3.11.14) and a workspace `.venv`
-  exist. Escaping and running again does NOT prompt — it just starts (a kernel
-  got resolved by then). So the kernel list simply hadn't loaded when the
-  picker first opened.
-- **Analysis:** the picker's entries are a static snapshot built at render
-  time from `ReplStore.kernel_specifications` + discovered python toolchains
-  (`build_grouped_entries` in `components/kernel_options.rs`). Both are
-  populated ASYNCHRONOUSLY (`refresh_kernelspecs` / `refresh_python_kernelspecs`
-  — pet toolchain discovery). `ensure_kernelspecs` kicks the refresh once, but
-  if the picker opens before it completes the delegate captures an empty list
-  and does NOT live-update when specs arrive (RenderOnce snapshot; the open
-  Picker entity's delegate is fixed).
-- **Fix attempted (2026-07-12):** the picker now observes `ReplStore`
-  (`cx.observe_in` wired when the picker entity is built): whenever the store
-  updates (async kernelspec/toolchain discovery completing), the delegate's
-  entries are rebuilt from `build_grouped_entries` and `picker.refresh`
-  re-applies the current query — so kernels stream into an already-open picker
-  instead of it staying empty. (User note 2026-07-12: "Sometimes kernels do
-  load in instantly" — intermittent, consistent with the async-discovery race.)
-- **Tested:** no — needs user confirmation on a fresh app start
-
 ## 27. One-off "changed on disk" toast on save (post-#21 fix)
 
 - **Status:** open (not reproduced)
@@ -575,44 +549,30 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 - **Fix attempted:** none
 - **Tested:** n/a
 
-## 63. Long text output shows only its last ~32 lines (the head is cut off)
+## 64. `f8` / `shift-f8` cell-error navigation appears to do nothing
 
 - **Status:** fix attempted - untested
-- **Symptom:** (user 2026-07-30, screenshots) A cell whose output is a large
-  text repr (a JSON-ish API response) displays only the TAIL in Zed — the user
-  sees the `meta`/warnings section and the beginning (`jsonapi`, `links`,
-  `data`) is simply absent. VS Code, opening the SAME .ipynb (so literally the
-  same saved output bytes), shows it from the start with its own "Output is
-  truncated. View as a scrollable element…" notice. Round-trips both ways, so
-  it is purely a Zed DISPLAY issue, not parsing or serialization — and the data
-  is definitely present (`hubs.get('data')` still works in Zed).
-- **Root cause (CONFIRMED):** plain/stream output is rendered by
-  `TerminalOutput`, a real terminal emulator sized to
-  `ReplSettings::max_lines` rows (`outputs/plain.rs`, `terminal_size`).
-  `max_lines` defaults to **32** (`assets/settings/default.json`, clamped
-  [4, 256]). Appending more than 32 lines scrolls the earlier ones off the
-  viewport exactly as a console would, so what remains visible is the LAST 32
-  lines. The content is not lost — the emulator keeps 10,000 lines of scrollback
-  (`DEFAULT_SCROLL_HISTORY_LINES`) and the full text is retained separately in
-  `TerminalOutput::full_buffer` for "open in buffer" — but the notebook renders
-  a fixed-height viewport with no way to scroll inside the output block.
-- **Immediate workaround for the user:** raise `"max_lines"` in settings (up to
-  256). That setting was designed for the INLINE REPL, where a short window is
-  reasonable; it is a poor default for notebook cells.
-- **Decision (user 2026-07-30):** truncate like VS Code — show the HEAD with a
-  truncation notice, keeping `max_lines` at 32 ("actually a fine default"). The
-  existing open-in-buffer covers seeing everything. A "view as a scrollable
-  element" affordance may come later, but outputs must NOT capture the
-  scrollwheel by default. Scheduled as **phase 59**.
-- **Also noted (user 2026-07-30):** outputs CAN already be scrolled by dragging
-  a selection, "but it doesn't work properly" — highlighting and dragging up
-  selects everything and moves the view. Not addressed by phase 59; file
-  separately if it still grates once truncation lands.
-- **Fix attempted (2026-07-31, phase 59):** an opt-in pin-to-top mode on
-  `TerminalOutput` keeps the viewport at the START of the content, so the HEAD
-  is shown; the terminal is still fed everything, so scrollback (and hence
-  `full_text` / open-in-buffer) stays complete. A truncated output renders a
-  muted notice naming the hidden line count. Off by default, so the inline REPL
-  still follows the tail. `2f2cd24`
-- **Tested:** clippy clean, `cargo test -p repl` passes (51). Runtime untested —
-  see `awaiting_testing.md`.
+- **Symptom:** (user 2026-08-06, testing phase 60) The failure indicator and
+  its click-to-jump work, but pressing `f8` / `shift-f8` "doesn't appear to do
+  anything". (User caveat: "I don't know that it's necessary anyway" — the
+  clickable indicator covers the common case, so this is low priority.)
+- **Analysis:** two independent causes, both plausible for what was seen.
+  1. **Edit mode shadows the binding.** Phase 60 bound `f8`/`shift-f8` in the
+     `NotebookEditor` context only
+     (`assets/keymaps/default-{linux,macos}.json`). With the cursor inside a
+     cell the focus path is `NotebookEditor > NotebookCellEditor > Editor`, and
+     the stock `Editor` bindings `editor::GoToDiagnostic` /
+     `GoToPreviousDiagnostic` match at the deeper `Editor` node, so they win —
+     the notebook actions never fire. Only command mode (focus on the notebook
+     itself) ever reached them.
+  2. **A single failure is a visual no-op.** `next_failed_index` wraps, so with
+     exactly ONE failed cell that is already selected — which is precisely the
+     state after clicking the "1 cell failed" button — both directions resolve
+     back to that same cell and re-reveal it, i.e. nothing moves. Correct, but
+     indistinguishable from "the key does nothing".
+- **Fix attempted (2026-08-06):** bound `f8`/`shift-f8` in the
+  `NotebookEditor > NotebookCellEditor > Editor` context too, so they override
+  the editor's diagnostic navigation inside notebook cells and work in edit
+  mode as well as command mode (same override pattern the existing `up`/`down`
+  cross-cell bindings use there). Cause 2 is by design and left alone.
+- **Tested:** no — needs user confirmation

@@ -218,7 +218,9 @@ entry rather than archiving it.
   complete; only the viewport changes. The pin is re-applied after each append
   and after the canvas resize (a scroll is a queued event, and a resize reflows
   the grid and drops the display offset). Off by default, so the inline REPL
-  keeps the console behaviour. Fixes bug #63. `2f2cd24`. AWAITING USER TESTING.
+  keeps the console behaviour. Fixes bug #63. `2f2cd24`. Confirmed 2026-08-06
+  (head shown, notice correct, open-in-buffer complete; also verified on a
+  truncated traceback, so it composes with phase 60).
 - Phase 60 — Cell error detection and "go to error" navigation: `GoToError`
   plus `NextError`/`PreviousError` (`f8`/`shift-f8`) over failed cells in
   document order with wrapping, and a clickable failure count in the pinned
@@ -227,10 +229,25 @@ entry rather than archiving it.
   viewport bottom so a tall cell shows its traceback, degrading to the plain
   reveal when the cell already fits. Detection itself already existed
   (`CellExecutionStatus::Failed`); this phase is navigation and affordance
-  only. `5e4ca4b`. AWAITING USER TESTING.
+  only. `5e4ca4b`. Confirmed 2026-08-06: indicator, click-to-jump, the
+  no-failures case and the caught-exception case all behave as designed. Two
+  caveats carried forward rather than reopening the phase — `f8`/`shift-f8` did
+  nothing for the user (→ bug #64), and the short-cell reveal wasn't
+  specifically exercised.
 
 ## Fixed bugs (confirmed)
 
+- #63 — Long text output showed only its LAST ~32 lines: the terminal emulator
+  behind plain output follows the tail like a console, so anything past
+  `max_lines` scrolled off the top. Fixed by phase 59's pin-to-top mode plus a
+  truncation notice. `2f2cd24`. Confirmed 2026-08-06.
+- #20 — Kernel picker came up empty on a fresh app start: kernelspec/toolchain
+  discovery is async and the picker's delegate captured a one-off snapshot, so
+  an early-opened picker stayed empty forever. The picker now observes
+  `ReplStore` and rebuilds its entries as discovery completes. Confirmed
+  2026-08-06 — the list is empty only for the moment discovery is still
+  running, then fills in. (The remaining gap, that "still searching" is
+  indistinguishable from "no matches", is backlogged as its own item.)
 - #53 — Notebook text output wrapped at a fixed 128 columns, well short of the
   block's right edge. Phase 40 widened the output CONTAINER but the terminal
   inside it was still sized from `max_columns`: the canvas sync took

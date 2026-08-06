@@ -1673,6 +1673,11 @@
       "cmd-shift-m": "notebook::AddMarkdownBlock",
       "cmd-shift-r": "notebook::RestartKernel",
       "escape": "notebook::EnterCommandMode",
+      // Without these the stock Editor bindings for `f8`/`shift-f8`
+      // (editor::GoToDiagnostic) match at the deeper Editor node and win, so
+      // cell-error navigation silently does nothing while editing a cell.
+      "f8": "notebook::NextError",
+      "shift-f8": "notebook::PreviousError",
     },
   },
   {

@@ -43,41 +43,18 @@ high → low within each group.
   Must be done generically (editor can't depend on repl). Bigger follow-ups
   (separate items): jump to the matching cell; make search preview show cell
   content instead of raw JSON.
-- Global kernel busy/idle indicator (user 2026-07-16): a single indicator,
-  visible regardless of scroll position, showing whether the kernel is idle or
-  actively working — NOT the per-cell spinner (that exists). The top kernel
-  strip already shows a status icon (`render_kernel_strip`, Idle=Circle/Success,
-  Busy=ArrowCircle/Warning, Starting=Muted) — so this is about making that
-  busy/idle state clear and prominent enough to read at a glance from anywhere
-  (e.g. an animated spinner + label while Busy), since the strip is pinned at
-  the top above the cells. Small; enhances the existing indicator.
-- Notebook runtime timer(s) in the top-right kernel strip (user 2026-07-16):
-  settings-gated timer(s) shown next to the kernel name/status in the TOP-RIGHT
-  strip (`render_kernel_strip`), NOT the right sidebar. Two options, could be
-  distinct or one dependent on the other:
-  1. **Show total execution time** — a running tally of cell runtimes: counts
-     UP only while a cell is running, PAUSED between cells (so idle time while
-     you write a new cell isn't counted). Design caveats the user flagged
-     against the naive "sum every cell's recorded duration" approach:
-     (a) on run #2 the already-completed cells still carry their previous
-     durations, so a plain sum shows a big number immediately — gating on cell
-     status (only count Running/just-finished this session) helps for Run All,
-     but running cells one-by-one still leaves earlier cells "completed" (not
-     pending), so status alone doesn't cleanly bound "this run". Likely needs a
-     session/run-scoped accumulator: reset on kernel start (or on a Run All?),
-     add each cell's measured duration as it FINISHES this session, and show
-     the live in-progress cell's elapsed added on top. Decide the reset
-     semantics at implementation. (b) user had a second downside in mind but
-     couldn't recall it — revisit.
-  2. **Show total kernel lifetime** — wall-clock since kernel startup, running
-     until the kernel is stopped/restarted. On stop, the final time stays in
-     the corner until the kernel starts again (then resets); a restart resets
-     immediately. (Use case admittedly unclear, but low-cost.)
-  Formatting (match the in-cell timer, phases 18/21): ms → seconds to 2 dp
-  (`1.83s`) → `Xm SS.ss` (minutes no decimals, seconds 2 dp) → `Xh Ym SS.ss`
-  (e.g. `2h 32m 43.36s`). Reuse/extract the cell timer's duration formatter so
-  both stay consistent. Add setting(s) under the REPL/Notebooks settings page
-  (phase 34) — one or two booleans.
+- Kernel picker can't distinguish "still discovering" from "nothing found"
+  (user 2026-08-06, out of confirming bug #20): kernelspec + python-toolchain
+  discovery is asynchronous, so a picker opened immediately after launch is
+  legitimately empty for a moment and shows the generic "No matches" — which
+  reads as "you have no Python interpreters". Show a discovery state instead
+  (e.g. a "Searching for kernels…" row / spinner) while a refresh is in
+  flight, so that once it settles "No matches" is trustworthy and actually
+  means no interpreter was found. Needs an in-flight flag on `ReplStore`'s
+  refreshes (`refresh_kernelspecs` / `refresh_python_kernelspecs`) that the
+  picker delegate can read — the picker already observes the store and rebuilds
+  its entries live (bug #20's fix), so this is only about what is displayed
+  while empty.
 
 ## Low priority
 
