@@ -6,29 +6,107 @@ implement directly from here. Completed and scheduled work is not tracked here �
 see the phase files, `CHANGELOG.md`, and git history. Roughly ordered
 high → low within each group.
 
+## PARKED — do NOT auto-promote (user 2026-08-06)
+
+Items in this section are excluded from the "keep 5 phases in rotation" rule.
+They must NOT be promoted into a phase to replenish the runway — not even if
+that leaves the count at 2. Promote one ONLY when the user asks for it by name.
+Everything here is the fork's release-engineering track, which the user has
+explicitly parked for a while.
+
+The three entries below were full phase files (45, 46, 47), all with ZERO tasks
+implemented, moved back here on 2026-08-06. The summaries keep what matters;
+the complete task-by-task detail is in the deleted files — see commit `4174e8b`
+(and the phase-43 discovery findings in commit `8f9a5d3dc5`) if one is revived.
+
+- **Fork auto-update from the Gitea releases feed** (was phase 45; change to
+  existing behaviour). Installed fork builds should update from the user's
+  Gitea — never zed.dev — or have updates cleanly disabled with an
+  explanation. Key facts: ONE choke point builds and parses the update check,
+  `AutoUpdater::get_release_asset` (`crates/auto_update/src/auto_update.rs`),
+  and remote-server downloads flow through it too; Gitea's
+  `/api/v1/repos/{owner}/{repo}/releases` is GitHub-compatible with the
+  existing `http_client::github` structs (which require `tag_name`,
+  `prerelease`, `assets`, `tarball_url`, `zipball_url` to be present); the
+  updater does no checksum/signature verification, so unsigned fork installers
+  update fine over OS-trusted TLS; on Windows the release asset must BE the
+  Inno installer (run `/verysilent /update=true`). Release scheme decided:
+  channel `stable`, tags `v<version>` with the PATCH bumped from a high offset
+  (upstream `0.196.x` → fork `0.196.100`…) because the comparator STRIPS
+  semver pre-release suffixes, so `-fork.1` cannot work. Gate the whole thing
+  on a compile-time `ZED_FORK_UPDATE_GITEA_BASE`; unset ⇒ upstream behaviour
+  untouched. Depends on an installer to update (phase 44, built) and on
+  releases actually being published (the Drone item below).
+- **Upstream-merge workflow** (was phase 46; new feature — process + docs).
+  Make merging `zed-industries/zed` into the fork routine and documented
+  (`docs/fork/upstream-merge.md` + a short checklist), merge NEVER rebase
+  (published history, and the phasing system references SHAs). Key facts:
+  `origin/main` is an upstream MIRROR kept current by GitHub's fork-sync and
+  must stay read-only; `origin/dev` is the fork mainline; upstream velocity is
+  ~150 commits/week and a 164-commit dry-run merge was CLEAN on 2026-07-16, so
+  weekly merges are cheap and the cost compounds with delay. Conflict hotspots,
+  ranked: `Cargo.lock` (churn, trivial — take upstream, `cargo check`
+  regenerates), `crates/settings_ui/src/page_data.rs`, `assets/settings/default.json`,
+  the three keymap files, `crates/settings_content/src/settings_content.rs`,
+  `crates/zed_actions/src/lib.rs`, `crates/gpui/src/elements/list.rs` (semantic
+  breakage risk even on a clean merge), `crates/util/src/process.rs`; the fork's
+  additions to those are additive blocks that get re-applied. `crates/repl/**`
+  is the tail risk: upstream has not touched it since the fork point, but a real
+  upstream notebook push would conflict massively. Working clones are SHALLOW —
+  merge-base math needs `git fetch --unshallow`. A textually-clean merge can
+  still break the notebook, so the playbook must mandate a post-merge smoke test
+  (`cargo build -p repl`, clippy, `cargo test -p repl -p gpui`, then open a
+  notebook and run cells). The playbook is only "done" once it has survived one
+  supervised real merge.
+- **Drone pipeline: tag → Windows installer → Gitea release** (was phase 47;
+  new feature). A pushed release tag should produce a Drone build on the user's
+  Windows runner that runs `script/bundle-windows.ps1` and attaches the
+  installer to that tag's Gitea release. Key facts: everything Zed's CI adds on
+  top of a local bundle is either Zed-Industries-only (signing, Sentry,
+  telemetry seeds, winget) or replaceable, and with `CI` unset the bundle script
+  skips it cleanly; `.github/workflows/*` are xtask-generated and stay
+  GitHub-only, so `.drone.yml` is a NEW fork-owned file that upstream can never
+  conflict with; the runner must be an EXEC runner on Windows (the toolchain
+  makes Windows containers impractical) with VS 2022 Build Tools (MSVC x64 +
+  Spectre + CMake), Windows 11 SDK 10.0.26100, Inno Setup 6, rustup, long paths
+  enabled, no `RUSTFLAGS`, ~100 GB disk (200+ if `target/` persists) and a
+  RAM-heavy final link. Cheapest thing to verify FIRST: whether a Gitea
+  pull-mirror sync actually fires Drone tag events on the user's versions — if
+  not, fall back to a Drone cron pipeline that polls for new `v*` tags. Token
+  scoped to the one repo; exclude `target/` from AV scanning or builds crawl.
+
 ## Medium priority
 
+- Execution-timer scoping options (user 2026-08-06, after confirming phase 61).
+  Two ideas for what the `Exec` total should MEAN; they are alternatives more
+  than additions, so decide the model before implementing either.
+  **(a) "Run All resets the exec timer" — user says they definitely want this.**
+  A sub-option (own setting, requires the exec timer to be on): hitting Run All
+  zeroes the tally first, so the number is the wall-clock cost of that one
+  end-to-end pass regardless of what was run before. Cheap and self-contained:
+  reset `execution_time_banked`/`execution_time_started_at` in `run_cells`
+  (the RunAll action) BEFORE it calls `run_cell_batch` — not inside
+  `run_cell_batch`, which is shared with Run Above / Run Below / multi-select
+  run, none of which mean "the whole notebook".
+  **(b) "Re-running a cell replaces that cell's contribution".** Instead of one
+  accumulator, hold `HashMap<CellId, Duration>` of the last duration MEASURED
+  THIS SESSION per cell and display the sum (+ the live cell's elapsed). A
+  re-run overwrites that cell's entry rather than adding to it, so the total
+  stays "what it currently costs to produce this notebook". The user also
+  wanted deleted cells to stop counting — that falls out for free if the sum is
+  computed by iterating `cell_order` and looking each id up (prune-on-read), so
+  no delete/undo/cut bookkeeping is needed at all. Cheaper to build than the
+  user feared, BUT it changes what the number means: (a)/current = "time this
+  session spent computing", (b) = "cost to reproduce the notebook as it
+  stands". Note (b) makes (a) largely redundant — after a Run All the two agree
+  — so if (b) is ever built, prefer replacing the setting pair with ONE enum
+  (`session` | `notebook`) rather than stacking three booleans.
+  Recommendation: do (a) now; leave (b) until the user has lived with (a) —
+  its value is only in piecemeal-run workflows, and its cost is a permanent
+  change to a number they have just started trusting.
 - Save-as dialog for notebooks (user 2026-07-16): default the file-type
   filter to something sensible (not "all files") and make sure the `.ipynb`
   extension is applied/autofilled rather than left off.
-- Rust kernel (evcxr_jupyter) treats all stderr as errors (user 2026-07-20):
-  evcxr writes EVERYTHING to stderr — compile progress, `Compiling {crate}`
-  lines, warnings — not just real errors, so running any Rust cell floods the
-  output with spurious `ERROR:` entries ("ERROR: compiling {crate}" etc.).
-  The convention evcxr follows is that stdout is reserved for actual program
-  output while stderr carries compilation/diagnostic logs. Goal: distinguish
-  normal Rust build/log chatter on stderr from genuine errors so the noise can
-  be filtered out of (or de-emphasised in) the error output. Investigate:
-  where the notebook maps a Jupyter `stream` message with `name: "stderr"`
-  onto an error-styled output (`crates/repl/src/outputs/`, `cell.rs` output
-  handling) — evcxr sends compile logs as `stream`/stderr, and real Rust
-  errors come through as `error`/`execute_reply` with `status: "error"`, so
-  gating the error styling on the actual message TYPE (not the stream name),
-  and/or a kernel-language-aware filter for known-benign evcxr stderr
-  patterns, may be enough. Confirm evcxr's actual message shapes first.
-
-## Medium priority (cont.)
-
 - Global-search result opens raw JSON, not the notebook (user 2026-07-16,
   DEFECT): Ctrl-Shift-F does include notebook content, but clicking a notebook
   result opens the `.ipynb` as raw JSON text instead of the `NotebookEditor`.
@@ -43,49 +121,22 @@ high → low within each group.
   Must be done generically (editor can't depend on repl). Bigger follow-ups
   (separate items): jump to the matching cell; make search preview show cell
   content instead of raw JSON.
-- Kernel picker can't distinguish "still discovering" from "nothing found"
-  (user 2026-08-06, out of confirming bug #20): kernelspec + python-toolchain
-  discovery is asynchronous, so a picker opened immediately after launch is
-  legitimately empty for a moment and shows the generic "No matches" — which
-  reads as "you have no Python interpreters". Show a discovery state instead
-  (e.g. a "Searching for kernels…" row / spinner) while a refresh is in
-  flight, so that once it settles "No matches" is trustworthy and actually
-  means no interpreter was found. Needs an in-flight flag on `ReplStore`'s
-  refreshes (`refresh_kernelspecs` / `refresh_python_kernelspecs`) that the
-  picker delegate can read — the picker already observes the store and rebuilds
-  its entries live (bug #20's fix), so this is only about what is displayed
-  while empty.
 
 ## Low priority
 
-- Kernel picker: show the env path under Jupyter-kernel entries the way
-  Python Environment entries show theirs (user 2026-07-16) — registered
-  venv kernelspecs currently give no clue which directory they point at.
-- Clicking an output body could also select its cell (user 2026-07-16) —
-  currently only the cell gutter/border selects the cell; clicking on an
-  output's content doesn't (a plain click there should select the cell, while
-  a drag still selects output text). Minor nicety; unclear it ever selected
-  from the output body, so not filed as a regression.
 - Arch Linux distribution (user 2026-07-16, explicitly deferred — "long
   finger"): proper pacman-managed install, i.e. a self-hosted pacman repo
   the user's machines can pull from, or an AUR package (paru-manageable).
   No AppImages. Needs the Linux bundle (`script/bundle-linux`) plus
   PKGBUILD/repo tooling, and updates handed to pacman (build with
   `ZED_UPDATE_EXPLANATION` so in-app auto-update stays off for the pacman
-  build). Windows (phases 44-47) comes first.
+  build). Was gated behind the Windows work, which is now PARKED — so this is
+  parked in practice too until the user revives that track.
 - Upstream the fork's two generic changes as PRs to zed-industries/zed to
   permanently shrink the merge-conflict surface (phase 43 discovery):
   gpui `scroll_to_reveal_item_top_aligned` (`crates/gpui/src/elements/list.rs`)
   and `util::process` `spawn_interruptible`/Windows interrupt plumbing
   (`crates/util/src/process.rs`).
-
-- Horizontal scrollbar for wide notebook outputs (user 2026-07-30): rich outputs
-  (e.g. pandas DataFrames) render at full width but overflow the viewport and
-  clip on the right with no way to scroll horizontally. Add a horizontal
-  scrollbar / horizontal scroll to the cell output container for wide outputs
-  (tables, wide text). Relates to bug #53 (text output too narrow) but is the
-  opposite end — this is about outputs that are TOO wide to fit. Investigate the
-  output container sizing in `crates/repl/src/outputs/` and `notebook/cell.rs`.
 
 - Notebook-aware copy/paste with a separate notebook clipboard (user 2026-07-30):
   copying cells should paste as FULL CELLS (structure, types, outputs) into
@@ -161,17 +212,6 @@ high → low within each group.
   failure indicator in the top kernel strip would partly cover the
   "is-it-still-running" gap, but not fully — this is still worth doing.
   **Priority: explicitly deferred by the user (2026-07-31) — not needed now.**
-- Notebook control buttons should focus the notebook (user 2026-07-30). Bug #51
-  made the sidebar buttons act on their own notebook regardless of focus, but
-  focus itself stays wherever it was (e.g. the project panel), so keyboard
-  shortcuts still don't go to the notebook afterwards. Clicking Run All /
-  Restart / Stop / etc. should ALSO move focus to that notebook, exactly as
-  clicking a cell or a per-cell run button does. Small: focus the notebook's
-  focus handle in the control-button listeners (`render_notebook_controls`).
-- Kernel picker "Creating <name>…" row polish (user 2026-07-30): the row works
-  but "could look a little better" visually. (The separate defect — it not
-  refreshing live when the build completes — is bug #58.)
-
 - Add `smooth_scrolling` to the GUI settings UI (user 2026-07-30). Phase 54
   added the setting to `default.json`, the schema and the docs, but NOT to the
   settings UI — so it's JSON-only today. It belongs in the existing **Editor →
@@ -185,12 +225,3 @@ high → low within each group.
   `mouse_wheel_zoom` boolean exactly. NOTE: `page_data.rs` is a known
   upstream-merge hotspot (phase 46) — keep the addition minimal and adjacent to
   the related entries.
-
-- Remove the redundant kernel selector from the notebook's right sidebar (user
-  2026-07-30). There are two kernel-picker triggers: the top-right kernel strip
-  and one at the bottom of the right control sidebar. They share a single
-  `PopoverMenuHandle`, so clicking the SIDEBAR one opens the popover anchored at
-  the TOP-RIGHT trigger — visibly odd, and confirming the redundancy. Simplest
-  fix is to drop the sidebar trigger and keep the top-right strip (which already
-  shows kernel name + status). This is a subset of the larger "top control bar
-  vs right sidebar" item above, but is worth doing on its own regardless of that.

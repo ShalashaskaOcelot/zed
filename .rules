@@ -176,6 +176,12 @@ root. This system must be adhered to religiously.
    - **"At least" 5:** if the user explicitly asks for a new phase with specific
      tasks (rather than adding items to the backlog), add it as a 6th/7th/etc —
      the 5 is a floor, not a cap.
+   - **Parked items are off-limits for replenishment (user 2026-08-06):**
+     `backlog.md` has a `## PARKED — do NOT auto-promote` section. Never promote
+     anything from it to satisfy this rule, even if that leaves the count at 2 —
+     a parked item moves into a phase only when the user asks for it by name. If
+     the rest of the backlog can't fill the runway, say so rather than reaching
+     into PARKED.
 
 # Rust coding guidelines
 
