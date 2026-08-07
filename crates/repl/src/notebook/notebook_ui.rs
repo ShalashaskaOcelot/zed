@@ -17,7 +17,7 @@ use gpui::{
 use language::{Buffer, Language, LanguageRegistry};
 use log;
 use project::{Project, ProjectEntryId, ProjectPath};
-use settings::{NotebookRunLandingMode, SeedQuerySetting, Settings as _};
+use settings::{NotebookFollowMode, NotebookRunLandingMode, SeedQuerySetting, Settings as _};
 use ui::{
     CommonAnimationExt, ScrollAxes, ScrollbarStyle, Scrollbars, Tooltip, WithScrollbar, prelude::*,
 };
@@ -45,8 +45,7 @@ use uuid::Uuid;
 use crate::components::{KernelPickerDelegate, KernelSelector};
 use crate::kernels::{
     Kernel, KernelSession, KernelSpecification, KernelStatus, NativeRunningKernel,
-    PythonEnvKernelSpecification, RemoteRunningKernel, SshRunningKernel,
-    WslRunningKernel,
+    PythonEnvKernelSpecification, RemoteRunningKernel, SshRunningKernel, WslRunningKernel,
 };
 use crate::notebook::MovementDirection;
 use crate::notebook::env_name_modal::EnvNameModal;
@@ -66,12 +65,10 @@ use zed_actions::notebook::{
     ConvertToCode, ConvertToMarkdown, CopyCell, CutCell, DeleteCell, DuplicateCell,
     EnterCommandMode, EnterEditMode, ExtendSelectionDown, ExtendSelectionToEnd,
     ExtendSelectionToStart, ExtendSelectionUp, GoToError, GoToRunningCell, InterruptKernel,
-    MoveCellDown,
-    MoveCellUp, JoinCells, NewNotebook, NextError, NotebookMoveDown, NotebookMoveUp, OpenNotebook,
-    PasteCell, PasteCellAbove, PreviousError, RedoCellOp, ReloadNotebook, RestartKernel, Run,
-    RunAll, RunAndAdvance,
-    RunCellAndBelow, RunCellsAbove, SelectAllCells, SelectFirstCell, SelectLastCell, SplitCell,
-    ToggleFollowRunningCell, UndoCellOp,
+    JoinCells, MoveCellDown, MoveCellUp, NewNotebook, NextError, NotebookMoveDown, NotebookMoveUp,
+    OpenNotebook, PasteCell, PasteCellAbove, PreviousError, RedoCellOp, ReloadNotebook,
+    RestartKernel, Run, RunAll, RunAndAdvance, RunCellAndBelow, RunCellsAbove, SelectAllCells,
+    SelectFirstCell, SelectLastCell, SplitCell, ToggleFollowRunningCell, UndoCellOp,
 };
 
 /// The failed-cell index to move to after `selected`, wrapping to the first
@@ -274,11 +271,21 @@ pub struct NotebookEditor {
     /// submitting the new queue. Submitting during the kernel's "aborting"
     /// state would get the new requests aborted too.
     resume_run_queue_on_idle: bool,
-    /// When on, the viewport auto-scrolls to follow the running cell as a batch
-    /// run (Run All / Above / Below) advances, so execution visibly "walks"
-    /// down the notebook. Viewport-only: it never changes the selection or
-    /// edit/command mode, so it doesn't fight a user editing a later cell.
+    /// When on, the notebook follows the running cell as a batch run (Run All /
+    /// Above / Below) advances, so execution visibly "walks" down the notebook.
+    /// What "follow" does is `repl.notebook_follow_mode`: `minimal` pins each
+    /// cell near the top of the viewport and never touches the selection, while
+    /// `page` moves the selection with execution and scrolls a whole page at a
+    /// time (see `follow_reveal`).
     follow_running_cell: bool,
+    /// Set when follow mode has just repositioned the list, and cleared when the
+    /// cell list is next rendered. Page-wise follow asks whether the running
+    /// cell is on screen, which it answers from the list's item measurements —
+    /// so a second cell finishing before the next frame would be measured
+    /// against the page it is about to be on, and jump again. Skipping the
+    /// jump for the rest of the frame keeps the page boundary honest when cells
+    /// run faster than the notebook redraws.
+    follow_scroll_pending: bool,
     /// Multi-selection: every selected index INCLUDING the primary
     /// (`selected_cell_index`). Empty when only a single cell is selected.
     /// Index-based, so any structural change collapses the selection.
@@ -362,15 +369,11 @@ impl NotebookEditor {
                             CellEvent::ToolbarAction(cell_id, action) => {
                                 this.handle_cell_toolbar_action(cell_id, *action, window, cx)
                             }
-                            CellEvent::Stop(cell_id) => {
-                                this.handle_cell_stop(cell_id, window, cx)
-                            }
+                            CellEvent::Stop(cell_id) => this.handle_cell_stop(cell_id, window, cx),
                             CellEvent::ModifiedClick { id, shift } => {
                                 this.handle_modified_click(id, *shift, window, cx)
                             }
-                            CellEvent::PlainClick { id } => {
-                                this.handle_plain_click(id, window, cx)
-                            }
+                            CellEvent::PlainClick { id } => this.handle_plain_click(id, window, cx),
                             CellEvent::MetadataChanged(_) => {
                                 // Collapse state persists to the .ipynb, so it
                                 // counts as unsaved changes.
@@ -416,9 +419,7 @@ impl NotebookEditor {
                             CellEvent::ModifiedClick { id, shift } => {
                                 this.handle_modified_click(id, *shift, window, cx)
                             }
-                            CellEvent::PlainClick { id } => {
-                                this.handle_plain_click(id, window, cx)
-                            }
+                            CellEvent::PlainClick { id } => this.handle_plain_click(id, window, cx),
                             _ => {}
                         },
                     )
@@ -439,9 +440,7 @@ impl NotebookEditor {
                             CellEvent::ModifiedClick { id, shift } => {
                                 this.handle_modified_click(id, *shift, window, cx)
                             }
-                            CellEvent::PlainClick { id } => {
-                                this.handle_plain_click(id, window, cx)
-                            }
+                            CellEvent::PlainClick { id } => this.handle_plain_click(id, window, cx),
                             _ => {}
                         },
                     )
@@ -479,6 +478,7 @@ impl NotebookEditor {
             run_queue: Vec::new(),
             active_run_cell: None,
             follow_running_cell: false,
+            follow_scroll_pending: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             kernel_picker_handle: PopoverMenuHandle::default(),
@@ -527,9 +527,13 @@ impl NotebookEditor {
         // lazy-starts it on first run) without re-picking (phase 25). Discovery
         // is async, so try now AND whenever the store updates; an explicit
         // in-session selection always wins — this only ever fills a void.
-        cx.observe_in(&ReplStore::global(cx), window, |this, _store, window, cx| {
-            this.adopt_metadata_kernel_selection(window, cx);
-        })
+        cx.observe_in(
+            &ReplStore::global(cx),
+            window,
+            |this, _store, window, cx| {
+                this.adopt_metadata_kernel_selection(window, cx);
+            },
+        )
         .detach();
         editor.adopt_metadata_kernel_selection(window, cx);
 
@@ -1273,12 +1277,12 @@ impl NotebookEditor {
                                         ),
                                         false,
                                     ),
-                                    None => {
-                                        (format!("Created {env_name} and installed ipykernel"), true)
-                                    }
+                                    None => (
+                                        format!("Created {env_name} and installed ipykernel"),
+                                        true,
+                                    ),
                                 };
-                                let toast =
-                                    workspace::Toast::new(notification_id.clone(), message);
+                                let toast = workspace::Toast::new(notification_id.clone(), message);
                                 let toast = if autohide { toast.autohide() } else { toast };
                                 workspace.show_toast(toast, cx);
                             })
@@ -2280,14 +2284,10 @@ impl NotebookEditor {
             let cell_id = self.run_queue.remove(0);
             if matches!(self.cell_map.get(&cell_id), Some(Cell::Code(_))) {
                 self.active_run_cell = Some(cell_id.clone());
-                // Follow mode: pin the cell about to run near the top of the
-                // viewport WITHOUT touching the selection or edit/command mode,
-                // so a Run All walks down the notebook while a user editing
-                // elsewhere isn't yanked away.
                 if self.follow_running_cell
                     && let Some(index) = self.cell_order.iter().position(|id| id == &cell_id)
                 {
-                    self.follow_scroll_to(index);
+                    self.follow_reveal(index, window, cx);
                 }
                 self.execute_cell(cell_id, window, cx);
                 return;
@@ -2308,6 +2308,66 @@ impl NotebookEditor {
         let viewport_height = self.cell_list.viewport_bounds().size.height;
         let margin = (viewport_height * 0.12).max(px(40.)).min(px(96.));
         self.cell_list.scroll_to_item_near_top(index, margin);
+    }
+
+    /// Follow the cell at `index` as it starts running, in whichever way
+    /// `repl.notebook_follow_mode` asks for.
+    ///
+    /// `minimal` re-pins every cell near the top as it runs — a small, frequent
+    /// movement. `page` instead makes the SELECTION carry the progress and
+    /// leaves the viewport alone while the running cell is on screen, moving a
+    /// whole page only when execution passes the fold. The two are deliberately
+    /// opposite: `minimal` keeps the running cell in one place, `page` keeps the
+    /// page in one place. Which reads better depends on whether you are watching
+    /// the cell or the notebook.
+    fn follow_reveal(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        match ReplSettings::get_global(cx).notebook_follow_mode {
+            NotebookFollowMode::Minimal => self.follow_scroll_to(index),
+            NotebookFollowMode::Page => {
+                // The selection is the progress indicator here, so it moves for
+                // every cell even when the viewport doesn't. Safe against
+                // stealing a cursor because entering edit mode turns follow off
+                // (`disable_follow_on_edit`).
+                self.set_selected_index(index, false, window, cx);
+                if !self.follow_scroll_pending && !self.cell_is_fully_visible(index) {
+                    self.cell_list.scroll_to_item_top_clamped(index);
+                    self.follow_scroll_pending = true;
+                }
+                // The moved selection is this mode's progress indicator, so it
+                // has to repaint even when the viewport didn't move and the
+                // cell's own status change wouldn't redraw the gutter.
+                cx.notify();
+            }
+        }
+    }
+
+    /// Whether cell `index` is entirely on screen. A PARTLY visible cell counts
+    /// as not visible: page-wise follow treats the last fully-visible cell as
+    /// the page boundary, so a cell hanging off the bottom edge starts the next
+    /// page rather than being watched with its output cut off.
+    fn cell_is_fully_visible(&self, index: usize) -> bool {
+        let viewport = self.cell_list.viewport_bounds();
+        // `bounds_for_item` yields `None` for a cell above the scroll position
+        // or one too far below it to have been measured — neither is on screen.
+        self.cell_list.bounds_for_item(index).is_some_and(|bounds| {
+            bounds.top() >= viewport.top() && bounds.bottom() <= viewport.bottom()
+        })
+    }
+
+    /// Follow mode is for WATCHING a run, so any move into edit mode ends it —
+    /// otherwise page-wise follow would drag the selection out from under
+    /// someone typing in a cell further down. Turning it back on is deliberate
+    /// (the toggle), which is the point: you have stopped watching.
+    ///
+    /// This fires for the post-run landing too, when
+    /// `repl.notebook_run_landing_mode` is `edit`: landing in a cell's editor
+    /// after a run is still being in edit mode, and single-cell runs don't use
+    /// follow mode anyway (only batch runs walk the queue).
+    fn disable_follow_on_edit(&mut self, cx: &mut Context<Self>) {
+        if self.follow_running_cell {
+            self.follow_running_cell = false;
+            cx.notify();
+        }
     }
 
     /// Reconcile the execution clock with whether a cell is running right now.
@@ -2494,17 +2554,26 @@ impl NotebookEditor {
     fn toggle_follow_running_cell(
         &mut self,
         _: &ToggleFollowRunningCell,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.follow_running_cell = !self.follow_running_cell;
-        // Turning it on jumps to the running cell immediately (if any), so the
-        // toggle's effect is visible right away rather than only on the next
-        // queue advance.
+        // Turning it on catches up with the running cell immediately (if any),
+        // so the toggle's effect is visible right away rather than only on the
+        // next queue advance. Page mode reveals unconditionally here: the point
+        // of the toggle is to go and look, even if the cell happens to be on
+        // screen already.
         if self.follow_running_cell
             && let Some(index) = self.running_cell_index(cx)
         {
-            self.follow_scroll_to(index);
+            match ReplSettings::get_global(cx).notebook_follow_mode {
+                NotebookFollowMode::Minimal => self.follow_scroll_to(index),
+                NotebookFollowMode::Page => {
+                    self.set_selected_index(index, false, window, cx);
+                    self.cell_list.scroll_to_item_top_clamped(index);
+                    self.follow_scroll_pending = true;
+                }
+            }
         }
         cx.notify();
     }
@@ -2720,6 +2789,7 @@ impl NotebookEditor {
 
     fn enter_edit_mode(&mut self, _: &EnterEditMode, window: &mut Window, cx: &mut Context<Self>) {
         self.notebook_mode = NotebookMode::Edit;
+        self.disable_follow_on_edit(cx);
         if let Some(cell_id) = self.cell_order.get(self.selected_cell_index) {
             if let Some(cell) = self.cell_map.get(cell_id) {
                 match cell {
@@ -3130,7 +3200,13 @@ impl NotebookEditor {
     fn add_markdown_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (cell_id, markdown_cell) = self.build_markdown_cell(String::new(), window, cx);
         let index = self.index_below_selection();
-        self.insert_cell(index, cell_id.clone(), Cell::Markdown(markdown_cell), window, cx);
+        self.insert_cell(
+            index,
+            cell_id.clone(),
+            Cell::Markdown(markdown_cell),
+            window,
+            cx,
+        );
         self.record_new_cell(index, &cell_id, cx);
         // Select the new cell in command mode (VS Code-style: press Enter to
         // edit). Staying in command mode keeps single-key shortcuts working.
@@ -3383,7 +3459,8 @@ impl NotebookEditor {
         // Continue editing in the bottom half, cursor at its start (Jupyter
         // behavior). `raw_insert_cell` already selected it.
         self.enter_edit_mode(&EnterEditMode, window, cx);
-        self.cell_list.scroll_to_reveal_item(self.selected_cell_index);
+        self.cell_list
+            .scroll_to_reveal_item(self.selected_cell_index);
         cx.notify();
     }
 
@@ -3484,7 +3561,12 @@ impl NotebookEditor {
         self.paste_cells_at(self.index_below_selection(), window, cx);
     }
 
-    fn paste_cell_above(&mut self, _: &PasteCellAbove, window: &mut Window, cx: &mut Context<Self>) {
+    fn paste_cell_above(
+        &mut self,
+        _: &PasteCellAbove,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // Insert before the primary cell (index 0 when the notebook is empty).
         self.paste_cells_at(self.selected_cell_index, window, cx);
     }
@@ -4005,6 +4087,7 @@ impl NotebookEditor {
             self.selected_cell_index = index;
             self.collapse_selection();
             self.notebook_mode = NotebookMode::Edit;
+            self.disable_follow_on_edit(cx);
             cx.notify();
         }
     }
@@ -4015,7 +4098,12 @@ impl NotebookEditor {
     /// focuses it and enters edit mode via the editor's own focus event, which
     /// fires after this (the classifier does not stop propagation for plain
     /// clicks), so this only "wins" for clicks that miss the editor.
-    fn handle_plain_click(&mut self, cell_id: &CellId, window: &mut Window, cx: &mut Context<Self>) {
+    fn handle_plain_click(
+        &mut self,
+        cell_id: &CellId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(index) = self.cell_order.iter().position(|id| id == cell_id) {
             self.selected_cell_index = index;
             self.collapse_selection();
@@ -4292,10 +4380,12 @@ impl NotebookEditor {
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Execute all cells", &RunAll, cx)
                                 })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.focus_notebook(window, cx);
-                                    this.run_cells(window, cx);
-                                })),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.focus_notebook(window, cx);
+                                        this.run_cells(window, cx);
+                                    },
+                                )),
                             )
                             .child(
                                 Self::render_notebook_control(
@@ -4307,10 +4397,12 @@ impl NotebookEditor {
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Run cells above", &RunCellsAbove, cx)
                                 })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.focus_notebook(window, cx);
-                                    this.run_cells_above(&RunCellsAbove, window, cx);
-                                })),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.focus_notebook(window, cx);
+                                        this.run_cells_above(&RunCellsAbove, window, cx);
+                                    },
+                                )),
                             )
                             .child(
                                 Self::render_notebook_control(
@@ -4322,10 +4414,12 @@ impl NotebookEditor {
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Run cell and below", &RunCellAndBelow, cx)
                                 })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.focus_notebook(window, cx);
-                                    this.run_cell_and_below(&RunCellAndBelow, window, cx);
-                                })),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.focus_notebook(window, cx);
+                                        this.run_cell_and_below(&RunCellAndBelow, window, cx);
+                                    },
+                                )),
                             )
                             .child(
                                 Self::render_notebook_control(
@@ -4338,10 +4432,12 @@ impl NotebookEditor {
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Clear all outputs", &ClearOutputs, cx)
                                 })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.focus_notebook(window, cx);
-                                    this.clear_outputs(window, cx);
-                                })),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.focus_notebook(window, cx);
+                                        this.clear_outputs(window, cx);
+                                    },
+                                )),
                             ),
                     )
                     .child(
@@ -4355,16 +4451,14 @@ impl NotebookEditor {
                                 )
                                 .disabled(!has_running_cell)
                                 .tooltip(move |_window, cx| {
-                                    Tooltip::for_action(
-                                        "Go to running cell",
-                                        &GoToRunningCell,
-                                        cx,
-                                    )
+                                    Tooltip::for_action("Go to running cell", &GoToRunningCell, cx)
                                 })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.focus_notebook(window, cx);
-                                    this.go_to_running_cell(&GoToRunningCell, window, cx);
-                                })),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.focus_notebook(window, cx);
+                                        this.go_to_running_cell(&GoToRunningCell, window, cx);
+                                    },
+                                )),
                             )
                             .child(
                                 Self::render_notebook_control(
@@ -4381,14 +4475,16 @@ impl NotebookEditor {
                                         cx,
                                     )
                                 })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.focus_notebook(window, cx);
-                                    this.toggle_follow_running_cell(
-                                        &ToggleFollowRunningCell,
-                                        window,
-                                        cx,
-                                    );
-                                })),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.focus_notebook(window, cx);
+                                        this.toggle_follow_running_cell(
+                                            &ToggleFollowRunningCell,
+                                            window,
+                                            cx,
+                                        );
+                                    },
+                                )),
                             ),
                     )
                     .child(
@@ -4403,10 +4499,12 @@ impl NotebookEditor {
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Move cell up", &MoveCellUp, cx)
                                 })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.focus_notebook(window, cx);
-                                    this.move_cell_up(window, cx);
-                                })),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.focus_notebook(window, cx);
+                                        this.move_cell_up(window, cx);
+                                    },
+                                )),
                             )
                             .child(
                                 Self::render_notebook_control(
@@ -4418,10 +4516,12 @@ impl NotebookEditor {
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Move cell down", &MoveCellDown, cx)
                                 })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.focus_notebook(window, cx);
-                                    this.move_cell_down(window, cx);
-                                })),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.focus_notebook(window, cx);
+                                        this.move_cell_down(window, cx);
+                                    },
+                                )),
                             ),
                     )
                     .child(
@@ -4436,10 +4536,12 @@ impl NotebookEditor {
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Add markdown block", &AddMarkdownBlock, cx)
                                 })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.focus_notebook(window, cx);
-                                    this.add_markdown_block(window, cx);
-                                })),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.focus_notebook(window, cx);
+                                        this.add_markdown_block(window, cx);
+                                    },
+                                )),
                             )
                             .child(
                                 Self::render_notebook_control(
@@ -4451,10 +4553,12 @@ impl NotebookEditor {
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Add code block", &AddCodeBlock, cx)
                                 })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.focus_notebook(window, cx);
-                                    this.add_code_block(window, cx);
-                                })),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.focus_notebook(window, cx);
+                                        this.add_code_block(window, cx);
+                                    },
+                                )),
                             ),
                     ),
             )
@@ -4519,10 +4623,12 @@ impl NotebookEditor {
                                 .tooltip(|_window, cx| {
                                     Tooltip::for_action("Restart Kernel", &RestartKernel, cx)
                                 })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.focus_notebook(window, cx);
-                                    this.restart_kernel(&RestartKernel, window, cx);
-                                })),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.focus_notebook(window, cx);
+                                        this.restart_kernel(&RestartKernel, window, cx);
+                                    },
+                                )),
                             )
                             .child(
                                 Self::render_notebook_control(
@@ -4535,10 +4641,12 @@ impl NotebookEditor {
                                 .tooltip(|_window, cx| {
                                     Tooltip::for_action("Interrupt Kernel", &InterruptKernel, cx)
                                 })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.focus_notebook(window, cx);
-                                    this.interrupt_kernel(&InterruptKernel, window, cx);
-                                })),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.focus_notebook(window, cx);
+                                        this.interrupt_kernel(&InterruptKernel, window, cx);
+                                    },
+                                )),
                             ),
                     ), // The sidebar's own kernel-picker trigger used to sit
                        // here. It shared a single `PopoverMenuHandle` with the
@@ -4704,10 +4812,7 @@ impl NotebookEditor {
                     )
                     .label_size(LabelSize::Small)
                     .style(ButtonStyle::Transparent)
-                    .tooltip(Tooltip::for_action_title(
-                        "Go to Error",
-                        &GoToError,
-                    ))
+                    .tooltip(Tooltip::for_action_title("Go to Error", &GoToError))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.go_to_error(&GoToError, window, cx);
                     })),
@@ -4740,7 +4845,8 @@ impl NotebookEditor {
                     // No status icon on the button: the animated indicator to
                     // its left carries the status now, and two icons for one
                     // state read as two different things.
-                    Button::new("kernel-selector", kernel_name.clone()).label_size(LabelSize::Small),
+                    Button::new("kernel-selector", kernel_name.clone())
+                        .label_size(LabelSize::Small),
                     Tooltip::text(format!(
                         "Kernel: {} ({}). Click to change.",
                         kernel_name,
@@ -4790,12 +4896,15 @@ impl NotebookEditor {
             )
     }
 
-    fn cell_list(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn cell_list(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity();
         // gpui can't read editor settings, so the notebook opts its list in.
         // Re-applied each render so toggling the setting takes effect live.
         self.cell_list
             .set_smooth_scroll(editor::EditorSettings::get_global(cx).smooth_scrolling);
+        // This render consumes any follow-mode jump made since the last one, so
+        // the next cell to run is measured against the page it is actually on.
+        self.follow_scroll_pending = false;
         list(self.cell_list.clone(), move |index, window, cx| {
             view.update(cx, |this, cx| {
                 let cell_id = &this.cell_order[index];
@@ -4963,9 +5072,11 @@ impl Render for NotebookEditor {
             .on_action(cx.listener(|this, _: &ExtendSelectionToEnd, window, cx| {
                 this.extend_selection_to_boundary(true, window, cx)
             }))
-            .on_action(cx.listener(|this, _: &SelectAllCells, window, cx| {
-                this.select_all_cells(window, cx)
-            }))
+            .on_action(
+                cx.listener(|this, _: &SelectAllCells, window, cx| {
+                    this.select_all_cells(window, cx)
+                }),
+            )
             .on_action(cx.listener(|this, _: &MoveDown, window, cx| {
                 this.select_next(
                     &Default::default(),
@@ -5361,12 +5472,15 @@ impl SearchableItem for NotebookEditor {
             // Translate the global active index to this cell's local index (its
             // position among this cell's matches), when the active match is here.
             let local_active = active_match_index.and_then(|global| {
-                matches.get(global).filter(|m| m.cell_id == cell_id).map(|_| {
-                    matches[..global]
-                        .iter()
-                        .filter(|m| m.cell_id == cell_id)
-                        .count()
-                })
+                matches
+                    .get(global)
+                    .filter(|m| m.cell_id == cell_id)
+                    .map(|_| {
+                        matches[..global]
+                            .iter()
+                            .filter(|m| m.cell_id == cell_id)
+                            .count()
+                    })
             });
             editor.update(cx, |editor, cx| {
                 SearchableItem::update_matches(
@@ -5545,11 +5659,17 @@ impl SearchableItem for NotebookEditor {
         match direction {
             Direction::Next => matches
                 .iter()
-                .position(|m| self.cell_index_of(&m.cell_id).is_some_and(|ci| ci >= selected))
+                .position(|m| {
+                    self.cell_index_of(&m.cell_id)
+                        .is_some_and(|ci| ci >= selected)
+                })
                 .or(Some(0)),
             Direction::Prev => matches
                 .iter()
-                .rposition(|m| self.cell_index_of(&m.cell_id).is_some_and(|ci| ci <= selected))
+                .rposition(|m| {
+                    self.cell_index_of(&m.cell_id)
+                        .is_some_and(|ci| ci <= selected)
+                })
                 .or(Some(matches.len() - 1)),
         }
     }
@@ -5634,7 +5754,11 @@ impl Item for NotebookEditor {
         editor.read(cx).pixel_position_of_cursor(cx)
     }
 
-    fn as_searchable(&self, handle: &Entity<Self>, _: &App) -> Option<Box<dyn SearchableItemHandle>> {
+    fn as_searchable(
+        &self,
+        handle: &Entity<Self>,
+        _: &App,
+    ) -> Option<Box<dyn SearchableItemHandle>> {
         Some(Box::new(handle.clone()))
     }
 
@@ -5753,7 +5877,11 @@ impl Item for NotebookEditor {
                 })?
                 .await?;
             this.update_in(cx, |this, window, cx| {
-                let entry_id = this.project.read(cx).entry_for_path(&path, cx).map(|entry| entry.id);
+                let entry_id = this
+                    .project
+                    .read(cx)
+                    .entry_for_path(&path, cx)
+                    .map(|entry| entry.id);
                 this.worktree_id = path.worktree_id;
                 this.notebook_item.update(cx, |item, cx| {
                     item.path = Some(abs_path);
@@ -5885,16 +6013,16 @@ impl SerializableItem for NotebookEditor {
         window: &mut Window,
         cx: &mut App,
     ) -> Task<Result<Entity<Self>>> {
-        let serialized =
-            match NotebookDb::global(cx).get_serialized_notebook(item_id, workspace_id) {
-                Ok(Some(serialized)) => serialized,
-                Ok(None) => {
-                    return Task::ready(Err(anyhow!(
-                        "no serialized notebook for item {item_id} in workspace {workspace_id:?}"
-                    )));
-                }
-                Err(error) => return Task::ready(Err(error)),
-            };
+        let serialized = match NotebookDb::global(cx).get_serialized_notebook(item_id, workspace_id)
+        {
+            Ok(Some(serialized)) => serialized,
+            Ok(None) => {
+                return Task::ready(Err(anyhow!(
+                    "no serialized notebook for item {item_id} in workspace {workspace_id:?}"
+                )));
+            }
+            Err(error) => return Task::ready(Err(error)),
+        };
 
         if let Some(abs_path) = serialized.abs_path {
             // Saved: reopen by path via the normal notebook open route so the
@@ -6074,8 +6202,8 @@ mod tests {
     use super::*;
     use crate::kernels::LocalKernelSpecification;
     use gpui::TestAppContext;
-    use project::Fs as _;
     use jupyter_protocol::JupyterKernelspec;
+    use project::Fs as _;
     use project::{FakeFs, Project, ProjectItem as _};
     use serde_json::json;
     use settings::SettingsStore;

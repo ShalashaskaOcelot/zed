@@ -1351,6 +1351,38 @@ pub struct ReplSettingsContent {
     ///
     /// Default: false
     pub notebook_show_kernel_uptime: Option<bool>,
+    /// How a notebook scrolls while "follow running cell" is on.
+    ///
+    /// Default: minimal
+    pub notebook_follow_mode: Option<NotebookFollowMode>,
+}
+
+/// How a notebook scrolls while "follow running cell" is on.
+///
+/// Default: minimal
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    MergeFrom,
+    strum::VariantArray,
+    strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum NotebookFollowMode {
+    /// Pin each cell near the top of the viewport as it starts running.
+    #[default]
+    Minimal,
+    /// Move a whole page at a time: hold the viewport still while the running
+    /// cell is on screen, and when it isn't, put it at the top. The selection
+    /// moves with execution, so progress shows without the viewport churning.
+    Page,
 }
 
 /// Which mode a notebook lands in after running a cell.

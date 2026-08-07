@@ -205,6 +205,23 @@ In a notebook, running a cell with `ctrl-enter` (run) or `shift-enter` (run and 
 - `edit`: always land in edit mode, with the cursor in the cell's editor.
 - `remember`: land in whatever mode you were in when you triggered the run — running from the editor keeps you editing (the next cell, for `shift-enter`); running from command mode stays in command mode.
 
+### Notebook Follow Mode
+
+"Follow Running Cell" (the toggle in the notebook's control sidebar) keeps the notebook with the cell that is executing as a batch run — Run All, Run Above, Run Below — walks down the cells. `repl.notebook_follow_mode` chooses how it does that:
+
+```json [settings]
+{
+  "repl": {
+    "notebook_follow_mode": "minimal"
+  }
+}
+```
+
+- `minimal` (default): pin each cell near the top of the viewport as it starts running. The viewport moves for every cell; the selection is never touched.
+- `page`: move a page at a time. The viewport holds still while the running cell is on screen, and when execution passes the fold the newly-reached cell becomes the top of the viewport — so a long run turns the notebook page by page instead of nudging continuously. The selection moves with execution instead, which is what shows progress, and the last page stops with the final cell in view rather than scrolling into blank space.
+
+Because `page` moves the selection, entering edit mode turns follow mode off (in both modes): following is for watching a run, and it must not drag the selection out from under you while you are typing. Switch it back on with the toggle when you want to go back to watching.
+
 ### Notebook Runtime Timers
 
 A notebook's kernel status strip can show two optional timers, both off by default:

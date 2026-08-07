@@ -286,6 +286,9 @@ entry rather than archiving it.
   pressing anywhere in an output now selects its cell, on mouse-DOWN and
   without consuming the event, so drag-to-select-text still works.
   AWAITING USER TESTING.
+- Phase 67 — Page-wise follow mode: a second `repl.notebook_follow_mode`
+  where the selection carries execution and the viewport moves a page at a
+  time, clamped at the end of the notebook. `PENDING`
 
 ## Fixed bugs (confirmed)
 

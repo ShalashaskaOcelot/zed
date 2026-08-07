@@ -151,6 +151,40 @@ and defects become new backlog/bug items.
       error toast (instead of failing silently). (Needs a machine/session
       where `python3`/`python` isn't on PATH.)
 
+## Phase 67 — Page-wise follow mode
+
+Kind: **new feature** (a SECOND follow mode; the existing one is untouched and
+still the default). Once it is confirmed present and basically working, any
+refinement becomes a new backlog/bug item rather than reopening this.
+
+Turn it on with `"repl": { "notebook_follow_mode": "page" }` in settings (or
+Settings → REPL & Notebooks → Notebook → Follow Mode), then switch
+"Follow Running Cell" on in the notebook's control sidebar. Every test below
+needs BOTH.
+
+- [ ] With the setting left at its default (`minimal`) follow mode behaves
+      exactly as before — each running cell re-pinned near the top.
+- [ ] In `page` mode with a notebook that fits on screen: Run All never moves
+      the viewport at all, and the selection highlight walks down the cells as
+      each one runs.
+- [ ] With a longer notebook: the viewport holds still while execution walks
+      down the cells that are on screen, then jumps a whole page when execution
+      passes the fold — the newly-reached cell becomes the TOP of the viewport,
+      and it holds still again for that page.
+- [ ] The last jump stops with the final cell visible instead of scrolling the
+      tail of the notebook up into blank space.
+- [ ] A cell taller than the viewport pins its top and overflows (no attempt to
+      fit it), and execution carries on normally afterwards.
+- [ ] Clicking into a cell to edit during a run turns Follow Running Cell OFF —
+      the sidebar toggle visibly flips — and the selection stops moving, so
+      your cursor is left alone. Turning it back on jumps to the running cell.
+- [ ] Worth a look while testing (the user's own prediction, phase 67 design):
+      because each running cell sits at or above the fold with room below it,
+      its status footer and the start of its output should usually be on
+      screen — except for the last cell on a page and cells taller than the
+      viewport. If that holds, the deferred "anchor on the status footer"
+      backlog item is largely covered; if it doesn't, say so.
+
 ## Phase 64 — Kernel picker and notebook control polish
 
 Kind: mixed — mostly changes to existing behaviour, so if one of these still

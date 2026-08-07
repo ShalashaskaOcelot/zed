@@ -796,6 +796,71 @@ impl ListState {
         state.logical_scroll_top = Some(scroll_top);
     }
 
+    /// Scroll so item `ix`'s top edge sits at the top of the viewport, but
+    /// never past the end of the list: when less than a viewport of content
+    /// remains below `ix`'s top, this stops at the maximum offset, so the last
+    /// item's bottom rests on the viewport's bottom edge instead of leaving
+    /// blank space below it.
+    ///
+    /// The other `scroll_to_*` methods deliberately set the position without
+    /// that bound (only wheel scrolling is clamped), which is fine when the
+    /// target is far from the end. The notebook's page-wise follow mode moves a
+    /// whole viewport at a time, so its last jump would otherwise scroll the
+    /// tail of the notebook up into a mostly-empty screen.
+    ///
+    /// An item taller than the viewport is unaffected by the clamp — its own
+    /// height always exceeds what remains, so its top pins and it overflows.
+    pub fn scroll_to_item_top_clamped(&self, ix: usize) {
+        let state = &mut *self.0.borrow_mut();
+        let viewport_height = state
+            .last_layout_bounds
+            .map_or(px(0.), |bounds| bounds.size.height);
+        let padding = state.last_padding.unwrap_or_default();
+        let available = (viewport_height - padding.top - padding.bottom).max(px(0.));
+
+        // Scope the cursor so its immutable borrow of `state` ends before the
+        // mutable writes below.
+        let scroll_top = {
+            let mut cursor = state.items.cursor::<ListItemSummary>(());
+            cursor.seek(&Count(ix), Bias::Right);
+            let item_top = cursor.start().height;
+            // How much content sits at or below `ix`'s top. Taking the
+            // DIFFERENCE of two cumulative heights makes this immune to
+            // mismeasurement above `ix` (unmeasured items far up the list, or
+            // outputs that grew while off-screen) — the same reason the anchor
+            // below is an item index rather than an absolute pixel offset.
+            let below = state.items.summary().height - item_top;
+            let deficit = available - below;
+
+            if deficit <= px(0.) {
+                ListOffset {
+                    item_ix: ix,
+                    offset_in_item: px(0.),
+                }
+            } else {
+                // Walk up from `ix` taking whole preceding items until they
+                // cover the deficit; whatever is left over becomes an offset
+                // INTO the anchor item. (`seek` re-seeks from the root, so
+                // stepping to earlier indices is fine.)
+                let mut anchor_ix = ix;
+                let mut taken = px(0.);
+                while anchor_ix > 0 && taken < deficit {
+                    cursor.seek(&Count(anchor_ix - 1), Bias::Right);
+                    taken = item_top - cursor.start().height;
+                    anchor_ix -= 1;
+                }
+                ListOffset {
+                    item_ix: anchor_ix,
+                    offset_in_item: (taken - deficit).max(px(0.)),
+                }
+            }
+        };
+
+        state.cancel_smooth_scroll();
+        state.rebase_pending_scroll(scroll_top);
+        state.logical_scroll_top = Some(scroll_top);
+    }
+
     /// Scroll so the item's BOTTOM edge sits at the bottom of the viewport,
     /// landing on the item's tail rather than its head. The notebook uses this
     /// to jump to a cell's OUTPUT (which renders below its source) instead of
@@ -1924,7 +1989,8 @@ mod test {
 
     use crate::{
         self as gpui, AppContext, Bounds, Context, Element, FollowMode, IntoElement, ListState,
-        Render, Styled, TestAppContext, Window, canvas, div, list, point, px, size,
+        Render, Styled, TestAppContext, VisualTestContext, Window, canvas, div, list, point, px,
+        size,
     };
 
     #[gpui::test]
@@ -2245,6 +2311,142 @@ mod test {
         assert_eq!(state.logical_scroll_top().item_ix, state.item_count());
         assert_eq!(state.item_is_above_viewport(0), Some(true));
         assert_eq!(state.item_is_below_viewport(0), Some(false));
+    }
+
+    /// A list of `count` uniform 20px items, drawn into a 100px-tall viewport
+    /// (five items per page) so the page arithmetic below is easy to read.
+    fn drawn_uniform_list(count: usize, cx: &mut VisualTestContext) -> ListState {
+        let state = ListState::new(count, crate::ListAlignment::Top, px(10.)).measure_all();
+        cx.draw(point(px(0.), px(0.)), size(px(100.), px(100.)), |_, cx| {
+            cx.new(|_| TestListView(state.clone())).into_any_element()
+        });
+        state
+    }
+
+    #[gpui::test]
+    fn test_scroll_to_item_top_clamped_aligns_top_away_from_the_end(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = drawn_uniform_list(20, cx);
+
+        state.scroll_to_item_top_clamped(5);
+
+        // Far from the end, the item simply becomes the top of the viewport.
+        let offset = state.logical_scroll_top();
+        assert_eq!(offset.item_ix, 5);
+        assert_eq!(offset.offset_in_item, px(0.));
+    }
+
+    #[gpui::test]
+    fn test_scroll_to_item_top_clamped_stops_at_the_end(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = drawn_uniform_list(10, cx);
+
+        // Only two items (40px) sit below item 8's top, so top-aligning it
+        // would leave 60px of blank space. The list stops at its maximum
+        // offset instead: item 5 at the top shows the last five items.
+        state.scroll_to_item_top_clamped(8);
+
+        let offset = state.logical_scroll_top();
+        assert_eq!(offset.item_ix, 5);
+        assert_eq!(offset.offset_in_item, px(0.));
+    }
+
+    #[gpui::test]
+    fn test_scroll_to_item_top_clamped_never_scrolls_past_the_last_item(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = drawn_uniform_list(10, cx);
+
+        // The last item clamps to the same place as any other item within the
+        // final page — the end of the list is the end of the list.
+        state.scroll_to_item_top_clamped(9);
+
+        let offset = state.logical_scroll_top();
+        assert_eq!(offset.item_ix, 5);
+        assert_eq!(offset.offset_in_item, px(0.));
+    }
+
+    #[gpui::test]
+    fn test_scroll_to_item_top_clamped_partial_item_anchor(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        // 7 items of 20px = 140px total in a 90px viewport: the maximum offset
+        // is 50px, which falls in the MIDDLE of item 2, so the clamp has to
+        // land part-way into an item rather than on a boundary.
+        let state = ListState::new(7, crate::ListAlignment::Top, px(10.)).measure_all();
+        cx.draw(point(px(0.), px(0.)), size(px(100.), px(90.)), |_, cx| {
+            cx.new(|_| TestListView(state.clone())).into_any_element()
+        });
+
+        state.scroll_to_item_top_clamped(6);
+
+        let offset = state.logical_scroll_top();
+        assert_eq!(offset.item_ix, 2);
+        assert_eq!(offset.offset_in_item, px(10.));
+
+        // Same list, but an item far enough from the end to need no clamping.
+        state.scroll_to_item_top_clamped(1);
+        let offset = state.logical_scroll_top();
+        assert_eq!(offset.item_ix, 1);
+        assert_eq!(offset.offset_in_item, px(0.));
+    }
+
+    #[gpui::test]
+    fn test_scroll_to_item_top_clamped_list_shorter_than_viewport(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        // 3 items of 20px in a 100px viewport: everything already fits, so
+        // there is nowhere to scroll to.
+        let state = drawn_uniform_list(3, cx);
+
+        state.scroll_to_item_top_clamped(2);
+
+        let offset = state.logical_scroll_top();
+        assert_eq!(offset.item_ix, 0);
+        assert_eq!(offset.offset_in_item, px(0.));
+    }
+
+    #[gpui::test]
+    fn test_scroll_to_item_top_clamped_item_taller_than_viewport(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+
+        // Item 4 is 300px in a 100px viewport, and it is the LAST item — the
+        // case where the clamp would otherwise fight the alignment. Its own
+        // height is more than a viewport, so there is no blank space to avoid:
+        // its top pins and it overflows.
+        struct TallItemView(ListState);
+        impl Render for TallItemView {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                list(self.0.clone(), |ix, _, _| {
+                    let height = if ix == 4 { px(300.) } else { px(20.) };
+                    div().h(height).w_full().into_any()
+                })
+                .w_full()
+                .h_full()
+            }
+        }
+
+        let state = ListState::new(5, crate::ListAlignment::Top, px(10.)).measure_all();
+        cx.draw(point(px(0.), px(0.)), size(px(100.), px(100.)), |_, cx| {
+            cx.new(|_| TallItemView(state.clone())).into_any_element()
+        });
+
+        state.scroll_to_item_top_clamped(4);
+
+        let offset = state.logical_scroll_top();
+        assert_eq!(offset.item_ix, 4);
+        assert_eq!(offset.offset_in_item, px(0.));
+    }
+
+    #[gpui::test]
+    fn test_scroll_to_item_top_clamped_before_layout(cx: &mut TestAppContext) {
+        let _cx = cx.add_empty_window();
+        // Nothing measured yet: with no viewport to clamp against, the item
+        // pins to the top rather than the call being dropped.
+        let state = ListState::new(10, crate::ListAlignment::Top, px(10.)).measure_all();
+
+        state.scroll_to_item_top_clamped(7);
+
+        let offset = state.logical_scroll_top();
+        assert_eq!(offset.item_ix, 7);
+        assert_eq!(offset.offset_in_item, px(0.));
     }
 
     #[gpui::test]

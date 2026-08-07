@@ -2595,6 +2595,16 @@
     //  3. Land in whatever mode was active when the run was triggered:
     //     "notebook_run_landing_mode": "remember"
     "notebook_run_landing_mode": "command",
+    // How a notebook scrolls while "follow running cell" is on. May take 2
+    // values:
+    //  1. Pin each cell near the top of the viewport as it starts running:
+    //     "notebook_follow_mode": "minimal"
+    //  2. Move a page at a time — hold the viewport still while the running
+    //     cell is on screen, and when it isn't, put it at the top. The
+    //     selection moves with execution, and entering edit mode turns follow
+    //     off:
+    //     "notebook_follow_mode": "page"
+    "notebook_follow_mode": "minimal",
   },
   // Vim settings
   "vim": {

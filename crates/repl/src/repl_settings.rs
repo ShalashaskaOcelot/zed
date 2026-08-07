@@ -1,4 +1,4 @@
-use settings::{NotebookRunLandingMode, RegisterSetting, Settings};
+use settings::{NotebookFollowMode, NotebookRunLandingMode, RegisterSetting, Settings};
 
 /// Settings for configuring REPL display and behavior.
 #[derive(Clone, Debug, RegisterSetting)]
@@ -53,6 +53,12 @@ pub struct ReplSettings {
     ///
     /// Default: false
     pub notebook_show_kernel_uptime: bool,
+    /// How the notebook scrolls while "follow running cell" is on: pin each
+    /// cell near the top as it runs, or move a page at a time and let the
+    /// selection carry the progress.
+    ///
+    /// Default: minimal
+    pub notebook_follow_mode: NotebookFollowMode,
 }
 
 impl Settings for ReplSettings {
@@ -70,6 +76,7 @@ impl Settings for ReplSettings {
             notebook_autostart_kernel: repl.notebook_autostart_kernel.unwrap_or(false),
             notebook_show_execution_time: repl.notebook_show_execution_time.unwrap_or(false),
             notebook_show_kernel_uptime: repl.notebook_show_kernel_uptime.unwrap_or(false),
+            notebook_follow_mode: repl.notebook_follow_mode.unwrap_or_default(),
         }
     }
 }

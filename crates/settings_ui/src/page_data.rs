@@ -7377,7 +7377,7 @@ fn terminal_page() -> SettingsPage {
 }
 
 fn repl_page() -> SettingsPage {
-    fn notebook_section() -> [SettingsPageItem; 6] {
+    fn notebook_section() -> [SettingsPageItem; 7] {
         [
             SettingsPageItem::SectionHeader("Notebook"),
             SettingsPageItem::SettingItem(SettingItem {
@@ -7398,6 +7398,29 @@ fn repl_page() -> SettingsPage {
                             .repl
                             .get_or_insert_default()
                             .notebook_run_landing_mode = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Follow Mode",
+                description: "How a notebook scrolls while \"follow running cell\" is on: pin each cell near the top as it runs, or move a page at a time and let the selection carry the progress.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("repl.notebook_follow_mode"),
+                    pick: |settings_content| {
+                        settings_content
+                            .repl
+                            .as_ref()?
+                            .notebook_follow_mode
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .repl
+                            .get_or_insert_default()
+                            .notebook_follow_mode = value;
                     },
                 }),
                 metadata: None,
