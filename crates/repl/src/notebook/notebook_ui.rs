@@ -2191,10 +2191,14 @@ impl NotebookEditor {
             .and_then(|cell_id| self.cell_map.get(cell_id))
     }
 
-    fn has_outputs(&self, _window: &mut Window, cx: &mut Context<Self>) -> bool {
+    /// Whether Clear Outputs would do anything. Outputs are not the only thing
+    /// it clears — execution counts, run durations, timestamps and status
+    /// markers go with them — so a notebook of cells that ran silently still
+    /// has something to clear (user 2026-08-06).
+    fn has_execution_record(&self, _window: &mut Window, cx: &mut Context<Self>) -> bool {
         self.cell_map.values().any(|cell| {
             if let Cell::Code(code_cell) = cell {
-                code_cell.read(cx).has_outputs()
+                code_cell.read(cx).has_execution_record()
             } else {
                 false
             }
@@ -4261,7 +4265,7 @@ impl NotebookEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let has_outputs = self.has_outputs(window, cx);
+        let has_execution_record = self.has_execution_record(window, cx);
         let has_running_cell = self.running_cell_index(cx).is_some();
         let following = self.follow_running_cell;
 
@@ -4330,7 +4334,7 @@ impl NotebookEditor {
                                     window,
                                     cx,
                                 )
-                                .disabled(!has_outputs)
+                                .disabled(!has_execution_record)
                                 .tooltip(move |_window, cx| {
                                     Tooltip::for_action("Clear all outputs", &ClearOutputs, cx)
                                 })

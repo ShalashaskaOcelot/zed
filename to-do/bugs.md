@@ -610,3 +610,23 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   viewport.
 - **Fix attempted:** none
 - **Tested:** n/a
+
+## 66. "Clear all outputs" is disabled when only execution info remains
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-08-06) The Clear Outputs control is only enabled when
+  some cell has actual OUTPUT. But the command also clears execution counts,
+  run durations, timestamps and the ✓/✕ status markers, so after running cells
+  that print nothing (`x = 1`) the notebook still shows `[3] ✓ 57ms` on every
+  cell while the button sits disabled with nothing apparently to clear.
+- **Analysis:** the control's `disabled` gate used `has_outputs`, which asks
+  only `!self.outputs.is_empty()`, while the action runs
+  `clear_execution_record` — which clears outputs AND `execution_count`,
+  `execution_duration`, `execution_start_time`, `last_executed_at`,
+  `metadata.execution` and the status. The gate was narrower than the action.
+- **Fix attempted (2026-08-06):** new `CodeCell::has_execution_record` (outputs
+  OR execution count OR duration OR last-executed timestamp OR a non-Idle
+  status) mirrors exactly what `clear_execution_record` clears; the notebook's
+  gate (`NotebookEditor::has_execution_record`) and the control's `disabled`
+  state now use it.
+- **Tested:** no — needs user confirmation

@@ -79,19 +79,18 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
 
 - Line numbers per notebook cell (user 2026-08-06). Two settings, BOTH default
   off — a global one for the whole notebook and a per-cell one — plus two
-  command-mode keybindings: `l` toggles line numbers on the FOCUSED cell,
-  `ctrl-l` toggles the notebook-wide setting.
-  **Binding check (done 2026-08-06):** `l` is free in
-  `NotebookEditor && notebook_mode == command` (the only `l` binding is
-  `menu::SelectNext` under the `Prompt` context, which can't be active there),
-  so it is safe. `ctrl-l` is NOT free in general: `editor::SelectLine` on Linux,
-  `editor::ScrollCursorCenter` on macOS (`cmd-l` is SelectLine there). Bound in
-  the command-mode context it wins, because focus is on the notebook rather
-  than a cell editor — but it must NOT be bound in the plain `NotebookEditor`
-  context, where the editor's own binding would shadow it while editing a cell
-  and it would silently do nothing (exactly the trap behind bug #64). Worth
-  considering Jupyter's own convention as an alternative that dodges the
-  conflict entirely: `L` for the cell, `shift-L` for all cells.
+  command-mode keybindings, settled on Jupyter's own convention (user
+  2026-08-06): `l` toggles line numbers on the FOCUSED cell, `shift-l` toggles
+  the notebook-wide setting.
+  **Binding check (done 2026-08-06):** both are free in
+  `NotebookEditor && notebook_mode == command` — the only `l` binding anywhere
+  is `menu::SelectNext` under the `Prompt` context, which cannot be active
+  there, and `shift-l` is unbound. This deliberately avoids `ctrl-l`, which is
+  taken (`editor::SelectLine` on Linux, `editor::ScrollCursorCenter` on macOS):
+  bound in the command-mode context it would have worked, but in the plain
+  `NotebookEditor` context the editor's binding would shadow it while editing a
+  cell and it would silently do nothing — the trap behind bug #64. Bind both in
+  the COMMAND-MODE context only.
   **Implementation note:** cell editors currently call
   `editor.set_show_gutter(false, cx)` (`cell.rs:529`), so line numbers need the
   gutter turned back ON, which also brings breakpoints / code actions /
@@ -222,6 +221,44 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
   failure indicator in the top kernel strip would partly cover the
   "is-it-still-running" gap, but not fully — this is still worth doing.
   **Priority: explicitly deferred by the user (2026-07-31) — not needed now.**
+
+  **PAGE-WISE FOLLOW — the design the user actually wants (2026-08-06, three
+  screenshots).** A different model from both today's behaviour and the
+  status-footer anchor above: move the viewport RARELY and in whole pages, and
+  let the command-mode SELECTION carry the "where is it up to" signal.
+  1. **Selection follows execution, always.** The command-mode selection
+     highlight moves to each cell as it starts running, so you watch it "fall"
+     down the notebook as cells complete. This is the primary indicator — not
+     the viewport.
+  2. **The viewport does not move while the running cell is already visible.**
+     If the whole notebook fits on screen, the viewport never moves at all.
+     Today's behaviour re-pins on every cell even when nothing needed to
+     change, which is the churn the user is objecting to.
+  3. **When the running cell is NOT visible, jump a whole page**, not the
+     minimum: the first cell that was below the fold becomes the TOP of the
+     viewport, and the viewport then stays put while execution walks down the
+     newly-revealed page. At the end of the notebook, where less than a page
+     remains, shift only far enough to show the remainder including the last
+     cell (i.e. clamp to the end rather than leaving blank space).
+  Rationale the user gave for the big jumps, which contradicts the
+  smallest-possible-movement rule used everywhere else: in follow mode the user
+  is WATCHING, not interacting, so a large deliberate jump is not disorienting
+  the way it would be mid-edit.
+
+  **Open questions to settle before implementing:**
+  * Moving the SELECTION is a behaviour change with a cost: today follow mode
+    is deliberately viewport-only so it never yanks someone editing another
+    cell during a long run. Does selection-follow only apply while the notebook
+    is in command mode (leaving an editing user alone), or always?
+  * "First cell below the fold goes to the top" — what if that cell is taller
+    than the viewport? Probably pin its top and let it overflow, but say so.
+  * Does this REPLACE the current follow behaviour or become a third setting
+    value (`off` | `minimal` | `page`)? The status-footer anchor above is a
+    fourth possibility; they should not all ship as separate modes without a
+    reason.
+  * Related: bug #65 (follow mode landing mid-cell on a very long cell) is in
+    the current implementation's reveal path. If page-wise follow replaces it,
+    check whether that bug survives the rewrite or is dissolved by it.
 - Add `smooth_scrolling` to the GUI settings UI (user 2026-07-30). Phase 54
   added the setting to `default.json`, the schema and the docs, but NOT to the
   settings UI — so it's JSON-only today. It belongs in the existing **Editor →

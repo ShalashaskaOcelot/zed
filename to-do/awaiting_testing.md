@@ -43,6 +43,11 @@ listed here.
       what the fix addressed). With only ONE failure that is already selected,
       both keys re-reveal that same cell — by design, so it looks like nothing
       happens.
+- [ ] Bug #66 — Run cells that print NOTHING (e.g. `x = 1`), so the notebook
+      shows execution counts and `✓ 57ms` but no output: the Clear Outputs
+      control in the sidebar is now enabled and clearing wipes the counts,
+      times and ✓ markers. With a genuinely untouched notebook (nothing run) it
+      is still disabled.
 - [ ] Bug #34 — soak test (no direct repro known): create/save/reopen
       notebooks normally over a few sessions; the same file should never
       end up open in two tabs again. (Cause found by inspection: stale

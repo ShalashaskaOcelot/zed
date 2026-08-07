@@ -1093,6 +1093,20 @@ impl CodeCell {
         !self.outputs.is_empty()
     }
 
+    /// Whether this cell carries anything `clear_execution_record` would clear.
+    /// That is MORE than outputs: the execution count, the duration/timestamp
+    /// in the status line and the ✓/✕ marker all go too. Clear Outputs keys its
+    /// enabled state off this, so a cell that ran without printing anything
+    /// (`x = 1`) doesn't leave the control looking like there is nothing to do
+    /// while its `[3] ✓ 57ms` is still on screen.
+    pub fn has_execution_record(&self) -> bool {
+        self.has_outputs()
+            || self.execution_count.is_some()
+            || self.execution_duration.is_some()
+            || self.last_executed_at.is_some()
+            || self.execution_status != CellExecutionStatus::Idle
+    }
+
     pub fn outputs(&self) -> &[Output] {
         &self.outputs
     }
