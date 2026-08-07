@@ -48,6 +48,22 @@ listed here.
       control in the sidebar is now enabled and clearing wipes the counts,
       times and ✓ markers. With a genuinely untouched notebook (nothing run) it
       is still disabled.
+- [ ] Bug #67 — Scroll the mouse wheel down a notebook showing a wide
+      DataFrame: only the NOTEBOOK moves; the table no longer drifts sideways.
+      The tilt/second wheel still scrolls the table horizontally.
+- [ ] Bug #68 — Grab the wide table's horizontal scrollbar and drag: the thumb
+      follows the pointer and keeps scrolling, instead of sliding away and
+      vanishing.
+- [ ] Bug #69 — A DataFrame with long column titles: no title wraps its last
+      character onto a second line, at any table width (including one narrow
+      enough to fit the output block).
+- [ ] Bug #70 — A table with a long text column (e.g. paths): every column's
+      left edge is a straight vertical line down the whole table, regardless of
+      how long individual values are.
+- [ ] Bug #72 — Start a kernel (and separately, restart one) WITHOUT running
+      anything: the strip settles on "Idle" by itself rather than sticking on
+      "Starting" until a cell is run. Intermittent before the fix, so it needs a
+      few attempts to trust.
 - [ ] Bug #34 — soak test (no direct repro known): create/save/reopen
       notebooks normally over a few sessions; the same file should never
       end up open in two tabs again. (Cause found by inspection: stale
@@ -140,37 +156,42 @@ and defects become new backlog/bug items.
 Kind: mixed — mostly changes to existing behaviour, so if one of these still
 behaves as before, say so and it gets fixed in place rather than refiled.
 
-- [ ] Launch the app and open the kernel picker immediately: it says
+- [x] Launch the app and open the kernel picker immediately: it says
       "Searching for kernels…" and then fills in, instead of "No matches".
-      Once discovery has settled with nothing found, it does say "No matches".
-- [ ] Registered Jupyter kernelspec entries now show the INTERPRETER they
-      launch (`argv[0]`) as their second line, so two similarly-named venv
-      kernels are distinguishable. (Falls back to the kernelspec directory when
-      argv[0] isn't an absolute path.)
-- [ ] The right sidebar no longer has a kernel selector at the bottom; the
-      top-right strip still opens the picker normally.
+      CONFIRMED 2026-08-06.
+- [x] Registered Jupyter kernelspec entries now show the INTERPRETER they
+      launch (`argv[0]`) as their second line. CONFIRMED 2026-08-06.
+- [x] The right sidebar no longer has a kernel selector at the bottom.
+      CONFIRMED 2026-08-06.
 - [ ] Open a notebook from the project panel WITHOUT clicking into it, press
       Run All in the sidebar, then use a keyboard shortcut (`escape`, arrows,
       `shift-enter`) — it now acts on the notebook, because the button moved
       focus there. Clicking a control WHILE editing a cell should NOT throw you
       out of the cell.
-- [ ] Creating an env still works and the "Creating…" row looks tidier — it now
-      matches the kernel rows' layout with a spinning icon. (Its failure to
-      refresh live when the build finishes is still bug #58.)
+- [x] Creating an env still works and the "Creating…" row looks tidier.
+      CONFIRMED 2026-08-06 — and the user re-confirmed it does NOT refresh when
+      the build finishes (still bug #58), and asked for a "creating" status
+      outside the picker too, since the strip shows a misleading "Starting"
+      (backlogged, not a defect in this phase).
 
 ## Phase 63 — Wide notebook outputs and output-body interaction
 
 Kind: mixed — the wide-output part is a change to existing behaviour (say so if
 it still clips), the click-to-select part is a new affordance.
 
-- [ ] Display a pandas DataFrame far wider than the pane: it is no longer cut
-      off at the right edge — it scrolls sideways WITHIN its output block, with
-      a horizontal scrollbar, and the notebook itself never scrolls sideways.
-- [ ] Scrolling the wheel over a wide table still scrolls the NOTEBOOK
-      vertically.
-- [ ] Clicking anywhere on an output selects that cell (gutter highlights,
-      command mode), so keyboard shortcuts then act on it — and dragging across
-      output text still selects the text rather than just selecting the cell.
-- [ ] Narrow tables and ordinary text output are unchanged: no scrollbar, no
-      layout shift, same widths as before.
+- [x] Display a pandas DataFrame far wider than the pane: it scrolls sideways
+      within its output block. PARTIALLY CONFIRMED 2026-08-06 — the sideways
+      scrolling itself works, but the scrollbar was unusable (bug #68) and the
+      table's own rendering had two defects the wider view exposed: column
+      titles wrapping (bug #69) and columns not lining up row to row (bug #70).
+- [x] Scrolling the wheel over a wide table still scrolls the NOTEBOOK
+      vertically. FAILED 2026-08-06 — it scrolled the notebook AND dragged the
+      table sideways at the same time. Filed as bug #67.
+- [x] Clicking anywhere on an output selects that cell, and dragging across
+      output text still selects the text. CONFIRMED 2026-08-06. (The wording
+      here was ambiguous: selecting the cell as well as the text on a drag is
+      the intended behaviour, and that is what happens.)
+- [x] Narrow tables and ordinary text output are unchanged. CONFIRMED
+      2026-08-06 — except that a table small enough to fit still wrapped its
+      column titles, which is bug #69, not a width regression.
 

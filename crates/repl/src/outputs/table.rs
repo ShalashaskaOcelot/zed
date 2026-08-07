@@ -230,11 +230,18 @@ impl TableView {
             color: text_style.color,
             ..Default::default()
         }];
+        // The header renders SEMIBOLD (`render_row`), which is wider than the
+        // same string at regular weight. Measuring it at regular weight left
+        // every column a few pixels short of its own title, so long titles
+        // wrapped their last character onto a second line even when the table
+        // had room to spare (user 2026-08-06).
+        let mut header_runs = runs.clone();
+        header_runs[0].font.weight = FontWeight::SEMIBOLD;
 
         for field in table.schema.fields.iter() {
-            runs[0].len = field.name.len();
+            header_runs[0].len = field.name.len();
             let mut width = text_system
-                .layout_line(&field.name, font_size, &runs, None)
+                .layout_line(&field.name, font_size, &header_runs, None)
                 .width;
 
             let Some(data) = table.data.as_ref() else {
@@ -370,7 +377,15 @@ impl TableView {
                     .min_w(*width + px(22.))
                     .map(|cell| {
                         if fill_width {
-                            cell.flex_grow(f32::from(*width))
+                            // `flex_basis(0)` is what keeps columns ALIGNED
+                            // down the table. With the default `auto` basis
+                            // each cell starts from its own content width, so
+                            // every row distributed the spare space differently
+                            // and a long value in column 1 shifted column 2
+                            // right for that row only (user 2026-08-06). From a
+                            // zero basis the split depends solely on the grow
+                            // factors, which are per-COLUMN.
+                            cell.flex_basis(px(0.)).flex_grow(f32::from(*width))
                         } else {
                             cell.w(*width + px(22.))
                         }
@@ -446,7 +461,7 @@ impl Render for TableView {
             })
             .collect();
 
-        v_flex()
+        let mut scroll_container = div()
             .id("table")
             .overflow_x_scroll()
             .track_scroll(&self.scroll_handle)
@@ -469,7 +484,26 @@ impl Render for TableView {
                     .min_w(self.total_width())
                     .child(header)
                     .children(body),
-            )
+            );
+        // Without this a VERTICAL wheel delta is applied to this element's
+        // horizontal offset, because gpui falls back to the other axis when an
+        // element scrolls in only one direction (`div.rs`, the scroll-wheel
+        // handler). Scrolling down the notebook therefore dragged every wide
+        // table sideways at the same time (user 2026-08-06). Restricted to its
+        // own axis, the table answers only to horizontal input — a tilt wheel,
+        // a trackpad swipe, or the scrollbar — and vertical wheels pass
+        // through to the notebook.
+        scroll_container.style().restrict_scroll_to_axis = Some(true);
+
+        v_flex()
+            .w_full()
+            // The scrollbar must live OUTSIDE the scrolling element: as a child
+            // of it, it was laid out in content space and scrolled away under
+            // the pointer the moment you dragged it (user 2026-08-06). Same
+            // structure as `ui`'s data_table — scroll container inside,
+            // scrollbars on the wrapper. Horizontal only: vertical scrolling
+            // belongs to the notebook.
+            .child(scroll_container)
             .when(row_count > MAX_RENDERED_ROWS, |this| {
                 this.child(
                     div()
@@ -482,9 +516,6 @@ impl Render for TableView {
                         )),
                 )
             })
-            // Horizontal only: the table must never capture vertical scrolling,
-            // which belongs to the notebook (the bug-#63 decision). Visibility
-            // follows the user's editor scrollbar setting, as elsewhere.
             .custom_scrollbars(
                 Scrollbars::for_settings::<editor::EditorSettingsScrollbarProxy>()
                     .show_along(ScrollAxes::Horizontal)

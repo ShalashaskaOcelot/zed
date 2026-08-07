@@ -546,6 +546,16 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   `KernelPickerDelegate` gets its entries and whether the notebook's
   build-completion path notifies/refreshes the open picker (vs only updating the
   notebook itself).
+- **Re-confirmed (user 2026-08-06, phase 64 testing, screenshot):** still
+  happening after phase 64's row restyle — the strip shows the new env as
+  "Idle" (built, running) while the open picker's row still reads "Creating
+  environment…". Phase 64 deliberately only touched the row's LOOK, so this is
+  unchanged, not a regression. Note the picker DOES now rebuild its entries when
+  `ReplStore` updates (bug #20's observer) — so the likely gap is that finishing
+  a build updates the NOTEBOOK's `creating_kernel_name` without the open
+  picker's captured `creating` value being refreshed, since that value is
+  passed into the delegate at build time and re-injected on every rebuild
+  (`build_entries_with_creating`). Start there.
 - **Fix attempted:** none
 - **Tested:** n/a
 
@@ -629,4 +639,127 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   status) mirrors exactly what `clear_execution_record` clears; the notebook's
   gate (`NotebookEditor::has_execution_record`) and the control's `disabled`
   state now use it.
+- **Tested:** no — needs user confirmation
+
+## 67. A vertical wheel scrolls wide tables sideways
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-08-06, testing phase 63) Scrolling the mouse wheel
+  down a notebook that shows a wide DataFrame scrolls BOTH the notebook
+  (vertically) and the table (horizontally) at the same time. The vertical
+  wheel should never move a table sideways: horizontal input should come only
+  from a tilt/second wheel (which works correctly) or the scrollbar.
+- **Analysis:** gpui's scroll-wheel handler falls back to the other axis when
+  an element scrolls in only ONE direction: with `overflow.x == Scroll` and no
+  vertical overflow it assigns `delta.y` to `delta_x` unless
+  `restrict_scroll_to_axis` is set (`gpui/src/elements/div.rs`, the
+  `ScrollWheelEvent` handler). Phase 63's table scroll container never set it.
+  The notebook scrolls too because the table doesn't consume the event.
+- **Fix attempted (2026-08-06):** `restrict_scroll_to_axis = Some(true)` on the
+  table's scroll container, the same way `ui`'s `data_table` and markdown code
+  blocks do it. The table now answers only to horizontal input; vertical wheels
+  pass through to the notebook.
+- **Tested:** no — needs user confirmation
+
+## 68. The table's horizontal scrollbar scrolls away when dragged
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-08-06, testing phase 63) The wide-table scrollbar
+  "kind of works but there's something wrong with it" — grabbing the thumb and
+  dragging right moves it LEFT, it slides out from under the pointer,
+  scrolling stops and the thumb disappears. It behaves as if it were fixed
+  inside the content rather than pinned to the viewport.
+- **Analysis:** that is exactly what it was. Phase 63 applied
+  `.custom_scrollbars(...)` to the SAME element that carries
+  `overflow_x_scroll`, so the scrollbar was laid out in content space and
+  translated with the content it was supposed to control. `ui`'s `data_table`
+  shows the correct structure: the scrolling element is a CHILD, and the
+  scrollbars go on a non-scrolling wrapper.
+- **Fix attempted (2026-08-06):** the table's scroll container is now a child
+  of a plain wrapper, and `custom_scrollbars` (tracking the same
+  `ScrollHandle`) is applied to the wrapper.
+- **Tested:** no — needs user confirmation
+
+## 69. Column titles wrap their last character
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-08-06, screenshots) DataFrame column headers wrap a
+  SINGLE character onto a second line (`total_page_view` + `s`,
+  `features_used_coun` + `t`, `nps_satisfaction_scor` + `e`). It happens even
+  when the table has spare room — e.g. with `max_columns` low enough that the
+  whole table fits inside the output block — so it is not an overflow problem.
+- **Analysis:** the header renders SEMIBOLD (`render_row`), but
+  `TableView::new` measured every column's width — including the title — with
+  a REGULAR-weight run. Semibold is a few percent wider, which for a 20-odd
+  character title is about one character: each column ends up marginally
+  narrower than its own title, and the title wraps.
+- **Fix attempted (2026-08-06):** header titles are measured with a
+  `FontWeight::SEMIBOLD` run, matching how they render.
+- **Tested:** no — needs user confirmation
+
+## 70. Table columns don't line up from row to row
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-08-06, screenshot) In a two-column table (`name`,
+  `path`) the second column's start position shifts row by row: it moves right
+  on rows whose `name` is long (index 10, 15) and back left on rows whose name
+  is short (index 14). A column's left edge should be a hard vertical line
+  through the whole table.
+- **Analysis:** in fill-width mode (used when any column is longer than
+  `LONG_COLUMN_WIDTH`) cells are laid out with `flex_grow(width)` and no
+  explicit basis, so each cell's flex basis defaults to `auto` — its own
+  CONTENT width. Spare space is then distributed differently in every row,
+  because every row's content differs. The grow factors are per-column but the
+  bases were per-cell.
+- **Fix attempted (2026-08-06):** `flex_basis(px(0.))` on fill-width cells, so
+  the split depends only on the per-column grow factors and the per-column
+  `min_w`. Fixed-width (non-fill) mode was already consistent.
+- **Tested:** no — needs user confirmation
+
+## 71. A cell being edited stops accepting input when scrolled out of view
+
+- **Status:** open (not diagnosed — do NOT guess a fix)
+- **Symptom:** (user 2026-08-06) With a cell in EDIT mode, scroll the notebook
+  so that cell leaves the viewport (e.g. to check a variable name further up).
+  Typing does nothing, and command keybindings don't work either. The cell
+  cannot be run. Scrolling it back into view restores everything. Does NOT
+  happen in command mode.
+- **Analysis:** almost certainly the cell list's virtualization. `list()` only
+  renders items near the viewport, so a scrolled-away cell's editor element
+  stops being painted; gpui drops focus for an element that is no longer in the
+  tree, which takes the keyboard with it. The notebook's own key context is
+  still mounted, which is why command mode is unaffected — its bindings live on
+  the notebook, while edit-mode input needs the cell EDITOR to hold focus.
+  Needs confirming against how `list` handles focused-but-unrendered items
+  before choosing between: keeping the focused cell rendered (an "always render
+  the focused item" exception in the list), restoring focus when it scrolls
+  back, or refusing to let the viewport leave the edited cell.
+- **Fix attempted:** none
+- **Tested:** n/a
+
+## 72. Kernel status sticks on "Starting" until a cell is run
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-08-06) After starting a kernel, the status stays
+  "Starting" even though the kernel is fully up — the user saw it flash "Idle"
+  for an instant and then go back. Running a cell flips it straight to "Busy"
+  and then correctly to "Idle". Also seen after a restart:
+  "Restarting" → "Starting" → stuck. Intermittent; no reliable repro.
+- **Analysis:** a Jupyter kernel broadcasts `status: starting` on iopub when it
+  comes up, and `NotebookEditor::route` feeds every status message into
+  `Kernel::set_execution_state`. The launch task sets
+  `Kernel::RunningKernel(...)` with `ExecutionState::Idle` — that is the flash
+  of "Idle" — and if the kernel's own `starting` broadcast arrives AFTER that
+  assignment (a race, hence the intermittency), it overwrites Idle with
+  Starting. Nothing else updates the state until the next execution, so the
+  strip sits on "Starting" until a cell runs. The restart case is the same race
+  one step later.
+- **Fix attempted (2026-08-06):** `Kernel::set_execution_state` ignores an
+  incoming `Starting` for a kernel that is already `RunningKernel` — by
+  definition it is past starting, and the only source of that message is the
+  startup broadcast we have already outrun. Caveat recorded in the code: during
+  a kernel-initiated AUTO-restart the sequence is
+  `autorestarting` → `starting` → `idle`, so the brief `starting` there now
+  reads as the previous state instead; `autorestarting` still shows Restarting,
+  so the visible outcome is unchanged.
 - **Tested:** no — needs user confirmation

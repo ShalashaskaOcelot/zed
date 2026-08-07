@@ -844,6 +844,18 @@ impl Kernel {
 
     pub fn set_execution_state(&mut self, status: &ExecutionState) {
         if let Kernel::RunningKernel(running_kernel) = self {
+            // A connected kernel is by definition past starting. Kernels
+            // broadcast `status: starting` on iopub as they come up, and that
+            // message can arrive AFTER the launch task has already installed
+            // the kernel here as Running/Idle — which left the status stuck on
+            // "Starting" until the next execution changed it (bug #72). The
+            // one cost: during a kernel-initiated auto-restart the sequence is
+            // autorestarting → starting → idle, so the brief `starting` no
+            // longer shows; `autorestarting` already reports Restarting, so
+            // what the user sees is unchanged.
+            if matches!(status, ExecutionState::Starting) {
+                return;
+            }
             running_kernel.set_execution_state(status.clone());
         }
     }

@@ -103,6 +103,17 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
   (the accent bar + run button, `GUTTER_WIDTH`), so the layout of two adjacent
   gutters needs a look — line numbers should not push the cell content around
   or double the left margin.
+- Show a "creating environment" status in the kernel strip, not just in the
+  picker (user 2026-08-06, screenshot). While an env is being built the picker
+  row says "Creating environment…" but the TOP-RIGHT strip says "Starting",
+  which is misleading — nothing is starting yet, a build is running and the
+  kernel launch only follows it. Phase 48 deliberately maps
+  `creating_kernel_name` onto `KernelStatus::Starting` for the strip
+  (`render_kernel_strip`); this wants its own state instead, with its own label
+  (and, after phase 62, the spinning icon it already gets for free). Small:
+  a `Creating` arm in the strip's status derivation rather than the current
+  `if creating { Starting }`. Keep it distinct from the real Starting state so
+  the two are legible in sequence: creating → starting → idle.
 - Exec timer: "Run All resets the tally" sub-option (user 2026-08-06, after
   confirming phase 61 — user wants this one). Its own setting, only meaningful
   when `repl.notebook_show_execution_time` is on: hitting Run All zeroes the
