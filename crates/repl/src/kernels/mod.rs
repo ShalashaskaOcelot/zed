@@ -200,10 +200,8 @@ pub fn start_kernel_tasks<S: KernelSession + 'static>(
                 if let Err(err) = result {
                     session
                         .update(cx, |session, cx| {
-                            session.kernel_errored(
-                                format!("handling failed for {name}: {err}"),
-                                cx,
-                            );
+                            session
+                                .kernel_errored(format!("handling failed for {name}: {err}"), cx);
                             cx.notify();
                         })
                         .ok();

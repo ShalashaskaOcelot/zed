@@ -269,12 +269,7 @@ impl TerminalOutput {
     /// frame's terminal sync, which is fresh by the time a copy shortcut
     /// dispatched after the selection gesture can run.
     pub fn selection_text(&self, cx: &App) -> Option<String> {
-        let text = self
-            .terminal
-            .read(cx)
-            .last_content
-            .selection_text
-            .clone()?;
+        let text = self.terminal.read(cx).last_content.selection_text.clone()?;
         if text.is_empty() { None } else { Some(text) }
     }
 
@@ -724,9 +719,7 @@ impl Render for TerminalOutput {
                         {
                             return;
                         }
-                        terminal.update(cx, |terminal, cx| {
-                            terminal.mouse_drag(event, bounds, cx)
-                        });
+                        terminal.update(cx, |terminal, cx| terminal.mouse_drag(event, bounds, cx));
                         this.update(cx, |_, cx| cx.notify());
                     }
                 });

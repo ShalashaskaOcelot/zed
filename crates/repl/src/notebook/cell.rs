@@ -15,9 +15,7 @@ use settings::Settings as _;
 use ui::{CommonAnimationExt, ContextMenu, IconButtonShape, PopoverMenu, Tooltip, prelude::*};
 use util::ResultExt;
 use workspace::Workspace;
-use zed_actions::notebook::{
-    AddCellBelow, DeleteCell, RunCellAndBelow, RunCellsAbove,
-};
+use zed_actions::notebook::{AddCellBelow, DeleteCell, RunCellAndBelow, RunCellsAbove};
 
 use crate::{
     notebook::{CELL_HOVER_GROUP, CODE_BLOCK_INSET, GUTTER_WIDTH},
@@ -44,7 +42,12 @@ pub fn format_duration(duration: Duration) -> String {
     } else {
         let hours = (total_secs / SECS_PER_HOUR) as u64;
         let minutes = ((total_secs % SECS_PER_HOUR) / SECS_PER_MINUTE) as u64;
-        format!("{}h {}m {:.1}s", hours, minutes, total_secs % SECS_PER_MINUTE)
+        format!(
+            "{}h {}m {:.1}s",
+            hours,
+            minutes,
+            total_secs % SECS_PER_MINUTE
+        )
     }
 }
 
@@ -79,12 +82,17 @@ pub enum CellEvent {
     /// The cell was clicked with a selection modifier held: shift extends the
     /// contiguous selection from the anchor to this cell; ctrl/cmd (`!shift`)
     /// toggles this cell in a discontiguous multi-selection.
-    ModifiedClick { id: CellId, shift: bool },
+    ModifiedClick {
+        id: CellId,
+        shift: bool,
+    },
     /// The cell's gutter (the run-button / accent-bar strip, or the output
     /// gutter) was plain-clicked. Selects just this cell and drops into command
     /// mode. Emitted only from the gutter, never the editor, so clicking the
     /// cell body still focuses the editor into edit mode.
-    PlainClick { id: CellId },
+    PlainClick {
+        id: CellId,
+    },
     /// Savable cell metadata changed (e.g. input/output collapse state, which
     /// persists to the .ipynb): the notebook should count as dirty.
     MetadataChanged(CellId),
@@ -1017,15 +1025,14 @@ impl CodeCell {
     fn metadata_for_save(&self) -> CellMetadata {
         let mut metadata = self.metadata.clone();
 
-        let mut jupyter =
-            metadata
-                .jupyter
-                .take()
-                .unwrap_or(nbformat::v4::JupyterCellMetadata {
-                    source_hidden: None,
-                    outputs_hidden: None,
-                    additional: Default::default(),
-                });
+        let mut jupyter = metadata
+            .jupyter
+            .take()
+            .unwrap_or(nbformat::v4::JupyterCellMetadata {
+                source_hidden: None,
+                outputs_hidden: None,
+                additional: Default::default(),
+            });
         jupyter.source_hidden = self.source_collapsed.then_some(true);
         jupyter.outputs_hidden = self.outputs_collapsed.then_some(true);
         let keep = jupyter.source_hidden.is_some()
@@ -1052,15 +1059,14 @@ impl CodeCell {
                         iopub_status_idle: None,
                         additional: Default::default(),
                     });
-            let completed_text =
-                completed.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            let completed_text = completed.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
             execution.shell_execute_reply = Some(completed_text.clone());
             execution.iopub_status_idle = Some(completed_text);
             if let Some(duration) = self.execution_duration
                 && let Ok(duration) = chrono::Duration::from_std(duration)
             {
-                let started_text = (completed - duration)
-                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                let started_text =
+                    (completed - duration).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
                 execution.iopub_status_busy = Some(started_text.clone());
                 execution.shell_execute_reply_started = Some(started_text);
             }
@@ -1260,7 +1266,11 @@ impl CodeCell {
         // Prefer the precise start (iopub `execute_input`); fall back to the
         // submit time for fast cells whose reply beat their input, so they
         // still show a (near-exact) duration rather than none.
-        if let Some(start_time) = self.execution_start_time.take().or(self.submitted_at.take()) {
+        if let Some(start_time) = self
+            .execution_start_time
+            .take()
+            .or(self.submitted_at.take())
+        {
             self.execution_duration = Some(start_time.elapsed());
         }
         self.submitted_at = None;
@@ -1630,8 +1640,9 @@ impl CodeCell {
                     Output::ErrorOutput(ErrorView {
                         ename: error.ename.clone(),
                         evalue: error.evalue.clone(),
-                        traceback: cx
-                            .new(|cx| TerminalOutput::from(&error.traceback.join("\n"), window, cx)),
+                        traceback: cx.new(|cx| {
+                            TerminalOutput::from(&error.traceback.join("\n"), window, cx)
+                        }),
                     }),
                     cx,
                 );
@@ -1651,7 +1662,9 @@ impl CodeCell {
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    cx.emit(CellEvent::PlainClick { id: this.id.clone() });
+                    cx.emit(CellEvent::PlainClick {
+                        id: this.id.clone(),
+                    });
                 }),
             )
             .child(self.gutter_indicator_bar(cx))
@@ -1828,7 +1841,9 @@ impl RenderableCell for CodeCell {
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    cx.emit(CellEvent::PlainClick { id: this.id.clone() });
+                    cx.emit(CellEvent::PlainClick {
+                        id: this.id.clone(),
+                    });
                 }),
             )
             .child(self.gutter_indicator_bar(cx))
@@ -2084,7 +2099,8 @@ impl Render for CodeCell {
                                                     .when_some(
                                                         output_max_height,
                                                         |div, max_height| {
-                                                            div.max_h(max_height).overflow_y_scroll()
+                                                            div.max_h(max_height)
+                                                                .overflow_y_scroll()
                                                         },
                                                     )
                                                     .children(self.outputs.iter().map(|output| {
@@ -2103,7 +2119,9 @@ impl Render for CodeCell {
                                                                 ))
                                                                 .into_any_element(),
                                                             None => div()
-                                                                .children(output.content(window, cx))
+                                                                .children(
+                                                                    output.content(window, cx),
+                                                                )
                                                                 .into_any_element(),
                                                         }
                                                     })),

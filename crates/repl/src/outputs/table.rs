@@ -61,9 +61,7 @@ use runtimelib::media::datatable::TabularDataResource;
 use serde_json::Value;
 use settings::Settings;
 use theme_settings::ThemeSettings;
-use ui::{
-    IntoElement, ScrollAxes, Scrollbars, Styled, WithScrollbar, div, prelude::*, v_flex,
-};
+use ui::{IntoElement, ScrollAxes, Scrollbars, Styled, WithScrollbar, div, prelude::*, v_flex};
 use util::markdown::MarkdownEscaped;
 
 use crate::outputs::OutputContent;
@@ -543,8 +541,8 @@ impl OutputContent for TableView {
     fn buffer_content(&mut self, _: &mut Window, cx: &mut App) -> Option<Entity<Buffer>> {
         let markdown_table = self.cached_clipboard_content.text()?;
         let buffer = cx.new(|cx| {
-            let mut buffer = Buffer::local(markdown_table, cx)
-                .with_language(language::PLAIN_TEXT.clone(), cx);
+            let mut buffer =
+                Buffer::local(markdown_table, cx).with_language(language::PLAIN_TEXT.clone(), cx);
             buffer.set_capability(language::Capability::ReadOnly, cx);
             buffer
         });

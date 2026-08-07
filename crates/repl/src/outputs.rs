@@ -380,7 +380,12 @@ impl Output {
                         |el| el.flex_1().w_full().overflow_x_hidden(),
                     )
                     .when_some(max_width, |el, max_width| el.max_w(max_width))
-                    .child(v_flex().w_full().children(content).children(truncation_notice)),
+                    .child(
+                        v_flex()
+                            .w_full()
+                            .children(content)
+                            .children(truncation_notice),
+                    ),
             )
             .children(match self {
                 Self::Plain { content, .. } => {
