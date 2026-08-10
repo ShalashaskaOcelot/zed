@@ -26,7 +26,7 @@ use smallvec::SmallVec;
 use std::{
     any::{Any, TypeId},
     cell::RefCell,
-    path::Path,
+    path::{Path, PathBuf},
     rc::Rc,
     sync::Arc,
     time::Duration,
@@ -189,6 +189,23 @@ pub trait Item: Focusable + EventEmitter<Self::Event> + Render + Sized {
     /// By default, returns the tab content text.
     fn suggested_filename(&self, cx: &App) -> SharedString {
         self.tab_content_text(0, cx)
+    }
+
+    /// Adjust the path chosen in the save-as dialog before anything is built
+    /// from it. The default keeps the user's choice verbatim.
+    ///
+    /// An item whose format is only recognised by its extension can insist on
+    /// one here: the platform dialog cannot be restricted by file type (gpui's
+    /// `prompt_for_new_path` takes no filter on any platform), so a suggested
+    /// filename is all the steering there is, and a user who types over it
+    /// gets a file their own editor can no longer open.
+    ///
+    /// This runs on the RAW dialog result — before the worktree is resolved,
+    /// because a save-as outside the project creates a single-file worktree
+    /// keyed to this exact path, and before the pane looks for an already-open
+    /// item at it, so the dedup sees the path that will really be written.
+    fn adjust_save_as_path(&self, path: PathBuf, _cx: &App) -> PathBuf {
+        path
     }
 
     fn tab_icon(&self, _window: &Window, _cx: &App) -> Option<Icon> {
@@ -485,6 +502,7 @@ pub trait ItemHandle: 'static + Send {
     fn tab_content(&self, params: TabContentParams, window: &Window, cx: &App) -> AnyElement;
     fn tab_content_text(&self, detail: usize, cx: &App) -> SharedString;
     fn suggested_filename(&self, cx: &App) -> SharedString;
+    fn adjust_save_as_path(&self, path: PathBuf, cx: &App) -> PathBuf;
     fn tab_icon(&self, window: &Window, cx: &App) -> Option<Icon>;
     fn tab_tooltip_text(&self, cx: &App) -> Option<SharedString>;
     fn tab_tooltip_content(&self, cx: &App) -> Option<TabTooltipContent>;
@@ -636,6 +654,10 @@ impl<T: Item> ItemHandle for Entity<T> {
 
     fn suggested_filename(&self, cx: &App) -> SharedString {
         self.read(cx).suggested_filename(cx)
+    }
+
+    fn adjust_save_as_path(&self, path: PathBuf, cx: &App) -> PathBuf {
+        self.read(cx).adjust_save_as_path(path, cx)
     }
 
     fn tab_icon(&self, window: &Window, cx: &App) -> Option<Icon> {

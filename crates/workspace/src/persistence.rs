@@ -4033,9 +4033,17 @@ mod tests {
             .last_session_workspace_locations("s", None, fs.as_ref())
             .await
             .unwrap();
+        // Bug #50 deliberately reversed the old rule here (commit `cd2162f`):
+        // gating restore on every root still existing threw away the whole
+        // workspace — including its DB-stored unsaved items — over one deleted
+        // folder. The missing root is dropped; the workspace still comes back.
+        let restored = sessions
+            .iter()
+            .find(|workspace| workspace.workspace_id == WorkspaceId(1))
+            .expect("a workspace whose root vanished must still restore, so unsaved items survive");
         assert!(
-            sessions.is_empty(),
-            "workspaces whose paths no longer exist on disk must not restore"
+            restored.paths.is_empty(),
+            "the missing root is dropped, leaving an empty location"
         );
     }
 

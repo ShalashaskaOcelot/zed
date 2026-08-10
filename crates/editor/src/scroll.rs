@@ -838,21 +838,22 @@ impl Editor {
         self.scroll_manager.smooth_scroll_last_step = Some(Instant::now());
         // Replacing the handle here is safe: a previous task only leaves
         // `smooth_scroll_running` false once it has finished its loop.
-        self.scroll_manager.smooth_scroll_task = Some(cx.spawn_in(window, async move |editor, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(SMOOTH_SCROLL_FRAME_INTERVAL)
-                    .await;
-                let still_animating = editor
-                    .update_in(cx, |editor, window, cx| {
-                        editor.step_smooth_scroll(window, cx)
-                    })
-                    .unwrap_or(false);
-                if !still_animating {
-                    break;
+        self.scroll_manager.smooth_scroll_task =
+            Some(cx.spawn_in(window, async move |editor, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(SMOOTH_SCROLL_FRAME_INTERVAL)
+                        .await;
+                    let still_animating = editor
+                        .update_in(cx, |editor, window, cx| {
+                            editor.step_smooth_scroll(window, cx)
+                        })
+                        .unwrap_or(false);
+                    if !still_animating {
+                        break;
+                    }
                 }
-            }
-        }));
+            }));
     }
 
     /// Advance the smooth-scroll glide by one step, returning whether it is

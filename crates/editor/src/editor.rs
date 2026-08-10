@@ -10082,6 +10082,26 @@ impl Editor {
                             (false, false)
                         };
 
+                        // A buffer whose path belongs to another item type (a
+                        // notebook, say) is only text to US: opening it here
+                        // would show the user the raw file — the JSON behind a
+                        // notebook — instead of the thing they searched. Hand
+                        // those to the workspace's path opener, which picks the
+                        // right item. The jump to the match is lost in that
+                        // case; landing in the right editor matters more. The
+                        // question goes to the registry rather than testing an
+                        // extension, so this crate stays ignorant of who claims
+                        // what.
+                        let claimed_path = buffer_read
+                            .project_path(cx)
+                            .filter(|path| workspace.path_claimed_by_project_item(path, cx));
+                        if let Some(path) = claimed_path {
+                            workspace
+                                .open_path(path, Some(pane.downgrade()), true, window, cx)
+                                .detach_and_log_err(cx);
+                            continue;
+                        }
+
                         // If project file is none workspace.open_project_item will fail to open the excerpt
                         // in a pre existing workspace item if one exists, because Buffer entity_id will be None
                         // so we check if there's a tab match in that case first

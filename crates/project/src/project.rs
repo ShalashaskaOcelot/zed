@@ -193,6 +193,22 @@ pub trait ProjectItem: 'static {
     ) -> Option<Task<Result<Entity<Self>>>>
     where
         Self: Sized;
+
+    /// Whether this item type claims `path` as its own — i.e. the file has a
+    /// format this item exists to present, rather than being opened as text.
+    ///
+    /// This must agree with [`Self::try_open`] but must not do any of its work:
+    /// it answers a question ("who owns this path?") for callers that hold a
+    /// buffer and need to know whether opening it as text would be wrong, so it
+    /// has to stay cheap and side-effect free. Default `false`, which is right
+    /// for the general text editor and for any item that claims nothing in
+    /// particular.
+    fn claims_path(_project: &Entity<Project>, _path: &ProjectPath, _cx: &App) -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
     fn entry_id(&self, cx: &App) -> Option<ProjectEntryId>;
     fn project_path(&self, cx: &App) -> Option<ProjectPath>;
     fn is_dirty(&self) -> bool;

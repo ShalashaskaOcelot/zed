@@ -286,11 +286,22 @@ entry rather than archiving it.
   pressing anywhere in an output now selects its cell, on mouse-DOWN and
   without consuming the event, so drag-to-select-text still works.
   AWAITING USER TESTING.
+- Phase 66 — Notebook file surfaces: save-as always yields an `.ipynb`
+  (via a new `Item::adjust_save_as_path` applied before the worktree is
+  created), and a global-search hit on a notebook opens the NOTEBOOK — the
+  editor asks the project-item registry who claims a path instead of knowing
+  about extensions. `PENDING`
 - Phase 67 — Page-wise follow mode: a second `repl.notebook_follow_mode`
   where the selection carries execution and the viewport moves a page at a
   time, clamped at the end of the notebook. `PENDING`
 
 ## Fixed bugs (confirmed)
+
+- Stale unit test `test_last_session_restores_workspace_with_missing_paths`
+  asserted the behaviour bug #50 deliberately reversed, so `cargo test -p
+  workspace` had been RED since `cd2162f` (2026-07-23). Rewritten to assert
+  the intended behaviour (missing roots dropped, workspace still restored).
+  Confirmed by the suite itself — 220 pass. `PENDING`
 
 - #63 — Long text output showed only its LAST ~32 lines: the terminal emulator
   behind plain output follows the tail like a console, so anything past

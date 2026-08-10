@@ -2466,6 +2466,10 @@ impl Pane {
                 else {
                     return Ok(false);
                 };
+                // Let the item insist on its own extension before anything is
+                // built from this path — the worktree below is keyed to it, as
+                // is the already-open lookup further down.
+                let new_path = cx.update(|_window, cx| item.adjust_save_as_path(new_path, cx))?;
 
                 let project_path = pane
                     .update(cx, |pane, cx| {

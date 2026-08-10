@@ -151,6 +151,27 @@ and defects become new backlog/bug items.
       error toast (instead of failing silently). (Needs a machine/session
       where `python3`/`python` isn't on PATH.)
 
+## Phase 66 — Notebook file surfaces: save-as and global search
+
+Kind: **mixed** — item 2 is a defect fix (say so if a search hit still opens
+JSON, it gets fixed in place), item 1 is a change to save-as behaviour.
+
+- [ ] Save-as an untitled notebook and type a name with NO extension: the file
+      is written as `<name>.ipynb`, the tab shows it, and reopening it from the
+      file tree gives a notebook (not JSON).
+- [ ] Save-as OUTSIDE any project folder (somewhere in your home directory)
+      with a bare name — this is the path that needed the fix to happen before
+      the worktree is created, so it is the one most worth trying.
+- [ ] Type a name that already ends in `.ipynb`: it is used exactly as typed,
+      no second extension.
+- [ ] Ctrl-Shift-F for text that lives in a notebook cell, click the result:
+      the notebook opens in the notebook editor. (The jump to the matching line
+      is deliberately not carried over — it opens the notebook, not the cell.)
+- [ ] Ctrl-Shift-F for text in a normal file: unchanged — opens the editor at
+      the matching line, including the split (`ctrl-enter`) variant.
+- [ ] A notebook already open in a tab doesn't get a second tab from a search
+      hit; the existing tab activates.
+
 ## Phase 67 — Page-wise follow mode
 
 Kind: **new feature** (a SECOND follow mode; the existing one is untouched and

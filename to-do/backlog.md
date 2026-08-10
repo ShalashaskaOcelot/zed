@@ -103,27 +103,6 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
   (the accent bar + run button, `GUTTER_WIDTH`), so the layout of two adjacent
   gutters needs a look — line numbers should not push the cell content around
   or double the left margin.
-- Show a "creating environment" status in the kernel strip, not just in the
-  picker (user 2026-08-06, screenshot). While an env is being built the picker
-  row says "Creating environment…" but the TOP-RIGHT strip says "Starting",
-  which is misleading — nothing is starting yet, a build is running and the
-  kernel launch only follows it. Phase 48 deliberately maps
-  `creating_kernel_name` onto `KernelStatus::Starting` for the strip
-  (`render_kernel_strip`); this wants its own state instead, with its own label
-  (and, after phase 62, the spinning icon it already gets for free). Small:
-  a `Creating` arm in the strip's status derivation rather than the current
-  `if creating { Starting }`. Keep it distinct from the real Starting state so
-  the two are legible in sequence: creating → starting → idle.
-- Exec timer: "Run All resets the tally" sub-option (user 2026-08-06, after
-  confirming phase 61 — user wants this one). Its own setting, only meaningful
-  when `repl.notebook_show_execution_time` is on: hitting Run All zeroes the
-  tally first, so the number is the wall-clock cost of that ONE end-to-end pass
-  regardless of what was run before. Cheap and self-contained: reset
-  `execution_time_banked` / `execution_time_started_at` in `run_cells` (the
-  RunAll action) BEFORE it calls `run_cell_batch` — NOT inside
-  `run_cell_batch`, which is shared with Run Above / Run Below / multi-select
-  run, none of which mean "the whole notebook". See the low-priority per-cell
-  item for the alternative model this competes with.
 
 ## Low priority
 
@@ -238,6 +217,21 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
   cell pins its top and overflows). What remains in THIS item is only the
   status-footer anchor described above — a different framing question, still
   deferred.
+- Filter the save-as dialog to `.ipynb` for notebooks (investigated and
+  deferred in phase 66, 2026-08-10). The dialog is pre-filled with
+  `Untitled.ipynb` and phase 66 made the chosen path always END with `.ipynb`
+  (`Item::adjust_save_as_path`), so this is now COSMETIC — a user can no longer
+  produce an unopenable file, they can only see every file type listed while
+  choosing where to put a notebook. The cost is not: gpui's platform trait
+  (`gpui/src/platform.rs:180`) takes no filter argument, so adding one means
+  changing the trait plus SIX implementations (macos, windows, linux/ashpd,
+  web, test, visual_test), the in-app fallback picker
+  (`open_path_prompt`), `Workspace::prompt_for_new_path`, and every caller —
+  all in files upstream actively develops, i.e. real merge-conflict surface for
+  a cosmetic win. Do NOT half-do it for one platform. If it is ever picked up,
+  the natural shape is an `Option<FileFilter>` on `prompt_for_new_path`
+  threaded from `Item`, defaulting to no filter so every existing caller is
+  unaffected.
 - Add `smooth_scrolling` to the GUI settings UI (user 2026-07-30). Phase 54
   added the setting to `default.json`, the schema and the docs, but NOT to the
   settings UI — so it's JSON-only today. It belongs in the existing **Editor →

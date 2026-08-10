@@ -827,6 +827,7 @@ type BuildProjectItemForPathFn =
 struct ProjectItemRegistry {
     build_project_item_fns_by_type: TypeIdHashMap<BuildProjectItemFn>,
     build_project_item_for_path_fns: Vec<BuildProjectItemForPathFn>,
+    claims_path_fns: Vec<fn(&Entity<Project>, &ProjectPath, &App) -> bool>,
 }
 
 impl ProjectItemRegistry {
@@ -839,6 +840,8 @@ impl ProjectItemRegistry {
                     as Box<dyn ItemHandle>
             },
         );
+        self.claims_path_fns
+            .push(<T::Item as project::ProjectItem>::claims_path);
         self.build_project_item_for_path_fns
             .push(|project, project_path, window, cx| {
                 let project_path = project_path.clone();
@@ -923,6 +926,15 @@ impl ProjectItemRegistry {
             return Task::ready(Err(anyhow!("cannot open file {:?}", path.path)));
         };
         open_project_item
+    }
+
+    /// Whether some registered item type claims `path` as its own format,
+    /// meaning opening it as text would show the user its raw bytes instead of
+    /// the thing they asked for.
+    fn claims_path(&self, project: &Entity<Project>, path: &ProjectPath, cx: &App) -> bool {
+        self.claims_path_fns
+            .iter()
+            .any(|claims_path| claims_path(project, path, cx))
     }
 
     fn build_item<T: project::ProjectItem>(
@@ -4847,6 +4859,18 @@ impl Workspace {
             })
             .map(|option| option.context("pane was dropped"))?
         })
+    }
+
+    /// Whether `path` belongs to a registered item type that presents it as
+    /// something other than text — a notebook, an image, and so on.
+    ///
+    /// Callers that already hold a BUFFER (search results, go-to-definition)
+    /// use this to notice that opening it as an editor would show raw file
+    /// contents, and route through [`Self::open_path`] instead. It is a
+    /// registry lookup, so no crate has to know which extensions those are.
+    pub fn path_claimed_by_project_item(&self, path: &ProjectPath, cx: &App) -> bool {
+        cx.try_global::<ProjectItemRegistry>()
+            .is_some_and(|registry| registry.claims_path(self.project(), path, cx))
     }
 
     fn load_path(
@@ -15648,6 +15672,10 @@ mod tests {
         struct TestIpynbItem {}
 
         impl project::ProjectItem for TestIpynbItem {
+            fn claims_path(_project: &Entity<Project>, path: &ProjectPath, _cx: &App) -> bool {
+                path.path.extension() == Some("ipynb")
+            }
+
             fn try_open(
                 _project: &Entity<Project>,
                 path: &ProjectPath,
@@ -15760,6 +15788,63 @@ mod tests {
                     focus_handle: cx.focus_handle(),
                 }
             }
+        }
+
+        /// A registered item type can say which paths are ITS format, so a
+        /// caller holding a buffer (a search result, a go-to-definition) can
+        /// tell that opening it as text would show raw file contents. Items
+        /// that don't claim anything — `TestPngItem` here, and the general text
+        /// editor — leave every path alone.
+        #[gpui::test]
+        async fn test_path_claimed_by_project_item(cx: &mut TestAppContext) {
+            init_test(cx);
+
+            cx.update(|cx| {
+                register_project_item::<TestPngItemView>(cx);
+                register_project_item::<TestIpynbItemView>(cx);
+            });
+
+            let fs = FakeFs::new(cx.executor());
+            fs.insert_tree(
+                "/root1",
+                json!({
+                    "one.png": "BINARYDATAHERE",
+                    "two.ipynb": "{ totally a notebook }",
+                    "three.txt": "editing text, sure why not?"
+                }),
+            )
+            .await;
+
+            let project = Project::test(fs, ["root1".as_ref()], cx).await;
+            let (workspace, cx) =
+                cx.add_window_view(|window, cx| Workspace::test_new(project.clone(), window, cx));
+
+            let worktree_id = project.update(cx, |project, cx| {
+                project.worktrees(cx).next().unwrap().read(cx).id()
+            });
+
+            workspace.update(cx, |workspace, cx| {
+                let claimed = |name: &str, cx: &App| {
+                    workspace.path_claimed_by_project_item(
+                        &ProjectPath {
+                            worktree_id,
+                            path: rel_path(name).into(),
+                        },
+                        cx,
+                    )
+                };
+
+                assert!(claimed("two.ipynb", cx), "the ipynb item claims its own");
+                assert!(
+                    !claimed("three.txt", cx),
+                    "ordinary text belongs to no specialised item"
+                );
+                assert!(
+                    !claimed("one.png", cx),
+                    "an item that doesn't override `claims_path` claims nothing, \
+                     so it never redirects an open"
+                );
+            });
         }
 
         #[gpui::test]

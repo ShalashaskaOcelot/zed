@@ -5245,6 +5245,23 @@ pub struct NotebookItem {
 }
 
 impl project::ProjectItem for NotebookItem {
+    /// Match `.ipynb` by the worktree-relative path (the fast common case),
+    /// falling back to the ABSOLUTE path when the relative one carries no
+    /// extension. A file saved/opened OUTSIDE any worktree gets a single-file
+    /// worktree rooted at the file, whose relative path is empty — without this
+    /// fallback the extension gate failed and the notebook opened as raw JSON in
+    /// a plain text editor instead of the notebook UI.
+    fn claims_path(project: &Entity<Project>, path: &ProjectPath, cx: &App) -> bool {
+        path.path.extension() == Some("ipynb")
+            || project
+                .read(cx)
+                .absolute_path(path, cx)
+                .as_deref()
+                .and_then(|abs_path| abs_path.extension())
+                .and_then(|extension| extension.to_str())
+                == Some("ipynb")
+    }
+
     fn try_open(
         project: &Entity<Project>,
         path: &ProjectPath,
@@ -5254,22 +5271,7 @@ impl project::ProjectItem for NotebookItem {
         let project = project.clone();
         let languages = project.read(cx).languages().clone();
 
-        // Match `.ipynb` by the worktree-relative path (the fast common case),
-        // falling back to the ABSOLUTE path when the relative one carries no
-        // extension. A file saved/opened OUTSIDE any worktree gets a single-file
-        // worktree rooted at the file, whose relative path is empty — without
-        // this fallback the extension gate failed and the notebook opened as raw
-        // JSON in a plain text editor instead of the notebook UI.
-        let is_ipynb = path.path.extension() == Some("ipynb")
-            || project
-                .read(cx)
-                .absolute_path(&path, cx)
-                .as_deref()
-                .and_then(|abs_path| abs_path.extension())
-                .and_then(|ext| ext.to_str())
-                == Some("ipynb");
-
-        if is_ipynb {
+        if Self::claims_path(&project, &path, cx) {
             Some(cx.spawn(async move |cx| {
                 let abs_path = project
                     .read_with(cx, |project, cx| project.absolute_path(&path, cx))
@@ -5730,6 +5732,27 @@ impl Item for NotebookEditor {
         } else {
             self.tab_content_text(0, cx)
         }
+    }
+
+    /// Insist on `.ipynb`, whatever the user typed over the suggested name.
+    ///
+    /// Save-as can only ever write nbformat JSON, and the extension is the only
+    /// thing that makes the result open as a notebook again — the path registry
+    /// keys on it, and the save dialog can't be filtered to steer the choice.
+    /// So a name with any other extension (or none) gets `.ipynb` APPENDED
+    /// rather than replaced: `data.json` becomes `data.json.ipynb`, which keeps
+    /// whatever the user typed intact and visible instead of quietly discarding
+    /// part of their filename.
+    fn adjust_save_as_path(&self, path: PathBuf, _cx: &App) -> PathBuf {
+        if path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("ipynb"))
+        {
+            return path;
+        }
+        let mut name = path.file_name().unwrap_or_default().to_os_string();
+        name.push(".ipynb");
+        path.with_file_name(name)
     }
 
     fn tab_content(&self, params: TabContentParams, _window: &Window, cx: &App) -> AnyElement {
@@ -6611,6 +6634,72 @@ mod tests {
             assert!(
                 !editor.notebook_item.read(cx).is_untitled(),
                 "save-as must attach the notebook to its file"
+            );
+        });
+    }
+
+    /// Save-as can only write nbformat JSON, and the dialog can't be filtered
+    /// to `.ipynb`, so whatever the user types has to end up with the extension
+    /// that makes the file open as a notebook again.
+    #[gpui::test]
+    async fn test_save_as_path_always_gets_the_notebook_extension(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            editor::init(cx);
+        });
+
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(path!("/notebooks"), json!({})).await;
+        let project = Project::test(fs.clone(), [path!("/notebooks").as_ref()], cx).await;
+        cx.update(|cx| ReplStore::init(fs.clone(), cx));
+
+        let template = NotebookEditor::empty_notebook().expect("template should build");
+        let languages = project.read_with(cx, |project, _| project.languages().clone());
+        let notebook_item = cx.update(|cx| {
+            cx.new(|_| NotebookItem::untitled(project.downgrade(), languages, template))
+        });
+
+        let cx = cx.add_empty_window();
+        let editor = cx.update(|window, cx| {
+            cx.new(|cx| NotebookEditor::new(project.clone(), notebook_item, window, cx))
+        });
+        cx.run_until_parked();
+
+        editor.read_with(cx, |editor, cx| {
+            let adjust = |path: &str| {
+                Item::adjust_save_as_path(editor, PathBuf::from(path), cx)
+                    .to_string_lossy()
+                    .into_owned()
+            };
+
+            assert_eq!(
+                adjust(path!("/notebooks/analysis")),
+                path!("/notebooks/analysis.ipynb"),
+                "a bare typed name is the case that used to produce an unopenable file"
+            );
+            assert_eq!(
+                adjust(path!("/notebooks/analysis.ipynb")),
+                path!("/notebooks/analysis.ipynb"),
+                "a name that already ends in .ipynb is left exactly as typed"
+            );
+            assert_eq!(
+                adjust(path!("/notebooks/ANALYSIS.IPYNB")),
+                path!("/notebooks/ANALYSIS.IPYNB"),
+                "the extension check is case-insensitive, so no doubling up"
+            );
+            assert_eq!(
+                adjust(path!("/notebooks/data.json")),
+                path!("/notebooks/data.json.ipynb"),
+                "another extension is APPENDED to rather than replaced, so \
+                 nothing the user typed is silently dropped"
+            );
+            assert_eq!(
+                adjust(path!("/notebooks/analysis.v2")),
+                path!("/notebooks/analysis.v2.ipynb"),
+                "a version-suffixed name reads as an extension to the OS too, \
+                 and still has to end up openable"
             );
         });
     }
