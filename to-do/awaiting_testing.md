@@ -64,6 +64,12 @@ listed here.
       anything: the strip settles on "Idle" by itself rather than sticking on
       "Starting" until a cell is run. Intermittent before the fix, so it needs a
       few attempts to trust.
+- [ ] Bug #73 — NOT YET FIXED, listed only so the repro isn't lost: delete a
+      file from the project panel on Windows and note whether the "Failed to
+      trash" toast appears every time or only for some files/drives. That
+      distinction (metadata lookup failing vs the item never reaching the bin)
+      picks the fix. Remove this line once a fix is attempted and it gets a
+      normal pointer.
 - [ ] Bug #34 — soak test (no direct repro known): create/save/reopen
       notebooks normally over a few sessions; the same file should never
       end up open in two tabs again. (Cause found by inspection: stale

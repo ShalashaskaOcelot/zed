@@ -763,3 +763,37 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   reads as the previous state instead; `autorestarting` still shows Restarting,
   so the visible outcome is unchanged.
 - **Tested:** no — needs user confirmation
+
+## 73. "Failed to trash" toast after a successful delete
+
+- **Status:** open
+- **Symptom:** (user 2026-08-11, screenshot, Windows) Deleting a file from the
+  project panel works — the file goes to the Recycle Bin and leaves the tree —
+  but a red toast says "Failed to trash 1 of 1 file."
+- **Analysis (code inspection 2026-08-11, NOT yet reproduced — this container is
+  headless Linux with no desktop trash, so the Windows branch below is inferred
+  from the crate source rather than observed):** the deletion genuinely
+  succeeded; the error is about UNDO METADATA, not about deleting.
+  - `Fs::trash` (`fs/src/fs.rs:801`) calls `trash::delete_with_info`, which
+    demands the backend describe WHERE in the bin the file landed so the panel
+    can offer undo (the fork-visible `TrashedEntry` / `Change::Trashed` path).
+  - On Windows (`trash-rs` `windows.rs:40-108`) the item IDs are collected by a
+    `PostDeleteItem` sink, then each is looked up with `get_trash_item_by_id`
+    AFTER `PerformOperations` — and **a failed lookup is only `warn!`ed and
+    skipped**. If the list ends up empty, `delete_with_info` (`lib.rs:118-122`)
+    returns `Err("delete_with_info did not return trash item information")`,
+    with the file already in the Recycle Bin.
+  - Linux has the same hole for a file not on the home-trash mount
+    (`freedesktop.rs:67-80`: `item` stays `None`, nothing is pushed).
+  - `ProjectPanel::resolve_delete_entry` (`project_panel.rs:2086-2098`) maps any
+    `Err` to `DeleteEntryOutcome::Failed`, which raises the toast
+    (`show_remove_failure_toast`, `:2711`).
+- **Fix direction (not yet attempted):** trashing and describing-the-trashed-
+  thing are separate outcomes. Have `Fs::trash` return
+  `Result<Option<TrashedEntry>>` — `Ok(None)` meaning "trashed, but we cannot
+  describe it, so no undo entry for this one" — and treat that as success in the
+  panel. Only a genuine `Err` should count as a failure. Check the other
+  `Fs::trash` callers (`git_ui/src/git_panel.rs:1906` and `:2107`) at the same
+  time. Note this is upstream code in `fs.rs`, so keep the change minimal.
+- **Fix attempted:** none
+- **Tested:** n/a
