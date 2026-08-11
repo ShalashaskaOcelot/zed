@@ -291,6 +291,10 @@ entry rather than archiving it.
   created), and a global-search hit on a notebook opens the NOTEBOOK — the
   editor asks the project-item registry who claims a path instead of knowing
   about extensions. `PENDING`
+- Phase 69 — Notebooks behave like text files on disk: a loose notebook (one
+  outside every project root) restores instead of vanishing, its tab strikes
+  through when the file is deleted, and unsaved changes to a SAVED notebook
+  survive a quit. `PENDING`
 - Phase 67 — Page-wise follow mode: a second `repl.notebook_follow_mode`
   where the selection carries execution and the viewport moves a page at a
   time, clamped at the end of the notebook. `PENDING`

@@ -7,6 +7,7 @@ use std::{path::PathBuf, sync::Arc};
 use anyhow::{Context as _, Result, anyhow};
 use collections::HashMap;
 use feature_flags::{FeatureFlagAppExt as _, NotebookFeatureFlag};
+use fs::MTime;
 use futures::FutureExt;
 use futures::channel::oneshot;
 use futures::future::Shared;
@@ -21,7 +22,7 @@ use settings::{NotebookFollowMode, NotebookRunLandingMode, SeedQuerySetting, Set
 use ui::{
     CommonAnimationExt, ScrollAxes, ScrollbarStyle, Scrollbars, Tooltip, WithScrollbar, prelude::*,
 };
-use workspace::item::{SaveOptions, TabContentParams};
+use workspace::item::{ItemEvent, SaveOptions, TabContentParams};
 use workspace::notifications::NotificationId;
 use workspace::searchable::{
     Direction, SearchEvent, SearchOptions, SearchToken, SearchableItem, SearchableItemHandle,
@@ -278,6 +279,12 @@ pub struct NotebookEditor {
     /// `page` moves the selection with execution and scrolls a whole page at a
     /// time (see `follow_reveal`).
     follow_running_cell: bool,
+    /// Set when this notebook was restored from a session with unsaved changes
+    /// that are not on disk. The ordinary dirtiness signals can't see them: the
+    /// restored cells become their own baseline, so `has_structural_changes` and
+    /// `has_content_changes` both read clean even though the file on disk says
+    /// something else. Cleared by `mark_as_saved`, like every other dirty flag.
+    restored_unsaved_changes: bool,
     /// Set when follow mode has just repositioned the list, and cleared when the
     /// cell list is next rendered. Page-wise follow asks whether the running
     /// cell is on screen, which it answers from the list's item measurements —
@@ -479,6 +486,7 @@ impl NotebookEditor {
             active_run_cell: None,
             follow_running_cell: false,
             follow_scroll_pending: false,
+            restored_unsaved_changes: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             kernel_picker_handle: PopoverMenuHandle::default(),
@@ -614,6 +622,7 @@ impl NotebookEditor {
     pub fn mark_as_saved(&mut self, cx: &mut Context<Self>) {
         self.original_cell_order = self.cell_order.clone();
         self.execution_state_changed = false;
+        self.restored_unsaved_changes = false;
 
         for cell in self.cell_map.values() {
             match cell {
@@ -650,6 +659,14 @@ impl NotebookEditor {
                 Cell::Raw(_) => {}
             }
         }
+        // Re-serialize now that the notebook is clean, so the hot-exit copy of
+        // its unsaved contents is CLEARED. Without this the next restore would
+        // resurrect pre-save edits over a file that already has them: a clean
+        // notebook isn't in the close-time dirty set, so nothing else would
+        // rewrite that row. (This is the one thing `Editor` gets from having
+        // `EditorEvent::Saved` in its `should_serialize` set; the notebook's
+        // single `()` event has to be emitted deliberately.)
+        cx.emit(());
         cx.notify();
     }
 
@@ -1516,6 +1533,45 @@ impl NotebookEditor {
         cx.notify();
     }
 
+    /// Put back the unsaved changes a previous session was holding, over the
+    /// copy just loaded from disk (phase 69's hot exit).
+    ///
+    /// The cells are loaded exactly as a reload would load them, then the
+    /// notebook is marked dirty explicitly: the restored cells ARE the baseline
+    /// afterwards, so nothing else would report the difference from disk, and
+    /// without that the tab would look clean, closing wouldn't prompt, and the
+    /// next serialize would drop the very changes we just recovered.
+    ///
+    /// `saved_mtime` is what the file had when the session ended. If disk has
+    /// moved on since, someone edited the notebook while Zed was closed, and
+    /// these restored changes are no longer based on the current file — that is
+    /// exactly the conflict `disk_changed_externally` exists for (bug #14), so
+    /// saving will ask before overwriting instead of silently winning.
+    fn restore_unsaved_notebook(
+        &mut self,
+        unsaved: &nbformat::v4::Notebook,
+        saved_mtime: Option<MTime>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let disk_mtime = self
+            .notebook_item
+            .read(cx)
+            .buffer
+            .as_ref()
+            .and_then(|buffer| buffer.read(cx).saved_mtime());
+        self.reload_cells_from_notebook(unsaved, window, cx);
+        self.restored_unsaved_changes = true;
+        // Order matters: `reload_cells_from_notebook` clears the conflict flag
+        // because it normally means "we now match disk", which is the opposite
+        // of what just happened here.
+        if let (Some(saved_mtime), Some(disk_mtime)) = (saved_mtime, disk_mtime)
+            && saved_mtime != disk_mtime
+        {
+            self.disk_changed_externally = true;
+        }
+    }
+
     /// Take down the "notebook changed on disk" conflict toast. Called by any
     /// path that re-aligns us with disk — reload (command or toast button) and
     /// a confirmed overwrite save.
@@ -1537,8 +1593,18 @@ impl NotebookEditor {
         cx: &mut Context<Self>,
     ) {
         cx.subscribe_in(&buffer, window, |this, buffer, event, window, cx| {
-            if let language::BufferEvent::Reloaded = event {
-                this.handle_external_change(buffer, window, cx);
+            match event {
+                language::BufferEvent::Reloaded => this.handle_external_change(buffer, window, cx),
+                // The file was deleted, recreated or renamed under us. The disk
+                // state lives on the buffer's `File`, which we don't own, so the
+                // only thing to do is repaint: `tab_content` re-reads it, and the
+                // emitted event tells the pane the tab changed so the close
+                // prompt and `close_on_file_delete` see it too.
+                language::BufferEvent::FileHandleChanged => {
+                    cx.emit(());
+                    cx.notify();
+                }
+                _ => {}
             }
         })
         .detach();
@@ -5760,7 +5826,41 @@ impl Item for NotebookEditor {
             .single_line()
             .color(params.text_color())
             .when(params.preview, |this| this.italic())
+            // Struck through once the file is gone from disk, the same as a text
+            // file's tab. The indicator is per-item — `TabContentParams` carries
+            // no deleted flag and the default `tab_content` has no notion of one
+            // — so it has to be applied here (phase 69).
+            .when(Item::has_deleted_file(self, cx), |this| {
+                this.strikethrough()
+            })
             .into_any_element()
+    }
+
+    /// Whether the notebook's file has been deleted from disk while it stayed
+    /// open. Drives the strikethrough above, the "this file has been deleted"
+    /// prompt on close, and the `close_on_file_delete` setting — none of which
+    /// worked for notebooks while this defaulted to `false`.
+    fn has_deleted_file(&self, cx: &App) -> bool {
+        self.notebook_item
+            .read(cx)
+            .buffer
+            .as_ref()
+            .and_then(|buffer| buffer.read(cx).file())
+            .is_some_and(|file| file.disk_state().is_deleted())
+    }
+
+    /// The notebook's single `()` event means "something about this item that
+    /// the tab shows has changed" — it is saved, or its file appeared/vanished.
+    /// Mapping it to `UpdateTab` is what makes the pane re-read the title, the
+    /// dirty state and `has_deleted_file`; without it the tab still repainted on
+    /// ordinary redraws, but the deleted-file close prompt and the
+    /// `close_on_file_delete` setting never ran for a notebook.
+    ///
+    /// Deliberately NOT mapped to `ItemEvent::Edit`: that schedules autosave,
+    /// and `()` is not an edit signal — the notebook emits it on save.
+    fn to_item_events(_event: &Self::Event, f: &mut dyn FnMut(ItemEvent)) {
+        f(ItemEvent::UpdateTab);
+        f(ItemEvent::UpdateBreadcrumbs);
     }
 
     fn tab_icon(&self, _window: &Window, _cx: &App) -> Option<Icon> {
@@ -5952,7 +6052,8 @@ impl Item for NotebookEditor {
     }
 
     fn is_dirty(&self, cx: &App) -> bool {
-        self.execution_state_changed
+        self.restored_unsaved_changes
+            || self.execution_state_changed
             || self.has_structural_changes()
             || self.has_content_changes(cx)
     }
@@ -6002,24 +6103,44 @@ impl SerializableItem for NotebookEditor {
     ) -> Option<Task<Result<()>>> {
         let workspace_id = workspace.database_id()?;
         let abs_path = self.notebook_item.read(cx).path.clone();
-        // A saved notebook only needs its path (reloaded from disk on restore);
-        // an untitled one persists its full nbformat JSON so its cells survive.
-        let contents = if abs_path.is_none() {
-            serde_json::to_string(&self.to_notebook(cx)).ok()
-        } else {
-            None
-        };
-        // Nothing to restore from (untitled whose contents failed to serialize).
-        if abs_path.is_none() && contents.is_none() {
+        // Hot exit, on the same rule as `SerializedEditor`: keep the notebook's
+        // JSON whenever it has UNSAVED changes, so quitting never loses them,
+        // and keep only the path when it is clean, so restore just reopens the
+        // file. Gating on DIRTY rather than on untitled is the whole point —
+        // previously a saved notebook stored no contents at all and its unsaved
+        // edits died with the process (phase 69).
+        let notebook = Item::is_dirty(self, cx).then(|| self.to_notebook(cx));
+        // Nothing to restore from: an untitled notebook with no content to keep.
+        if abs_path.is_none() && notebook.is_none() {
             return None;
         }
+        let mtime = self
+            .notebook_item
+            .read(cx)
+            .buffer
+            .as_ref()
+            .and_then(|buffer| buffer.read(cx).saved_mtime());
         let db = NotebookDb::global(cx);
         Some(cx.spawn_in(window, async move |_this, cx| {
             cx.background_spawn(async move {
+                // Encode off the main thread. `to_notebook` has to run on it
+                // (it reads the cell entities), but a notebook carrying image
+                // outputs is megabytes of base64 and this runs on every edit,
+                // throttled only to `SERIALIZATION_THROTTLE_TIME`.
+                let contents = notebook
+                    .as_ref()
+                    .and_then(|notebook| serde_json::to_string(notebook).log_err());
+                if abs_path.is_none() && contents.is_none() {
+                    return Ok(());
+                }
                 db.save_serialized_notebook(
                     item_id,
                     workspace_id,
-                    SerializedNotebook { abs_path, contents },
+                    SerializedNotebook {
+                        abs_path,
+                        contents,
+                        mtime,
+                    },
                 )
                 .await
                 .context("failed to save serialized notebook")
@@ -6050,7 +6171,7 @@ impl SerializableItem for NotebookEditor {
         if let Some(abs_path) = serialized.abs_path {
             // Saved: reopen by path via the normal notebook open route so the
             // file is loaded and watched exactly as a fresh open would be.
-            let project_path = project.update(cx, |project, cx| {
+            let existing_project_path = project.update(cx, |project, cx| {
                 project
                     .find_worktree(&abs_path, cx)
                     .map(|(worktree, path)| ProjectPath {
@@ -6058,22 +6179,53 @@ impl SerializableItem for NotebookEditor {
                         path,
                     })
             });
-            let Some(project_path) = project_path else {
-                return Task::ready(Err(anyhow!(
-                    "serialized notebook path is not in any worktree: {abs_path:?}"
-                )));
-            };
-            let Some(open_task) =
-                <NotebookItem as project::ProjectItem>::try_open(&project, &project_path, cx)
-            else {
-                return Task::ready(Err(anyhow!("not a notebook path: {abs_path:?}")));
-            };
+            let saved_mtime = serialized.mtime;
+            let unsaved_contents = serialized.contents;
             window.spawn(cx, async move |cx| {
+                let project_path = match existing_project_path {
+                    Some(project_path) => project_path,
+                    None => {
+                        // Not in any worktree: a notebook opened from outside
+                        // every project root lives in an INVISIBLE single-file
+                        // worktree, and only VISIBLE worktrees are saved as the
+                        // workspace's roots — so at restore time that worktree
+                        // does not exist yet. Recreate it the way
+                        // `Project::open_local_buffer` does for a loose text
+                        // file, instead of giving up and dropping the tab.
+                        let (worktree, relative_path) = project
+                            .update(cx, |project, cx| {
+                                project.find_or_create_worktree(&abs_path, false, cx)
+                            })
+                            .await
+                            .with_context(|| format!("opening loose notebook {abs_path:?}"))?;
+                        ProjectPath {
+                            worktree_id: worktree.read_with(cx, |worktree, _| worktree.id()),
+                            path: relative_path,
+                        }
+                    }
+                };
+                let open_task = cx.update(|_, cx| {
+                    <NotebookItem as project::ProjectItem>::try_open(&project, &project_path, cx)
+                })?;
+                let Some(open_task) = open_task else {
+                    anyhow::bail!("not a notebook path: {abs_path:?}");
+                };
                 let notebook_item = open_task
                     .await
                     .context("failed to open serialized notebook by path")?;
+                // Contents are stored only for a notebook with UNSAVED changes,
+                // so anything here is newer than what was just loaded from disk.
+                let unsaved = unsaved_contents
+                    .as_deref()
+                    .and_then(|contents| NotebookEditor::parse_notebook_text(contents).log_err());
                 cx.update(|window, cx| {
-                    cx.new(|cx| NotebookEditor::new(project, notebook_item, window, cx))
+                    cx.new(|cx| {
+                        let mut editor = NotebookEditor::new(project, notebook_item, window, cx);
+                        if let Some(unsaved) = unsaved {
+                            editor.restore_unsaved_notebook(&unsaved, saved_mtime, window, cx);
+                        }
+                        editor
+                    })
                 })
             })
         } else if let Some(contents) = serialized.contents {
@@ -6089,14 +6241,28 @@ impl SerializableItem for NotebookEditor {
                 })
             })
         } else {
-            Task::ready(Err(anyhow!("empty serialized notebook")))
+            // Untitled and clean at quit, so nothing was worth keeping: come
+            // back as a fresh notebook rather than losing the tab. (`Editor`
+            // does the same for a path-less, contents-less row.)
+            window.spawn(cx, async move |cx| {
+                let notebook = NotebookEditor::empty_notebook()
+                    .context("failed to build an empty notebook template")?;
+                cx.update(|window, cx| {
+                    let languages = project.read(cx).languages().clone();
+                    let notebook_item = cx
+                        .new(|_| NotebookItem::untitled(project.downgrade(), languages, notebook));
+                    cx.new(|cx| NotebookEditor::new(project, notebook_item, window, cx))
+                })
+            })
         }
     }
 
     fn should_serialize(&self, _event: &Self::Event) -> bool {
-        // The notebook's only event type is `()`, emitted on content-relevant
-        // changes; serialize on any of them. The close-time serialize captures
-        // final state regardless, so this only affects hot-exit freshness.
+        // The notebook has a single `()` event, so there is no event set to
+        // filter on the way `Editor` filters `EditorEvent`. The cost control
+        // lives in `serialize` instead: it encodes the notebook's JSON only
+        // when there are unsaved changes, and does the encode off the main
+        // thread. `()` is emitted deliberately and rarely — see `mark_as_saved`.
         true
     }
 }
@@ -6550,6 +6716,161 @@ mod tests {
             assert!(
                 !editor.has_content_changes(cx),
                 "opening must not make any cell buffer dirty"
+            );
+        });
+    }
+
+    /// Hot exit (phase 69): unsaved changes restored over the copy read from
+    /// disk must READ as unsaved — the restored cells become the baseline, so
+    /// without an explicit marker the tab would look clean, closing wouldn't
+    /// prompt, and the next serialize would drop the changes just recovered.
+    #[gpui::test]
+    async fn test_restored_unsaved_notebook_is_dirty_until_saved(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            editor::init(cx);
+        });
+
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            path!("/notebooks"),
+            json!({ "test.ipynb": NOTEBOOK_WITH_MIXED_CELLS }),
+        )
+        .await;
+        let project = Project::test(fs.clone(), [path!("/notebooks").as_ref()], cx).await;
+        cx.update(|cx| ReplStore::init(fs.clone(), cx));
+        let worktree_id = project.read_with(cx, |project, cx| {
+            project.worktrees(cx).next().unwrap().read(cx).id()
+        });
+
+        let notebook_item = cx
+            .update(|cx| {
+                NotebookItem::try_open(
+                    &project,
+                    &ProjectPath {
+                        worktree_id,
+                        path: rel_path("test.ipynb").into(),
+                    },
+                    cx,
+                )
+                .expect("ipynb files should be openable as notebooks")
+            })
+            .await
+            .expect("notebook should parse");
+
+        let cx = cx.add_empty_window();
+        let editor = cx.update(|window, cx| {
+            cx.new(|cx| NotebookEditor::new(project.clone(), notebook_item, window, cx))
+        });
+        cx.run_until_parked();
+
+        editor.read_with(cx, |editor, cx| {
+            assert!(
+                !Item::is_dirty(editor, cx),
+                "a notebook just opened from disk is clean"
+            );
+        });
+
+        // What a previous session was holding: the same notebook with an extra
+        // cell that never reached disk.
+        let mut unsaved =
+            NotebookEditor::parse_notebook_text(NOTEBOOK_WITH_MIXED_CELLS).expect("should parse");
+        unsaved.cells.push(NotebookEditor::empty_code_cell());
+        let restored_cell_count = unsaved.cells.len();
+
+        editor.update_in(cx, |editor, window, cx| {
+            editor.restore_unsaved_notebook(&unsaved, None, window, cx);
+        });
+        cx.run_until_parked();
+
+        editor.read_with(cx, |editor, cx| {
+            assert_eq!(
+                editor.cell_count(),
+                restored_cell_count,
+                "the restored cells are what the user sees"
+            );
+            assert!(
+                Item::is_dirty(editor, cx),
+                "restored unsaved changes must mark the notebook dirty, even though \
+                 they are now its own baseline"
+            );
+            assert!(
+                !editor.disk_changed_externally,
+                "the file did not move under us, so this is not a conflict"
+            );
+        });
+
+        editor.update(cx, |editor, cx| editor.mark_as_saved(cx));
+        editor.read_with(cx, |editor, cx| {
+            assert!(
+                !Item::is_dirty(editor, cx),
+                "saving clears the restored-unsaved marker like every other dirty flag"
+            );
+        });
+    }
+
+    /// If the file moved on disk while Zed was closed, the restored changes are
+    /// no longer based on it — that is the existing overwrite-conflict case, and
+    /// the stored mtime is the only way to notice.
+    #[gpui::test]
+    async fn test_restored_unsaved_notebook_flags_a_stale_base(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            editor::init(cx);
+        });
+
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            path!("/notebooks"),
+            json!({ "test.ipynb": NOTEBOOK_WITH_MIXED_CELLS }),
+        )
+        .await;
+        let project = Project::test(fs.clone(), [path!("/notebooks").as_ref()], cx).await;
+        cx.update(|cx| ReplStore::init(fs.clone(), cx));
+        let worktree_id = project.read_with(cx, |project, cx| {
+            project.worktrees(cx).next().unwrap().read(cx).id()
+        });
+
+        let notebook_item = cx
+            .update(|cx| {
+                NotebookItem::try_open(
+                    &project,
+                    &ProjectPath {
+                        worktree_id,
+                        path: rel_path("test.ipynb").into(),
+                    },
+                    cx,
+                )
+                .expect("ipynb files should be openable as notebooks")
+            })
+            .await
+            .expect("notebook should parse");
+
+        let cx = cx.add_empty_window();
+        let editor = cx.update(|window, cx| {
+            cx.new(|cx| NotebookEditor::new(project.clone(), notebook_item, window, cx))
+        });
+        cx.run_until_parked();
+
+        let unsaved =
+            NotebookEditor::parse_notebook_text(NOTEBOOK_WITH_MIXED_CELLS).expect("should parse");
+
+        // An mtime that cannot match what the file actually has.
+        let stale = Some(fs::MTime::from_seconds_and_nanos(1, 0));
+        editor.update_in(cx, |editor, window, cx| {
+            editor.restore_unsaved_notebook(&unsaved, stale, window, cx);
+        });
+        cx.run_until_parked();
+
+        editor.read_with(cx, |editor, _| {
+            assert!(
+                editor.disk_changed_externally,
+                "a file edited while Zed was closed must raise the overwrite conflict \
+                 rather than being silently overwritten by the restored changes"
             );
         });
     }

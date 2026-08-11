@@ -232,6 +232,19 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
   the natural shape is an `Option<FileFilter>` on `prompt_for_new_path`
   threaded from `Item`, defaulting to no filter so every existing caller is
   unaffected.
+- Live hot-exit serialization for notebooks (noted while building phase 69,
+  2026-08-11). Notebook contents now reach the DB on two occasions: once when
+  the item is added to a pane, and at close time for a dirty item (plus on save,
+  to clear stale content). `Editor` also serializes on every edit, because its
+  `should_serialize` sees `BufferEdited` — so a text buffer survives a CRASH
+  and a notebook does not. Closing that gap means emitting the notebook's `()`
+  event per edit, which is the expensive path deliberately avoided in phase 69:
+  every emission runs `to_notebook(cx)` on the main thread (a deep clone of all
+  cells INCLUDING outputs) up to five times a second, and a notebook with image
+  outputs is megabytes. Worth doing only with a cheaper snapshot — e.g. cloning
+  cell text without outputs and merging outputs from the last full encode — or
+  a longer debounce of its own. Graceful quit is already covered, so this is
+  crash-safety only.
 - Add `smooth_scrolling` to the GUI settings UI (user 2026-07-30). Phase 54
   added the setting to `default.json`, the schema and the docs, but NOT to the
   settings UI — so it's JSON-only today. It belongs in the existing **Editor →

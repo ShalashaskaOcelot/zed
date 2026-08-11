@@ -178,6 +178,43 @@ JSON, it gets fixed in place), item 1 is a change to save-as behaviour.
 - [ ] A notebook already open in a tab doesn't get a second tab from a search
       hit; the existing tab activates.
 
+## Phase 69 — Notebooks behave like text files on disk
+
+Kind: **mixed** — the loose-notebook restore and the hot exit are changes to
+existing behaviour (if a loose notebook still vanishes, or unsaved edits still
+die on quit, say so and they get fixed in place), the strikethrough is a new
+affordance.
+
+- [ ] Open a notebook from OUTSIDE any project folder (no folder open, or a
+      notebook somewhere else entirely), quit, reopen: the tab comes back with
+      the notebook in it. This silently disappeared before.
+- [ ] With a notebook open, delete the file in Explorer: the tab title goes
+      struck through, the same as a `.md` does. (Deleting it while Zed is
+      CLOSED is deliberately not covered — see the note below.)
+- [ ] With `"close_on_file_delete": true`, the same deletion closes the notebook
+      tab when it has no unsaved changes; with unsaved changes it stays open and
+      closing it prompts.
+- [ ] Edit a saved notebook WITHOUT saving, quit Zed, reopen: the edits are
+      still there and the notebook still shows dirty. Save it and the dot
+      clears.
+- [ ] Save that notebook, quit, reopen: you get the SAVED file, not the older
+      unsaved copy — i.e. saving really did clear the stored hot-exit content.
+- [ ] Edit a notebook in another program while Zed is closed, having left
+      unsaved changes to it in Zed: on reopen, saving raises the existing
+      overwrite conflict rather than silently winning.
+- [ ] A large notebook with image outputs stays responsive while typing. This is
+      the phase's one performance risk: the JSON encode now runs for any dirty
+      notebook, not just untitled ones. It is off the main thread and only fires
+      on save, but say so if typing feels heavier than before.
+- [ ] Not regressed: untitled notebooks still restore with their cells, and an
+      untitled notebook you never touched still comes back (as an empty
+      notebook) rather than vanishing.
+
+Known and deliberate (user decision 2026-08-11): a notebook deleted BETWEEN
+sessions still restores as a blank notebook with no strikethrough, because
+generic session restore never marks a missing file as deleted. `.md` behaves
+the same way; matching it was the point.
+
 ## Phase 67 — Page-wise follow mode
 
 Kind: **new feature** (a SECOND follow mode; the existing one is untouched and

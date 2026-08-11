@@ -15261,6 +15261,7 @@ dependencies = [
  "editor",
  "feature_flags",
  "file_icons",
+ "fs",
  "futures 0.3.32",
  "gpui",
  "html_to_markdown",
