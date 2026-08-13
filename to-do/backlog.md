@@ -253,6 +253,30 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
   should still show Starting. Small: the restart path needs to hold its own
   status until the kernel reports ready, rather than handing over to the
   generic launch status partway through.
+- Keep the SELECTED cell still while output grows above it (user 2026-08-11).
+  Nothing to do with follow mode — noticed with follow off: `shift-enter` runs a
+  cell and moves to the next, then the output from the cell you just ran appears,
+  grows that cell, and pushes the newly-selected cell down and out of view. You
+  end up looking at the output of the cell you left rather than the cell you are
+  now on.
+  **Why it happens:** the list is anchored by ITEM INDEX
+  (`ListState::logical_scroll_top` = `{item_ix, offset_in_item}`) and paints
+  downward from that anchor. Growth in an item ABOVE the anchor is absorbed
+  silently, growth in the anchor item itself or below pushes everything after it
+  down. With the viewport anchored above the cell that just ran, its new output
+  displaces the selection.
+  **Two shapes worth weighing (the user asked for the first, but it is the
+  harder one):**
+  1. Re-anchor to the selected cell so growth above is absorbed. The anchor
+     would have to be the selected cell with a NEGATIVE offset to keep the view
+     visually unchanged, and `ListOffset` has no negative offset — so this needs
+     a gpui change, in a file that is already a merge hotspot.
+  2. Correct after the fact: when output changes a cell's height and the
+     selected cell has left the viewport, minimally reveal it. Cheap, entirely
+     in `notebook_ui`, and the same shape as phase 69's per-frame follow
+     maintenance (`maintain_page_follow`) — which is proof the pattern works.
+     Downside: a visible correction rather than no movement at all.
+  Option 2 first unless the flicker turns out to read badly.
 - Add `smooth_scrolling` to the GUI settings UI (user 2026-07-30). Phase 54
   added the setting to `default.json`, the schema and the docs, but NOT to the
   settings UI — so it's JSON-only today. It belongs in the existing **Editor →

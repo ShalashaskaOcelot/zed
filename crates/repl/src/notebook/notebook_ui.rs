@@ -168,7 +168,10 @@ enum SelectionMode {
 }
 
 pub(crate) const MEDIUM_SPACING_SIZE: f32 = 12.0;
-pub(crate) const GUTTER_WIDTH: f32 = 30.0;
+// Wide enough for a three-digit execution number (`[169]`) in the cell gutter
+// without wrapping; four digits will still wrap, which the user accepted as the
+// right trade against pushing every cell's content further right.
+pub(crate) const GUTTER_WIDTH: f32 = 38.0;
 /// Hover group shared by every cell's root element, so gutters and toolbars
 /// can show/hide on cell hover regardless of cell type.
 pub(crate) const CELL_HOVER_GROUP: &str = "notebook-cell";
@@ -285,14 +288,6 @@ pub struct NotebookEditor {
     /// `has_content_changes` both read clean even though the file on disk says
     /// something else. Cleared by `mark_as_saved`, like every other dirty flag.
     restored_unsaved_changes: bool,
-    /// Set when follow mode has just repositioned the list, and cleared when the
-    /// cell list is next rendered. Page-wise follow asks whether the running
-    /// cell is on screen, which it answers from the list's item measurements —
-    /// so a second cell finishing before the next frame would be measured
-    /// against the page it is about to be on, and jump again. Skipping the
-    /// jump for the rest of the frame keeps the page boundary honest when cells
-    /// run faster than the notebook redraws.
-    follow_scroll_pending: bool,
     /// Multi-selection: every selected index INCLUDING the primary
     /// (`selected_cell_index`). Empty when only a single cell is selected.
     /// Index-based, so any structural change collapses the selection.
@@ -485,7 +480,6 @@ impl NotebookEditor {
             run_queue: Vec::new(),
             active_run_cell: None,
             follow_running_cell: false,
-            follow_scroll_pending: false,
             restored_unsaved_changes: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
@@ -2390,33 +2384,67 @@ impl NotebookEditor {
         match ReplSettings::get_global(cx).notebook_follow_mode {
             NotebookFollowMode::Minimal => self.follow_scroll_to(index),
             NotebookFollowMode::Page => {
-                // The selection is the progress indicator here, so it moves for
-                // every cell even when the viewport doesn't. Safe against
-                // stealing a cursor because entering edit mode turns follow off
-                // (`disable_follow_on_edit`).
+                // Only the SELECTION moves here — it is this mode's progress
+                // indicator, so it moves for every cell even when the viewport
+                // doesn't. Safe against stealing a cursor because entering edit
+                // mode turns follow off (`disable_follow_on_edit`).
+                //
+                // The viewport is NOT decided here. Where the page should sit
+                // depends on cell heights, and the cell that just started
+                // running has produced no output yet — so anything decided now
+                // is decided from heights that are about to change.
+                // `maintain_page_follow` re-checks it every frame instead.
                 self.set_selected_index(index, false, window, cx);
-                if !self.follow_scroll_pending && !self.cell_is_fully_visible(index) {
-                    self.cell_list.scroll_to_item_top_clamped(index);
-                    self.follow_scroll_pending = true;
-                }
-                // The moved selection is this mode's progress indicator, so it
-                // has to repaint even when the viewport didn't move and the
-                // cell's own status change wouldn't redraw the gutter.
                 cx.notify();
             }
         }
     }
 
-    /// Whether cell `index` is entirely on screen. A PARTLY visible cell counts
-    /// as not visible: page-wise follow treats the last fully-visible cell as
-    /// the page boundary, so a cell hanging off the bottom edge starts the next
-    /// page rather than being watched with its output cut off.
-    fn cell_is_fully_visible(&self, index: usize) -> bool {
+    /// Keep the running cell on screen in page mode. Called once per frame from
+    /// the cell list, so it sees the heights the LAST layout measured.
+    ///
+    /// Deciding the page only when a cell starts running does not hold: the
+    /// cells above it are still producing output, which grows them and pushes
+    /// the running cell down and off the bottom (user 2026-08-11 — a notebook
+    /// of `time.sleep` cells followed perfectly, one that displayed a DataFrame
+    /// did not). Nothing can predict that at run start, because the output does
+    /// not exist yet, so the only correct answer is to keep asking. The check is
+    /// a cursor seek and re-scrolling to a page already in place is a no-op, so
+    /// asking every frame is cheap and settles immediately.
+    fn maintain_page_follow(&mut self, cx: &App) {
+        if !self.follow_running_cell
+            || ReplSettings::get_global(cx).notebook_follow_mode != NotebookFollowMode::Page
+        {
+            return;
+        }
+        let Some(index) = self.running_cell_index(cx) else {
+            return;
+        };
+        if !self.cell_is_followed(index) {
+            self.cell_list.scroll_to_item_top_clamped(index);
+        }
+    }
+
+    /// Whether cell `index` counts as being followed — i.e. the viewport is
+    /// already showing what there is to show of it.
+    ///
+    /// Normally that means ENTIRELY on screen: page-wise follow treats the last
+    /// fully-visible cell as the page boundary, so a cell hanging off the bottom
+    /// edge starts the next page rather than being watched with its output cut
+    /// off. A cell TALLER than the viewport can never satisfy that, so for those
+    /// any part being visible counts — otherwise every frame would drag the
+    /// viewport back to the cell's top and you could never scroll down its own
+    /// output while it ran.
+    fn cell_is_followed(&self, index: usize) -> bool {
         let viewport = self.cell_list.viewport_bounds();
         // `bounds_for_item` yields `None` for a cell above the scroll position
         // or one too far below it to have been measured — neither is on screen.
         self.cell_list.bounds_for_item(index).is_some_and(|bounds| {
-            bounds.top() >= viewport.top() && bounds.bottom() <= viewport.bottom()
+            if bounds.size.height > viewport.size.height {
+                bounds.top() < viewport.bottom() && bounds.bottom() > viewport.top()
+            } else {
+                bounds.top() >= viewport.top() && bounds.bottom() <= viewport.bottom()
+            }
         })
     }
 
@@ -2636,8 +2664,9 @@ impl NotebookEditor {
                 NotebookFollowMode::Minimal => self.follow_scroll_to(index),
                 NotebookFollowMode::Page => {
                     self.set_selected_index(index, false, window, cx);
+                    // Unconditional: the point of switching follow ON is to go
+                    // and look, even if the cell happens to be on screen.
                     self.cell_list.scroll_to_item_top_clamped(index);
-                    self.follow_scroll_pending = true;
                 }
             }
         }
@@ -4968,9 +4997,10 @@ impl NotebookEditor {
         // Re-applied each render so toggling the setting takes effect live.
         self.cell_list
             .set_smooth_scroll(editor::EditorSettings::get_global(cx).smooth_scrolling);
-        // This render consumes any follow-mode jump made since the last one, so
-        // the next cell to run is measured against the page it is actually on.
-        self.follow_scroll_pending = false;
+        // Re-check the page against the heights the last layout measured, so
+        // output growing in the cells above can't quietly carry the running cell
+        // off the bottom of the screen.
+        self.maintain_page_follow(cx);
         list(self.cell_list.clone(), move |index, window, cx| {
             view.update(cx, |this, cx| {
                 let cell_id = &this.cell_order[index];

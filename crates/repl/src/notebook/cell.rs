@@ -1875,6 +1875,10 @@ impl RenderableCell for CodeCell {
                             this.child(
                                 div()
                                     .text_xs()
+                                    // Without this a count that doesn't fit wraps
+                                    // its closing bracket onto a second line
+                                    // (user 2026-08-11, `[169]`).
+                                    .whitespace_nowrap()
                                     .text_color(cx.theme().colors().text_muted)
                                     .child(format!("[{count}]")),
                             )

@@ -53,6 +53,16 @@ listed here.
 - [ ] Bug #75 — Create a new notebook, type something, quit Zed, reopen: it
       comes back WITH the dirty marker, not looking saved. Editing and undoing
       back to the restored state should leave it dirty throughout.
+- [ ] Bug #77 — Page-wise follow with OUTPUT-producing cells (the DataFrame
+      notebook that broke it): the running cell now stays on screen as the cells
+      above it grow. Watch for the trade-off: scrolling the running cell fully
+      off screen during a run pulls the view back, because the check is now
+      continuous. Scrolling while it stays partly visible is fine, and a cell
+      taller than the viewport can be scrolled through freely.
+- [ ] Bug #78 — Run a cell enough times for a three-digit execution count:
+      `[169]` fits on one line. The cell gutter is 8px wider as a result, so
+      every cell's content sits slightly further right — say if that reads
+      badly.
 - [ ] Bug #34 — soak test (no direct repro known): create/save/reopen
       notebooks normally over a few sessions; the same file should never
       end up open in two tabs again. (Cause found by inspection: stale
@@ -215,9 +225,9 @@ needs BOTH.
 
 - [ ] With the setting left at its default (`minimal`) follow mode behaves
       exactly as before — each running cell re-pinned near the top.
-- [ ] In `page` mode with a notebook that fits on screen: Run All never moves
-      the viewport at all, and the selection highlight walks down the cells as
-      each one runs.
+- [x] In `page` mode with a notebook that fits on screen: Run All never moves
+      the viewport, and the selection walks down the cells. CONFIRMED
+      2026-08-11.
 - [ ] With a longer notebook: the viewport holds still while execution walks
       down the cells that are on screen, then jumps a whole page when execution
       passes the fold — the newly-reached cell becomes the TOP of the viewport,

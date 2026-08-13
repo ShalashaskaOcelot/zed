@@ -769,3 +769,47 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 - **Fix attempted:** none — the two causes need different fixes and the check
   above separates them.
 - **Tested:** n/a
+
+## 77. Page-wise follow loses the running cell once outputs appear
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-08-11, testing phase 67) With
+  `notebook_follow_mode: "page"`, a notebook of plain `time.sleep(1)` cells
+  follows perfectly. Add cells that produce OUTPUT (a DataFrame display) and the
+  running cell drifts out of the viewport: it was inside the page when the page
+  was chosen, then the cells above it grew as their output arrived and pushed it
+  off the bottom. `minimal` mode is unaffected.
+- **Analysis (2026-08-11):** the user's own diagnosis is right and the cause is
+  structural. `follow_reveal` decided where the page should sit ONCE, when a
+  cell started running, from the heights measured at that moment — and the
+  output that will grow the cells above does not exist yet. Nothing can be
+  predicted at run start, so a one-shot decision cannot be correct. (The index
+  anchor keeps the page's TOP stable while items above it grow, which is why
+  the page itself doesn't drift; what drifts is everything below the growing
+  cell, including the cell being followed.)
+- **Fix attempted (2026-08-11):** the page is now re-checked every frame
+  (`maintain_page_follow`, called from `cell_list` so it reads the heights the
+  last layout measured) rather than once per cell. `follow_reveal` in page mode
+  now only moves the selection. The visibility test also gained a case for a
+  cell TALLER than the viewport — any part visible counts — so a tall running
+  cell can't drag the viewport back to its top every frame and stop you
+  scrolling through its own output.
+- **Known trade-off to watch for when testing:** because the check now runs
+  continuously, scrolling the running cell completely off screen DURING a run
+  will pull the view back. Scrolling while it stays partly on screen is fine.
+  Say so if that reads as fighting you — the alternative is to suppress the
+  correction after a manual scroll, which needs a scroll-origin signal.
+- **Tested:** no — needs user confirmation.
+
+## 78. Three-digit execution counts wrap in the cell gutter
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-08-11, screenshot) An execution count of 100 or more
+  renders as `[169` with the closing bracket wrapped onto a second line.
+- **Analysis:** the gutter's control column is `GUTTER_WIDTH - 7` = 23px wide
+  and the text wraps to fit it. `[169]` needs roughly 26px at `text_xs`.
+- **Fix attempted (2026-08-11):** `GUTTER_WIDTH` 30 → 38 (so the column is 31px)
+  and the count no longer wraps. Four digits will still not fit; the user
+  explicitly accepted that rather than push every cell's content further right.
+- **Tested:** no — needs user confirmation.
+
