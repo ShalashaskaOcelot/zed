@@ -813,3 +813,25 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   explicitly accepted that rather than push every cell's content further right.
 - **Tested:** no — needs user confirmation.
 
+## 79. Loose notebooks still don't restore after a restart
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-08-11, testing phase 69) A notebook opened from OUTSIDE
+  every project root is still not restored when Zed is reopened — phase 69's
+  fallback did not take effect.
+- **Cause (2026-08-11, reproduced in a test):** the fallback itself was right;
+  what it did with the worktree was not. An INVISIBLE worktree is held only
+  WEAKLY by the worktree store (`WorktreeStore::add`: a strong handle is kept
+  only when `retain_worktrees` or the worktree is visible), so it lives exactly
+  as long as someone holds a strong handle. `deserialize` created the worktree,
+  read its id, and let the handle drop — destroying it before `try_open` could
+  open anything in it, which fails with "no such worktree". The per-item
+  `log_err` in session restore then dropped the tab, exactly as before the fix.
+  `Pane::save_item` documents this same trap for out-of-project save-as; this
+  code walked into it.
+- **Fix attempted (2026-08-11):** hold the created worktree until the notebook
+  is open, then drop it (the opened buffer's `File` holds it from that point).
+  Covered by `test_loose_notebook_is_restored`, which drives the real
+  `NotebookEditor::deserialize` against a project with no matching worktree —
+  and which fails with the hold removed.
+- **Tested:** no — needs user confirmation.

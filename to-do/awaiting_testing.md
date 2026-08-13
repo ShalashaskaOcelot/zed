@@ -59,10 +59,10 @@ listed here.
       off screen during a run pulls the view back, because the check is now
       continuous. Scrolling while it stays partly visible is fine, and a cell
       taller than the viewport can be scrolled through freely.
-- [ ] Bug #78 — Run a cell enough times for a three-digit execution count:
-      `[169]` fits on one line. The cell gutter is 8px wider as a result, so
-      every cell's content sits slightly further right — say if that reads
-      badly.
+
+- [ ] Bug #79 — SECOND fix. Open a notebook from OUTSIDE every project root,
+      quit Zed, reopen: the tab comes back. (The first fix recreated the
+      worktree but let it be destroyed again before the notebook could open.)
 - [ ] Bug #34 — soak test (no direct repro known): create/save/reopen
       notebooks normally over a few sessions; the same file should never
       end up open in two tabs again. (Cause found by inspection: stale
@@ -150,37 +150,13 @@ and defects become new backlog/bug items.
       error toast (instead of failing silently). (Needs a machine/session
       where `python3`/`python` isn't on PATH.)
 
-## Phase 66 — Notebook file surfaces: save-as and global search
-
-Kind: **mixed** — item 2 is a defect fix (say so if a search hit still opens
-JSON, it gets fixed in place), item 1 is a change to save-as behaviour.
-
-- [ ] Save-as an untitled notebook and type a name with NO extension: the file
-      is written as `<name>.ipynb`, the tab shows it, and reopening it from the
-      file tree gives a notebook (not JSON).
-- [ ] Save-as OUTSIDE any project folder (somewhere in your home directory)
-      with a bare name — this is the path that needed the fix to happen before
-      the worktree is created, so it is the one most worth trying.
-- [ ] Type a name that already ends in `.ipynb`: it is used exactly as typed,
-      no second extension.
-- [ ] Ctrl-Shift-F for text that lives in a notebook cell, click the result:
-      the notebook opens in the notebook editor. (The jump to the matching line
-      is deliberately not carried over — it opens the notebook, not the cell.)
-- [ ] Ctrl-Shift-F for text in a normal file: unchanged — opens the editor at
-      the matching line, including the split (`ctrl-enter`) variant.
-- [ ] A notebook already open in a tab doesn't get a second tab from a search
-      hit; the existing tab activates.
-
 ## Phase 69 — Notebooks behave like text files on disk
 
 Kind: **mixed**. Tested 2026-08-11 — most of it works; the failures became bugs
 #74, #75 and #76 and are tracked there.
 
-- [ ] Loose notebook restores after a restart. NOT yet tested — the restore
-      checks below were all done on a notebook inside a project folder, which
-      always worked. This one needs a notebook opened from OUTSIDE every project
-      root (no folder open at all, or a notebook somewhere unrelated): quit with
-      it open, reopen, the tab should come back.
+- [x] Loose notebook restores after a restart. FAILED 2026-08-11 — still not
+      restored. Cause found and re-fixed; tracked as bug #79.
 - [x] Deleting the file in Explorer strikes the tab title through. CONFIRMED
       2026-08-11.
 - [ ] With `"close_on_file_delete": true`, the same deletion closes the notebook
@@ -245,48 +221,3 @@ needs BOTH.
       screen — except for the last cell on a page and cells taller than the
       viewport. If that holds, the deferred "anchor on the status footer"
       backlog item is largely covered; if it doesn't, say so.
-
-## Phase 64 — Kernel picker and notebook control polish
-
-Kind: mixed — mostly changes to existing behaviour, so if one of these still
-behaves as before, say so and it gets fixed in place rather than refiled.
-
-- [x] Launch the app and open the kernel picker immediately: it says
-      "Searching for kernels…" and then fills in, instead of "No matches".
-      CONFIRMED 2026-08-06.
-- [x] Registered Jupyter kernelspec entries now show the INTERPRETER they
-      launch (`argv[0]`) as their second line. CONFIRMED 2026-08-06.
-- [x] The right sidebar no longer has a kernel selector at the bottom.
-      CONFIRMED 2026-08-06.
-- [ ] Open a notebook from the project panel WITHOUT clicking into it, press
-      Run All in the sidebar, then use a keyboard shortcut (`escape`, arrows,
-      `shift-enter`) — it now acts on the notebook, because the button moved
-      focus there. Clicking a control WHILE editing a cell should NOT throw you
-      out of the cell.
-- [x] Creating an env still works and the "Creating…" row looks tidier.
-      CONFIRMED 2026-08-06 — and the user re-confirmed it does NOT refresh when
-      the build finishes (still bug #58), and asked for a "creating" status
-      outside the picker too, since the strip shows a misleading "Starting"
-      (backlogged, not a defect in this phase).
-
-## Phase 63 — Wide notebook outputs and output-body interaction
-
-Kind: mixed — the wide-output part is a change to existing behaviour (say so if
-it still clips), the click-to-select part is a new affordance.
-
-- [x] Display a pandas DataFrame far wider than the pane: it scrolls sideways
-      within its output block. PARTIALLY CONFIRMED 2026-08-06 — the sideways
-      scrolling itself works, but the scrollbar was unusable (bug #68) and the
-      table's own rendering had two defects the wider view exposed: column
-      titles wrapping (bug #69) and columns not lining up row to row (bug #70).
-- [x] Scrolling the wheel over a wide table still scrolls the NOTEBOOK
-      vertically. FAILED 2026-08-06 — it scrolled the notebook AND dragged the
-      table sideways at the same time. Filed as bug #67.
-- [x] Clicking anywhere on an output selects that cell, and dragging across
-      output text still selects the text. CONFIRMED 2026-08-06. (The wording
-      here was ambiguous: selecting the cell as well as the text on a drag is
-      the intended behaviour, and that is what happens.)
-- [x] Narrow tables and ordinary text output are unchanged. CONFIRMED
-      2026-08-06 — except that a table small enough to fit still wrapped its
-      column titles, which is bug #69, not a width regression.
-

@@ -6216,8 +6216,18 @@ impl SerializableItem for NotebookEditor {
             let saved_mtime = serialized.mtime;
             let unsaved_contents = serialized.contents;
             window.spawn(cx, async move |cx| {
+                // Held until the notebook is open. An INVISIBLE worktree is
+                // kept only WEAKLY by the worktree store (`WorktreeStore::add`),
+                // so it survives just as long as someone holds a strong handle:
+                // letting this drop before the open would destroy the worktree
+                // out from under it and fail with "no such worktree". `Pane`'s
+                // out-of-project save-as has the same guard for the same reason.
+                let created_worktree;
                 let project_path = match existing_project_path {
-                    Some(project_path) => project_path,
+                    Some(project_path) => {
+                        created_worktree = None;
+                        project_path
+                    }
                     None => {
                         // Not in any worktree: a notebook opened from outside
                         // every project root lives in an INVISIBLE single-file
@@ -6232,10 +6242,12 @@ impl SerializableItem for NotebookEditor {
                             })
                             .await
                             .with_context(|| format!("opening loose notebook {abs_path:?}"))?;
-                        ProjectPath {
+                        let project_path = ProjectPath {
                             worktree_id: worktree.read_with(cx, |worktree, _| worktree.id()),
                             path: relative_path,
-                        }
+                        };
+                        created_worktree = Some(worktree);
+                        project_path
                     }
                 };
                 let open_task = cx.update(|_, cx| {
@@ -6247,6 +6259,8 @@ impl SerializableItem for NotebookEditor {
                 let notebook_item = open_task
                     .await
                     .context("failed to open serialized notebook by path")?;
+                // The opened buffer's `File` holds the worktree from here on.
+                drop(created_worktree);
                 // Contents are stored only for a notebook with UNSAVED changes,
                 // so anything here is newer than what was just loaded from disk.
                 let unsaved = unsaved_contents
@@ -6760,6 +6774,91 @@ mod tests {
             assert!(
                 !editor.has_content_changes(cx),
                 "opening must not make any cell buffer dirty"
+            );
+        });
+    }
+
+    /// A notebook opened from OUTSIDE every project root lives in an invisible
+    /// single-file worktree, which is not part of the saved workspace roots — so
+    /// at restore time its path belongs to no worktree and one has to be
+    /// recreated, exactly as `Project::open_local_buffer` does for a loose text
+    /// file.
+    ///
+    /// The trap this pins down: an invisible worktree is held only WEAKLY by the
+    /// worktree store, so recreating one and then letting the handle go destroys
+    /// it before anything can be opened in it. `deserialize` has to keep it
+    /// alive until the notebook is open, and this test fails with "no such
+    /// worktree" if it doesn't (bug #79).
+    #[gpui::test]
+    async fn test_loose_notebook_is_restored(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            editor::init(cx);
+        });
+
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            path!("/elsewhere"),
+            json!({ "loose.ipynb": NOTEBOOK_WITH_MIXED_CELLS }),
+        )
+        .await;
+        // A project with NO worktree covering the notebook — the state a
+        // restored session starts in for a loose file.
+        let project = Project::test(fs.clone(), [], cx).await;
+        cx.update(|cx| ReplStore::init(fs.clone(), cx));
+
+        let abs_path = PathBuf::from(path!("/elsewhere/loose.ipynb"));
+        assert!(
+            project
+                .update(cx, |project, cx| project.find_worktree(&abs_path, cx))
+                .is_none(),
+            "precondition: the notebook's path is in no worktree"
+        );
+
+        let workspace_db = cx.update(|cx| workspace::WorkspaceDb::global(cx));
+        let workspace_id = workspace_db.next_id().await.unwrap();
+        let notebook_db = cx.update(|cx| NotebookDb::global(cx));
+        notebook_db
+            .save_serialized_notebook(
+                1234,
+                workspace_id,
+                SerializedNotebook {
+                    abs_path: Some(abs_path.clone()),
+                    contents: None,
+                    mtime: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let cx = cx.add_empty_window();
+        let workspace =
+            cx.update(|window, cx| cx.new(|cx| Workspace::test_new(project.clone(), window, cx)));
+
+        let editor = cx
+            .update(|window, cx| {
+                NotebookEditor::deserialize(
+                    project.clone(),
+                    workspace.downgrade(),
+                    workspace_id,
+                    1234,
+                    window,
+                    cx,
+                )
+            })
+            .await
+            .expect("a loose notebook must be restored, not dropped");
+
+        editor.read_with(cx, |editor, _| {
+            assert_eq!(
+                editor.cell_count(),
+                NotebookEditor::parse_notebook_text(NOTEBOOK_WITH_MIXED_CELLS)
+                    .unwrap()
+                    .cells
+                    .len(),
+                "the restored notebook should hold the file's real content"
             );
         });
     }

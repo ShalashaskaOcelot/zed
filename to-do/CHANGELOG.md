@@ -286,7 +286,7 @@ entry rather than archiving it.
   pressing anywhere in an output now selects its cell, on mouse-DOWN and
   without consuming the event, so drag-to-select-text still works.
   AWAITING USER TESTING.
-- Phase 66 — Notebook file surfaces: save-as always yields an `.ipynb`
+- Phase 66 (CONFIRMED 2026-08-11) — Notebook file surfaces: save-as always yields an `.ipynb`
   (via a new `Item::adjust_save_as_path` applied before the worktree is
   created), and a global-search hit on a notebook opens the NOTEBOOK — the
   editor asks the project-item registry who claims a path instead of knowing
@@ -300,6 +300,10 @@ entry rather than archiving it.
   time, clamped at the end of the notebook. `PENDING`
 
 ## Fixed bugs (confirmed)
+
+- #78 — Three-digit execution counts (`[169]`) wrapped their closing bracket in
+  the cell gutter; the gutter is wider and the count no longer wraps. Confirmed
+  2026-08-11.
 
 - #7 — Restart left stale `msg_id → CellId` entries, so output from a
   pre-restart execution could land on a cell after restarting. Confirmed
