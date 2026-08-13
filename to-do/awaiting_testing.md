@@ -27,49 +27,32 @@ here, add a one-line entry to `CHANGELOG.md`, and delete the bug's `bugs.md`
 entry. If a fix failed, leave the bug open with the new finding and keep it
 listed here.
 
-- [ ] Bug #7 — Run a cell, restart the kernel, then run again: no output from
-      the pre-restart execution should land on a cell, and no stale execution
-      request should be left behind.
 - [ ] Bug #15 — Soak test: use command-mode shortcuts across focus changes
       (click away to another pane/panel and back, close and reopen a notebook).
       Shortcuts should never stop responding. The on_focus part was already
       reported working 2026-07-09; this is the remaining desync watch.
-- [ ] Bug #64 — `f8` / `shift-f8` cycle failed cells. To get two failures you
-      have to run cells INDIVIDUALLY: a batch stops at the first failure, but a
-      single-cell run is its own batch, so run a failing cell, then run a
-      second failing cell further down (ctrl-enter each) — both stay red and
-      the strip reads "2 cells failed". Then check `f8`/`shift-f8` move between
-      them BOTH in command mode and with the cursor inside a cell (edit mode is
-      what the fix addressed). With only ONE failure that is already selected,
-      both keys re-reveal that same cell — by design, so it looks like nothing
-      happens.
-- [ ] Bug #66 — Run cells that print NOTHING (e.g. `x = 1`), so the notebook
-      shows execution counts and `✓ 57ms` but no output: the Clear Outputs
-      control in the sidebar is now enabled and clearing wipes the counts,
-      times and ✓ markers. With a genuinely untouched notebook (nothing run) it
-      is still disabled.
-- [ ] Bug #67 — Scroll the mouse wheel down a notebook showing a wide
-      DataFrame: only the NOTEBOOK moves; the table no longer drifts sideways.
-      The tilt/second wheel still scrolls the table horizontally.
-- [ ] Bug #68 — Grab the wide table's horizontal scrollbar and drag: the thumb
-      follows the pointer and keeps scrolling, instead of sliding away and
-      vanishing.
-- [ ] Bug #69 — A DataFrame with long column titles: no title wraps its last
-      character onto a second line, at any table width (including one narrow
-      enough to fit the output block).
+- [ ] Bug #64 — FIX FAILED 2026-08-11 (`f8`/`shift-f8` still don't move between
+      failed cells even though the strip counts them). No new fix yet: the next
+      step is establishing whether the action dispatches at all. Low priority —
+      two failed cells only happen if you make them happen.
+
+- [ ] Bug #69 — SECOND fix (the first was wrong). Display a DataFrame with
+      column titles long enough to have wrapped before (`Column_number_10` and
+      up): no title wraps its last character, at any table width. The table's
+      text may look very slightly different in size — it now renders at the
+      buffer font size, which is what its column widths were always measured
+      against.
 - [ ] Bug #70 — A table with a long text column (e.g. paths): every column's
       left edge is a straight vertical line down the whole table, regardless of
       how long individual values are.
-- [ ] Bug #72 — Start a kernel (and separately, restart one) WITHOUT running
-      anything: the strip settles on "Idle" by itself rather than sticking on
-      "Starting" until a cell is run. Intermittent before the fix, so it needs a
-      few attempts to trust.
-- [ ] Bug #73 — NOT YET FIXED, listed only so the repro isn't lost: delete a
-      file from the project panel on Windows and note whether the "Failed to
-      trash" toast appears every time or only for some files/drives. That
-      distinction (metadata lookup failing vs the item never reaching the bin)
-      picks the fix. Remove this line once a fix is attempted and it gets a
-      normal pointer.
+
+- [ ] Bug #74 — Dirty a notebook, quit Zed, delete the file from disk, reopen:
+      the notebook comes back (with the unsaved changes it was holding) instead
+      of the tab silently disappearing. It will be blank-plus-your-changes,
+      since the file itself is gone.
+- [ ] Bug #75 — Create a new notebook, type something, quit Zed, reopen: it
+      comes back WITH the dirty marker, not looking saved. Editing and undoing
+      back to the restored state should leave it dirty throughout.
 - [ ] Bug #34 — soak test (no direct repro known): create/save/reopen
       notebooks normally over a few sessions; the same file should never
       end up open in two tabs again. (Cause found by inspection: stale
@@ -180,40 +163,44 @@ JSON, it gets fixed in place), item 1 is a change to save-as behaviour.
 
 ## Phase 69 — Notebooks behave like text files on disk
 
-Kind: **mixed** — the loose-notebook restore and the hot exit are changes to
-existing behaviour (if a loose notebook still vanishes, or unsaved edits still
-die on quit, say so and they get fixed in place), the strikethrough is a new
-affordance.
+Kind: **mixed**. Tested 2026-08-11 — most of it works; the failures became bugs
+#74, #75 and #76 and are tracked there.
 
-- [ ] Open a notebook from OUTSIDE any project folder (no folder open, or a
-      notebook somewhere else entirely), quit, reopen: the tab comes back with
-      the notebook in it. This silently disappeared before.
-- [ ] With a notebook open, delete the file in Explorer: the tab title goes
-      struck through, the same as a `.md` does. (Deleting it while Zed is
-      CLOSED is deliberately not covered — see the note below.)
+- [ ] Loose notebook restores after a restart. NOT yet tested — the restore
+      checks below were all done on a notebook inside a project folder, which
+      always worked. This one needs a notebook opened from OUTSIDE every project
+      root (no folder open at all, or a notebook somewhere unrelated): quit with
+      it open, reopen, the tab should come back.
+- [x] Deleting the file in Explorer strikes the tab title through. CONFIRMED
+      2026-08-11.
 - [ ] With `"close_on_file_delete": true`, the same deletion closes the notebook
       tab when it has no unsaved changes; with unsaved changes it stays open and
-      closing it prompts.
-- [ ] Edit a saved notebook WITHOUT saving, quit Zed, reopen: the edits are
-      still there and the notebook still shows dirty. Save it and the dot
-      clears.
-- [ ] Save that notebook, quit, reopen: you get the SAVED file, not the older
-      unsaved copy — i.e. saving really did clear the stored hot-exit content.
-- [ ] Edit a notebook in another program while Zed is closed, having left
-      unsaved changes to it in Zed: on reopen, saving raises the existing
-      overwrite conflict rather than silently winning.
-- [ ] A large notebook with image outputs stays responsive while typing. This is
-      the phase's one performance risk: the JSON encode now runs for any dirty
-      notebook, not just untitled ones. It is off the main thread and only fires
-      on save, but say so if typing feels heavier than before.
-- [ ] Not regressed: untitled notebooks still restore with their cells, and an
-      untitled notebook you never touched still comes back (as an empty
-      notebook) rather than vanishing.
+      closing it prompts. (Not reported on — the setting is off by default, so
+      it needs turning on first.)
+- [x] Unsaved changes to a saved notebook survive a quit. CONFIRMED 2026-08-11.
+- [x] Saving then quitting gives back the SAVED version, not the older unsaved
+      copy. CONFIRMED 2026-08-11 — this was the stale-content trap.
+- [x] Conflict when the file was edited elsewhere. FAILED 2026-08-11 — the
+      cached version opened with no notification at all. Filed as bug #76; the
+      flag may well be set and simply invisible until you save, which is the
+      first thing to check there.
+- [ ] A large notebook with image outputs stays responsive while typing. Still
+      untested — the DataFrames used so far don't exercise it. What matters is a
+      notebook whose OUTPUTS are heavy (`df.plot()` or any matplotlib figure,
+      several of them, so the file is megabytes of base64), then typing in a
+      cell with unsaved changes pending. The encode now runs for every dirty
+      notebook, not just untitled ones.
+- [x] Not regressed: untitled notebooks still restore with their cells.
+      CONFIRMED 2026-08-11 — though they came back looking clean, which is bug
+      #75.
+- [x] A blank untitled notebook does NOT restore. Confirmed 2026-08-11 and
+      explicitly accepted by the user as not an issue: nothing is stored for it
+      because there is nothing worth storing.
 
 Known and deliberate (user decision 2026-08-11): a notebook deleted BETWEEN
-sessions still restores as a blank notebook with no strikethrough, because
-generic session restore never marks a missing file as deleted. `.md` behaves
-the same way; matching it was the point.
+sessions restores blank with no strikethrough, because generic session restore
+never marks a missing file as deleted. `.md` behaves the same way. Note this is
+DIFFERENT from bug #74, where the tab didn't come back at all.
 
 ## Phase 67 — Page-wise follow mode
 

@@ -7,19 +7,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 
 ---
 
-## 7. Restart does not clear per-execution state
-
-- **Status:** fix attempted - untested
-- **Symptom:** (found in code review, not user-reported) After a restart,
-  stale `msg_id → CellId` entries linger in `execution_requests`; incoming
-  messages could be routed to old cells.
-- **Analysis:** `restart_kernel` doesn't clear `self.execution_requests`;
-  `change_kernel` does (`notebook_ui.rs:486`).
-- **Fix attempted:** `restart_kernel` now clears `execution_requests` (and
-  stops executing-cell spinners); `kernel_errored`/`kernel_exited` clear it
-  too.
-- **Tested:** no — needs user confirmation
-
 ## 9. Notebook never reports itself dirty
 
 - **Status:** open
@@ -265,7 +252,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 - **Tested:** no — can only be soak-tested: work normally (create/save/reopen
   Untitled notebooks); if the same file never opens twice again over a few
   sessions, call it fixed.
-
 
 ## 41. Text/table output doesn't use the output block's full width
 
@@ -585,7 +571,19 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   the editor's diagnostic navigation inside notebook cells and work in edit
   mode as well as command mode (same override pattern the existing `up`/`down`
   cross-cell bindings use there). Cause 2 is by design and left alone.
-- **Tested:** no — needs user confirmation
+- **Tested (user 2026-08-11): FAILED.** With two cells deliberately failed the
+  strip correctly reads "2 cells failed", but `f8` / `shift-f8` still do not
+  move between them. The previous fix (binding them in the base
+  `NotebookEditor` context so they work from edit mode) was therefore not the
+  whole story — or not the story at all. Next step is to establish whether the
+  action DISPATCHES at all (log in `next_error`/`previous_error`) before
+  changing any more bindings; if it dispatches, the fault is in
+  `next_failed_index`/`reveal_error_cell`, not in the keymap.
+- **Priority note (user 2026-08-11):** low. Getting two failed cells at once is
+  artificial — a batch run stops at the first failure, so more than one failure
+  only happens if you run failing cells individually on purpose. Worth fixing
+  for correctness, not worth prioritising.
+
 
 ## 65. Follow mode lands mid-cell on a very long cell
 
@@ -621,100 +619,33 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 - **Fix attempted:** none
 - **Tested:** n/a
 
-## 66. "Clear all outputs" is disabled when only execution info remains
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-08-06) The Clear Outputs control is only enabled when
-  some cell has actual OUTPUT. But the command also clears execution counts,
-  run durations, timestamps and the ✓/✕ status markers, so after running cells
-  that print nothing (`x = 1`) the notebook still shows `[3] ✓ 57ms` on every
-  cell while the button sits disabled with nothing apparently to clear.
-- **Analysis:** the control's `disabled` gate used `has_outputs`, which asks
-  only `!self.outputs.is_empty()`, while the action runs
-  `clear_execution_record` — which clears outputs AND `execution_count`,
-  `execution_duration`, `execution_start_time`, `last_executed_at`,
-  `metadata.execution` and the status. The gate was narrower than the action.
-- **Fix attempted (2026-08-06):** new `CodeCell::has_execution_record` (outputs
-  OR execution count OR duration OR last-executed timestamp OR a non-Idle
-  status) mirrors exactly what `clear_execution_record` clears; the notebook's
-  gate (`NotebookEditor::has_execution_record`) and the control's `disabled`
-  state now use it.
-- **Tested:** no — needs user confirmation
-
-## 67. A vertical wheel scrolls wide tables sideways
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-08-06, testing phase 63) Scrolling the mouse wheel
-  down a notebook that shows a wide DataFrame scrolls BOTH the notebook
-  (vertically) and the table (horizontally) at the same time. The vertical
-  wheel should never move a table sideways: horizontal input should come only
-  from a tilt/second wheel (which works correctly) or the scrollbar.
-- **Analysis:** gpui's scroll-wheel handler falls back to the other axis when
-  an element scrolls in only ONE direction: with `overflow.x == Scroll` and no
-  vertical overflow it assigns `delta.y` to `delta_x` unless
-  `restrict_scroll_to_axis` is set (`gpui/src/elements/div.rs`, the
-  `ScrollWheelEvent` handler). Phase 63's table scroll container never set it.
-  The notebook scrolls too because the table doesn't consume the event.
-- **Fix attempted (2026-08-06):** `restrict_scroll_to_axis = Some(true)` on the
-  table's scroll container, the same way `ui`'s `data_table` and markdown code
-  blocks do it. The table now answers only to horizontal input; vertical wheels
-  pass through to the notebook.
-- **Tested:** no — needs user confirmation
-
-## 68. The table's horizontal scrollbar scrolls away when dragged
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-08-06, testing phase 63) The wide-table scrollbar
-  "kind of works but there's something wrong with it" — grabbing the thumb and
-  dragging right moves it LEFT, it slides out from under the pointer,
-  scrolling stops and the thumb disappears. It behaves as if it were fixed
-  inside the content rather than pinned to the viewport.
-- **Analysis:** that is exactly what it was. Phase 63 applied
-  `.custom_scrollbars(...)` to the SAME element that carries
-  `overflow_x_scroll`, so the scrollbar was laid out in content space and
-  translated with the content it was supposed to control. `ui`'s `data_table`
-  shows the correct structure: the scrolling element is a CHILD, and the
-  scrollbars go on a non-scrolling wrapper.
-- **Fix attempted (2026-08-06):** the table's scroll container is now a child
-  of a plain wrapper, and `custom_scrollbars` (tracking the same
-  `ScrollHandle`) is applied to the wrapper.
-- **Tested:** no — needs user confirmation
-
 ## 69. Column titles wrap their last character
 
 - **Status:** fix attempted - untested
-- **Symptom:** (user 2026-08-06, screenshots) DataFrame column headers wrap a
-  SINGLE character onto a second line (`total_page_view` + `s`,
-  `features_used_coun` + `t`, `nps_satisfaction_scor` + `e`). It happens even
-  when the table has spare room — e.g. with `max_columns` low enough that the
-  whole table fits inside the output block — so it is not an overflow problem.
-- **Analysis:** the header renders SEMIBOLD (`render_row`), but
-  `TableView::new` measured every column's width — including the title — with
-  a REGULAR-weight run. Semibold is a few percent wider, which for a 20-odd
-  character title is about one character: each column ends up marginally
-  narrower than its own title, and the title wraps.
-- **Fix attempted (2026-08-06):** header titles are measured with a
-  `FontWeight::SEMIBOLD` run, matching how they render.
-- **Tested:** no — needs user confirmation
+- **Symptom:** (user 2026-08-06, re-confirmed with screenshots 2026-08-11) A
+  DataFrame column title wraps its final character onto a second line —
+  `Column_number_10` renders as `Column_number_1` + `0` while the
+  one-character-shorter `Column_number_9` beside it fits fine. Happens at any
+  table width, including one with room to spare.
+- **First fix attempt (2026-08-06) — WRONG LAYER, kept anyway:** headers render
+  SEMIBOLD but every column was measured at regular weight, so each was a few
+  pixels short of its own title. Measuring headers semibold is correct and is
+  still in place, but it was not the cause — the second screenshot shows the
+  wrap surviving it.
+- **Actual cause (2026-08-11):** the table renders at a DIFFERENT FONT SIZE from
+  the one it measures with. `TableView::new` measures every column with
+  `ThemeSettings::buffer_font_size`, but the rendered table only sets the
+  buffer font FAMILY (`ui`'s `font_buffer` sets `font_family` and nothing else,
+  `typography.rs:13`) — the size stayed whatever the surrounding output block
+  gave it. Every glyph then rendered a fraction wider than it was measured, and
+  the error accumulates with the length of the string: invisible on a 15-
+  character title, just past the ~6px of padding slack on a 16-character one.
+  That is exactly the observed 9-vs-10 threshold.
+- **Fix attempted (2026-08-11):** pin the rendered text size to the measured one
+  (`.text_size(buffer_font_size)` alongside `.font_buffer(cx)`), so measurement
+  and rendering agree by construction.
+- **Tested:** no — needs user confirmation.
 
-## 70. Table columns don't line up from row to row
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-08-06, screenshot) In a two-column table (`name`,
-  `path`) the second column's start position shifts row by row: it moves right
-  on rows whose `name` is long (index 10, 15) and back left on rows whose name
-  is short (index 14). A column's left edge should be a hard vertical line
-  through the whole table.
-- **Analysis:** in fill-width mode (used when any column is longer than
-  `LONG_COLUMN_WIDTH`) cells are laid out with `flex_grow(width)` and no
-  explicit basis, so each cell's flex basis defaults to `auto` — its own
-  CONTENT width. Spare space is then distributed differently in every row,
-  because every row's content differs. The grow factors are per-column but the
-  bases were per-cell.
-- **Fix attempted (2026-08-06):** `flex_basis(px(0.))` on fill-width cells, so
-  the split depends only on the per-column grow factors and the per-column
-  `min_w`. Fixed-width (non-fill) mode was already consistent.
-- **Tested:** no — needs user confirmation
 
 ## 71. A cell being edited stops accepting input when scrolled out of view
 
@@ -737,42 +668,18 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
 - **Fix attempted:** none
 - **Tested:** n/a
 
-## 72. Kernel status sticks on "Starting" until a cell is run
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-08-06) After starting a kernel, the status stays
-  "Starting" even though the kernel is fully up — the user saw it flash "Idle"
-  for an instant and then go back. Running a cell flips it straight to "Busy"
-  and then correctly to "Idle". Also seen after a restart:
-  "Restarting" → "Starting" → stuck. Intermittent; no reliable repro.
-- **Analysis:** a Jupyter kernel broadcasts `status: starting` on iopub when it
-  comes up, and `NotebookEditor::route` feeds every status message into
-  `Kernel::set_execution_state`. The launch task sets
-  `Kernel::RunningKernel(...)` with `ExecutionState::Idle` — that is the flash
-  of "Idle" — and if the kernel's own `starting` broadcast arrives AFTER that
-  assignment (a race, hence the intermittency), it overwrites Idle with
-  Starting. Nothing else updates the state until the next execution, so the
-  strip sits on "Starting" until a cell runs. The restart case is the same race
-  one step later.
-- **Fix attempted (2026-08-06):** `Kernel::set_execution_state` ignores an
-  incoming `Starting` for a kernel that is already `RunningKernel` — by
-  definition it is past starting, and the only source of that message is the
-  startup broadcast we have already outrun. Caveat recorded in the code: during
-  a kernel-initiated AUTO-restart the sequence is
-  `autorestarting` → `starting` → `idle`, so the brief `starting` there now
-  reads as the previous state instead; `autorestarting` still shows Restarting,
-  so the visible outcome is unchanged.
-- **Tested:** no — needs user confirmation
-
 ## 73. "Failed to trash" toast after a successful delete
 
 - **Status:** open
 - **Symptom:** (user 2026-08-11, screenshot, Windows) Deleting a file from the
   project panel works — the file goes to the Recycle Bin and leaves the tree —
   but a red toast says "Failed to trash 1 of 1 file."
-- **Analysis (code inspection 2026-08-11, NOT yet reproduced — this container is
-  headless Linux with no desktop trash, so the Windows branch below is inferred
-  from the crate source rather than observed):** the deletion genuinely
+- **Repro CONFIRMED by the user on Windows, 2026-08-11.** The analysis below is
+  still code inspection — this container is headless Linux with no desktop
+  trash — but the symptom is confirmed, so the Windows branch is the one to
+  fix. Still unknown, and worth noting next time it happens: whether it fires
+  for EVERY file or only some (that separates a failing metadata lookup from an
+  item that never reached the bin). the deletion genuinely
   succeeded; the error is about UNDO METADATA, not about deleting.
   - `Fs::trash` (`fs/src/fs.rs:801`) calls `trash::delete_with_info`, which
     demands the backend describe WHERE in the bin the file landed so the panel
@@ -796,4 +703,69 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   `Fs::trash` callers (`git_ui/src/git_panel.rs:1906` and `:2107`) at the same
   time. Note this is upstream code in `fs.rs`, so keep the change minimal.
 - **Fix attempted:** none
+- **Tested:** n/a
+
+## 74. A notebook deleted while Zed is closed doesn't restore at all
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-08-11, testing phase 69) Dirty a notebook, quit Zed —
+  the unsaved changes are stored — then delete the file from disk and reopen
+  Zed. The notebook does not come back at all: no tab, and the unsaved changes
+  it was holding are gone. Expected (matching a text file) is that it restores
+  with the cached content.
+- **Analysis (2026-08-11):** nothing to do with the deletion path — with the
+  file gone, `NotebookItem::try_open` fails before it can build anything.
+  `Project::open_buffer` deliberately returns an EMPTY buffer for a path with no
+  entry (`buffer_store.rs:665`, `DiskState::New`), so the notebook parses fine;
+  but `try_open` then did
+  `project.entry_for_path(&path, cx).map(|e| e.id).context("Entry not found")?`
+  and a deleted file has no worktree entry, so the whole open errored. Session
+  restore's per-item `log_err` (`persistence/model.rs:388`) swallowed it and
+  dropped the tab.
+- **Fix attempted (2026-08-11):** the entry id is now optional, which it already
+  was in `NotebookItem` — it is only a FALLBACK for `entry_id()`, which
+  re-resolves from the path on every call (bug #34). Nothing needed it to be
+  present at open time.
+- **Tested:** no — needs user confirmation.
+
+## 75. A restored unsaved notebook doesn't show as dirty
+
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-08-11) Create a new notebook, type something (dirty
+  marker appears, correct), quit Zed, reopen. The notebook is restored with its
+  content but shows NO dirty marker. Typing brings the marker back; undoing back
+  to the restored state removes it again. Anything unsaved should read as dirty,
+  because it always has unsaved changes.
+- **Analysis (2026-08-11):** the same trap phase 69 fixed for file-backed
+  notebooks, missed for untitled ones. Rebuilding a notebook from stored JSON
+  makes those cells their own baseline, so `has_structural_changes` and
+  `has_content_changes` both read clean — the notebook looks identical to what
+  it was "loaded" from, even though that was the DB and not a file.
+- **Fix attempted (2026-08-11):** set `restored_unsaved_changes` (phase 69's
+  explicit marker) on the untitled restore path too, so a restored untitled
+  notebook is dirty from the moment it appears until it is saved.
+- **Tested:** no — needs user confirmation.
+
+## 76. Restoring unsaved changes over a file edited elsewhere says nothing
+
+- **Status:** open
+- **Symptom:** (user 2026-08-11, testing phase 69) Dirty a notebook in Zed, quit
+  Zed, edit the same file in another editor and save, then reopen Zed. The
+  cached unsaved version opens with no notification at all — nothing says the
+  file on disk has moved on underneath it.
+- **Analysis (2026-08-11):** phase 69 stores the file's `mtime` and, on restore,
+  sets `disk_changed_externally` when disk no longer matches it
+  (`restore_unsaved_notebook`) — pinned by
+  `test_restored_unsaved_notebook_flags_a_stale_base`. But that flag is only
+  ever SURFACED at save time (bug #14's Overwrite/Cancel prompt); nothing tells
+  the user at restore. So the reported symptom is consistent with the mechanism
+  working correctly and simply being invisible until you try to save.
+  **Unresolved, and the thing to check first:** save the restored notebook and
+  see whether the Overwrite/Cancel prompt appears. If it does, this is purely a
+  missing notification (show the existing conflict toast at restore time). If it
+  does not, the mtime comparison itself is failing on a real restore and the
+  unit test is passing for a case that doesn't occur — likely the stored mtime
+  is `None` because the notebook's buffer had no `saved_mtime` when serialized.
+- **Fix attempted:** none — the two causes need different fixes and the check
+  above separates them.
 - **Tested:** n/a

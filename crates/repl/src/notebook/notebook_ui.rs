@@ -5350,18 +5350,22 @@ impl project::ProjectItem for NotebookItem {
 
                 let notebook = NotebookEditor::parse_notebook_text(&file_content)?;
 
-                let id = project
-                    .update(cx, |project, cx| {
-                        project.entry_for_path(&path, cx).map(|entry| entry.id)
-                    })
-                    .context("Entry not found")?;
+                // A MISSING entry is not a failure. The notebook opens fine
+                // without one — `id` is only a fallback for `entry_id`, which
+                // re-resolves from the path anyway — and insisting on it meant a
+                // notebook whose file had been deleted could not be opened at
+                // all. Session restore then dropped the tab silently, taking any
+                // unsaved changes it was holding with it (bug #74).
+                let id = project.update(cx, |project, cx| {
+                    project.entry_for_path(&path, cx).map(|entry| entry.id)
+                });
 
                 Ok(cx.new(|_| NotebookItem {
                     path: Some(abs_path),
                     project_path: Some(path),
                     languages,
                     notebook,
-                    id: Some(id),
+                    id,
                     project: project.downgrade(),
                     buffer: Some(buffer),
                 }))
@@ -6237,7 +6241,17 @@ impl SerializableItem for NotebookEditor {
                     let languages = project.read(cx).languages().clone();
                     let notebook_item = cx
                         .new(|_| NotebookItem::untitled(project.downgrade(), languages, notebook));
-                    cx.new(|cx| NotebookEditor::new(project, notebook_item, window, cx))
+                    cx.new(|cx| {
+                        let mut editor = NotebookEditor::new(project, notebook_item, window, cx);
+                        // Contents are only stored for a notebook with unsaved
+                        // changes, so a restored untitled notebook has content
+                        // that exists NOWHERE on disk — it is unsaved by
+                        // definition and has to say so. Rebuilding it makes the
+                        // restored cells their own baseline, which otherwise
+                        // reads as clean until the next keystroke (bug #75).
+                        editor.restored_unsaved_changes = true;
+                        editor
+                    })
                 })
             })
         } else {

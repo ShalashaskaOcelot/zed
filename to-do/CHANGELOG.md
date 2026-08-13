@@ -301,6 +301,24 @@ entry rather than archiving it.
 
 ## Fixed bugs (confirmed)
 
+- #7 — Restart left stale `msg_id → CellId` entries, so output from a
+  pre-restart execution could land on a cell after restarting. Confirmed
+  2026-08-11.
+- #66 — Clear Outputs was disabled for cells that ran but printed nothing;
+  it now enables whenever there is any execution record and clears counts,
+  times and ✓ markers. Confirmed 2026-08-11.
+- #67 — A vertical wheel dragged wide tables sideways while the notebook
+  scrolled (`restrict_scroll_to_axis`). Confirmed 2026-08-11.
+- #68 — The wide table's horizontal scrollbar slid out from under the pointer
+  when dragged; moved off the scrolling element onto a wrapper. Confirmed
+  2026-08-11.
+- #70 — Table columns didn't line up row to row; `flex_basis(0)` makes the
+  split depend only on the per-column grow factors. Confirmed 2026-08-11.
+- #72 — Kernel status stuck on "Starting" until a cell was run: a late
+  `status: starting` broadcast overwrote the launched state. Confirmed
+  2026-08-11. (Follow-up in the backlog: a RESTART should go straight to Idle
+  rather than via Starting.)
+
 - Stale unit test `test_last_session_restores_workspace_with_missing_paths`
   asserted the behaviour bug #50 deliberately reversed, so `cargo test -p
   workspace` had been RED since `cd2162f` (2026-07-23). Rewritten to assert

@@ -245,6 +245,14 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
   cell text without outputs and merging outputs from the last full encode — or
   a longer debounce of its own. Graceful quit is already covered, so this is
   crash-safety only.
+- Restarting a kernel should go Restarting → Idle, not Restarting → Starting →
+  Idle (user 2026-08-11, confirming bug #72). "Restarting" already covers both
+  halves of the operation — killing the old process and starting the new one —
+  so dropping into "Starting" afterwards is a redundant flicker that makes a
+  restart look like two separate events. A fresh start (no previous kernel)
+  should still show Starting. Small: the restart path needs to hold its own
+  status until the kernel reports ready, rather than handing over to the
+  generic launch status partway through.
 - Add `smooth_scrolling` to the GUI settings UI (user 2026-07-30). Phase 54
   added the setting to `default.json`, the schema and the docs, but NOT to the
   settings UI — so it's JSON-only today. It belongs in the existing **Editor →

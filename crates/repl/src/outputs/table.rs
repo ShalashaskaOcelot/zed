@@ -468,7 +468,15 @@ impl Render for TableView {
             // MEASURED in (`TableView::new` uses the buffer font) — an
             // ambient UI font makes cells narrower than their content, which
             // wrapped/truncated long values like paths (phase 29).
+            //
+            // `font_buffer` sets only the FAMILY. The size stayed ambient while
+            // the measurement used `buffer_font_size`, so every glyph rendered
+            // a fraction wider than it was measured — invisible on a short
+            // title and just enough to wrap the last character of a long one
+            // (bug #69: `Column_number_10` wrapped where `Column_number_9`
+            // fitted). Pin the size to what was measured.
             .font_buffer(cx)
+            .text_size(ThemeSettings::get_global(cx).buffer_font_size(cx))
             .child(
                 v_flex()
                     .rounded_md()
