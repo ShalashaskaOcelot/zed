@@ -160,6 +160,22 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
     and renders properly (relates to bug #57 — the scrollbar currently overlaps
     the cell margin because the sidebar occupies that space).
   * A setting to choose between the two layouts.
+  **Reference design (user 2026-08-12, screenshots): the `.py` REPL top bar.**
+  The user considers it "perfect" as a starting point — copy its layout rather
+  than inventing one. What it already has: the kernel name, version and venv
+  marker on the right (`Python 3.11.15 (venv)`) with the breadcrumb path on the
+  left, and an icon row beside it. It is already a KERNEL PICKER (any
+  REPL-capable file gets one), so that part does not need building — some of it
+  is simply hidden until the file has a kernel. Its overflow menu carries
+  Run Line, Interrupt, Clear Outputs, **Shut Down Kernel**, Restart Kernel and
+  View Sessions; the user specifically wants **Shut Down Kernel** carried over,
+  which the notebook's sidebar does not currently offer at all.
+  What that bar does NOT have, and a notebook version needs adding: follow
+  running cell, go to running cell, the failure indicator and its `f8`
+  navigation, and the notebook-only run controls (Run All / Run Above / Run
+  Below). Worth checking whether the notebook can reuse the same element rather
+  than growing a parallel implementation — see where the `.py` bar is built
+  (the REPL/editor toolbar path) before committing to a new one.
 
 - Accurate notebook scrollbar via full measurement (user 2026-07-30). The
   scrollbar thumb is wrong on open and SHRINKS as you scroll: a notebook that
