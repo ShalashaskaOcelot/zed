@@ -69,7 +69,8 @@ use zed_actions::notebook::{
     JoinCells, MoveCellDown, MoveCellUp, NewNotebook, NextError, NotebookMoveDown, NotebookMoveUp,
     OpenNotebook, PasteCell, PasteCellAbove, PreviousError, RedoCellOp, ReloadNotebook,
     RestartKernel, Run, RunAll, RunAndAdvance, RunCellAndBelow, RunCellsAbove, SelectAllCells,
-    SelectFirstCell, SelectLastCell, SplitCell, ToggleFollowRunningCell, UndoCellOp,
+    SelectFirstCell, SelectLastCell, SelectNextCell, SelectPreviousCell, SplitCell,
+    ToggleFollowRunningCell, UndoCellOp,
 };
 
 /// The failed-cell index to move to after `selected`, wrapping to the first
@@ -155,7 +156,7 @@ enum CellEdit {
 }
 
 /// Whether the notebook is in command mode (navigating cells) or edit mode (editing a cell).
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum NotebookMode {
     Command,
     Edit,
@@ -2312,6 +2313,15 @@ impl NotebookEditor {
     }
 
     fn run_cells(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Running the WHOLE notebook is not an editing action, so it leaves
+        // edit mode (phase 70) — otherwise the keyboard keeps talking to the
+        // cell you happened to be in while every cell executes. Deliberately
+        // only Run All: the other controls stay non-disruptive, so pressing one
+        // mid-edit does not throw you out of the cell (phase 64).
+        if self.notebook_mode == NotebookMode::Edit {
+            self.enter_command_mode(window, cx);
+        }
+
         // Opt-in: make the execution tally measure THIS pass rather than
         // everything run since the kernel started.
         //
@@ -4274,9 +4284,18 @@ impl NotebookEditor {
         }
     }
 
+    /// Cell navigation deliberately has its OWN actions rather than reusing
+    /// `menu::SelectNext`/`SelectPrevious`. Those are bound context-free at the
+    /// top of every keymap (for menus and pickers), and a context-free binding
+    /// matches at EVERY depth, so while a notebook was handling them `ctrl-n`
+    /// and `ctrl-p` moved between cells instead of reaching
+    /// `workspace::NewFile` / `file_finder::Toggle`. Nulling those keys in the
+    /// notebook context does not help: a `null` in a BUILT-IN keymap is skipped
+    /// rather than treated as a stop (only a USER keymap's `null` breaks the
+    /// chain), and the context-free binding ties at the same depth anyway.
+    /// Not answering the shared action is what actually lets the key through.
     fn select_next(
         &mut self,
-        _: &menu::SelectNext,
         selection_mode: SelectionMode,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -4313,7 +4332,6 @@ impl NotebookEditor {
 
     fn select_previous(
         &mut self,
-        _: &menu::SelectPrevious,
         selection_mode: SelectionMode,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -5209,11 +5227,11 @@ impl Render for NotebookEditor {
             .on_action(cx.listener(|this, action, window, cx| {
                 this.handle_enter_command_mode(action, window, cx)
             }))
-            .on_action(cx.listener(|this, action, window, cx| {
-                this.select_next(action, SelectionMode::SelectOnly, window, cx)
+            .on_action(cx.listener(|this, _: &SelectNextCell, window, cx| {
+                this.select_next(SelectionMode::SelectOnly, window, cx)
             }))
-            .on_action(cx.listener(|this, action, window, cx| {
-                this.select_previous(action, SelectionMode::SelectOnly, window, cx)
+            .on_action(cx.listener(|this, _: &SelectPreviousCell, window, cx| {
+                this.select_previous(SelectionMode::SelectOnly, window, cx)
             }))
             .on_action(cx.listener(Self::select_first))
             .on_action(cx.listener(Self::select_last))
@@ -5235,20 +5253,10 @@ impl Render for NotebookEditor {
                 }),
             )
             .on_action(cx.listener(|this, _: &MoveDown, window, cx| {
-                this.select_next(
-                    &Default::default(),
-                    SelectionMode::SelectAndMove,
-                    window,
-                    cx,
-                );
+                this.select_next(SelectionMode::SelectAndMove, window, cx);
             }))
             .on_action(cx.listener(|this, _: &MoveUp, window, cx| {
-                this.select_previous(
-                    &Default::default(),
-                    SelectionMode::SelectAndMove,
-                    window,
-                    cx,
-                );
+                this.select_previous(SelectionMode::SelectAndMove, window, cx);
             }))
             .on_action(cx.listener(|this, _: &NotebookMoveDown, window, cx| {
                 let Some(cell) = this.get_selected_cell() else {
@@ -5274,12 +5282,7 @@ impl Render for NotebookEditor {
                 });
 
                 if is_at_last_line {
-                    this.select_next(
-                        &Default::default(),
-                        SelectionMode::SelectAndMove,
-                        window,
-                        cx,
-                    );
+                    this.select_next(SelectionMode::SelectAndMove, window, cx);
                 } else {
                     editor.update(cx, |editor, cx| {
                         editor.move_down(&Default::default(), window, cx);
@@ -5309,12 +5312,7 @@ impl Render for NotebookEditor {
                 });
 
                 if is_at_first_line {
-                    this.select_previous(
-                        &Default::default(),
-                        SelectionMode::SelectAndMove,
-                        window,
-                        cx,
-                    );
+                    this.select_previous(SelectionMode::SelectAndMove, window, cx);
                 } else {
                     editor.update(cx, |editor, cx| {
                         editor.move_up(&Default::default(), window, cx);
@@ -6936,6 +6934,71 @@ mod tests {
             editor.read_with(cx, |editor, _| editor.execution_time_banked),
             Duration::ZERO,
             "with the setting on, Run All measures that pass and nothing before it"
+        );
+    }
+
+    /// Run All leaves edit mode (phase 70) — and does it for the KEYBINDING as
+    /// well as the button, since `ctrl-shift-enter` from inside a cell is the
+    /// same "run the whole notebook" intent as clicking the control.
+    #[gpui::test]
+    async fn test_run_all_leaves_edit_mode(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            editor::init(cx);
+        });
+
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            path!("/notebooks"),
+            json!({ "test.ipynb": NOTEBOOK_WITH_MIXED_CELLS }),
+        )
+        .await;
+        let project = Project::test(fs.clone(), [path!("/notebooks").as_ref()], cx).await;
+        cx.update(|cx| ReplStore::init(fs.clone(), cx));
+        let worktree_id = project.read_with(cx, |project, cx| {
+            project.worktrees(cx).next().unwrap().read(cx).id()
+        });
+
+        let notebook_item = cx
+            .update(|cx| {
+                NotebookItem::try_open(
+                    &project,
+                    &ProjectPath {
+                        worktree_id,
+                        path: rel_path("test.ipynb").into(),
+                    },
+                    cx,
+                )
+                .expect("ipynb files should be openable as notebooks")
+            })
+            .await
+            .expect("notebook should parse");
+
+        let cx = cx.add_empty_window();
+        let editor = cx.update(|window, cx| {
+            cx.new(|cx| NotebookEditor::new(project.clone(), notebook_item, window, cx))
+        });
+        cx.run_until_parked();
+
+        editor.update_in(cx, |editor, window, cx| {
+            editor.enter_edit_mode(&EnterEditMode, window, cx)
+        });
+        assert_eq!(
+            editor.read_with(cx, |editor, _| editor.notebook_mode),
+            NotebookMode::Edit,
+            "test setup: the notebook should be in edit mode before Run All"
+        );
+
+        editor.update_in(cx, |editor, window, cx| editor.run_cells(window, cx));
+        cx.run_until_parked();
+
+        assert_eq!(
+            editor.read_with(cx, |editor, _| editor.notebook_mode),
+            NotebookMode::Command,
+            "Run All runs the whole notebook, so it should not leave the \
+             keyboard talking to one cell"
         );
     }
 

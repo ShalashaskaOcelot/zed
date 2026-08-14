@@ -974,6 +974,10 @@ pub mod notebook {
             NotebookMoveDown,
             /// Move up in cells.
             NotebookMoveUp,
+            /// Selects the next cell (command mode).
+            SelectNextCell,
+            /// Selects the previous cell (command mode).
+            SelectPreviousCell,
             /// Selects the first cell.
             SelectFirstCell,
             /// Selects the last cell.

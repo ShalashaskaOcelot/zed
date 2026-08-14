@@ -150,6 +150,29 @@ and defects become new backlog/bug items.
       error toast (instead of failing silently). (Needs a machine/session
       where `python3`/`python` isn't on PATH.)
 
+## Phase 70 — Notebook keyboard and control corrections
+
+Kind: **change to existing behaviour** — if any of these still behave the old
+way, the change did not take effect: say so and it gets fixed in place, NOT
+refiled as a new item.
+
+- [ ] In a notebook, `ctrl-n` makes a new file and `ctrl-p` opens the file
+      finder, as they do everywhere else.
+- [ ] Cell navigation is unchanged: `up`/`down` in command mode move the
+      selection and reveal the whole cell; while EDITING, up/down still cross
+      into the previous/next cell at the first/last line. (This is the part most
+      worth a real look — cell navigation was rewired onto its own actions to
+      free those keys.)
+- [ ] Neither key does anything odd while EDITING a cell — they should behave as
+      they do in any editor.
+- [ ] Start editing a cell, then click Run All: the notebook leaves edit mode
+      and the run starts. `ctrl-shift-enter` from inside a cell does the same.
+- [ ] The other sidebar controls still do NOT throw you out of a cell you are
+      editing (phase 64's behaviour, deliberately kept).
+- [ ] Known and accepted: `tab`/`shift-tab` in command mode no longer step
+      between cells (they only did so as a side effect of the collision being
+      fixed). Flag it if you actually used them.
+
 ## Phase 68 — Kernel strip states and the Run All timer reset
 
 Kind: **mixed** — item 1 is a change to existing behaviour (if the strip still

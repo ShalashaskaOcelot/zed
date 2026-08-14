@@ -77,32 +77,7 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
 
 ## Medium priority
 
-- Line numbers per notebook cell (user 2026-08-06). Two settings, BOTH default
-  off — a global one for the whole notebook and a per-cell one — plus two
-  command-mode keybindings, settled on Jupyter's own convention (user
-  2026-08-06): `l` toggles line numbers on the FOCUSED cell, `shift-l` toggles
-  the notebook-wide setting.
-  **Binding check (done 2026-08-06):** both are free in
-  `NotebookEditor && notebook_mode == command` — the only `l` binding anywhere
-  is `menu::SelectNext` under the `Prompt` context, which cannot be active
-  there, and `shift-l` is unbound. This deliberately avoids `ctrl-l`, which is
-  taken (`editor::SelectLine` on Linux, `editor::ScrollCursorCenter` on macOS):
-  bound in the command-mode context it would have worked, but in the plain
-  `NotebookEditor` context the editor's binding would shadow it while editing a
-  cell and it would silently do nothing — the trap behind bug #64. Bind both in
-  the COMMAND-MODE context only.
-  **Implementation note:** cell editors currently call
-  `editor.set_show_gutter(false, cx)` (`cell.rs:529`), so line numbers need the
-  gutter turned back ON, which also brings breakpoints / code actions /
-  runnables / git-diff markers with it — those need suppressing, or the gutter
-  needs a line-numbers-only mode. There is already a per-editor override,
-  `Editor::show_line_numbers: Option<bool>` with `line_numbers_enabled()`
-  falling back to `EditorSettings::gutter.line_numbers` (`editor/src/config.rs`),
-  which is exactly the shape needed for "cell overrides notebook overrides
-  global". Also note the notebook draws its OWN gutter to the left of each cell
-  (the accent bar + run button, `GUTTER_WIDTH`), so the layout of two adjacent
-  gutters needs a look — line numbers should not push the cell content around
-  or double the left margin.
+_(empty — the line-numbers item moved into `phase_71.md` on 2026-08-12.)_
 
 ## Low priority
 

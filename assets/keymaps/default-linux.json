@@ -1497,8 +1497,13 @@
     "context": "NotebookEditor && notebook_mode == command",
     "bindings": {
       "enter": "notebook::EnterEditMode",
-      "down": "menu::SelectNext",
-      "up": "menu::SelectPrevious",
+      // The notebook's OWN cell-navigation actions, not `menu::SelectNext` /
+      // `menu::SelectPrevious`. Those are bound context-free at the top of this
+      // file for menus and pickers, and a context-free binding matches at every
+      // depth — so while the notebook answered them, `ctrl-n`/`ctrl-p` moved
+      // between cells instead of reaching New File / the file finder.
+      "down": "notebook::SelectNextCell",
+      "up": "notebook::SelectPreviousCell",
       "shift-down": "notebook::ExtendSelectionDown",
       "shift-up": "notebook::ExtendSelectionUp",
       "shift-home": "notebook::ExtendSelectionToStart",

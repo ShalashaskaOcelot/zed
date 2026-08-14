@@ -291,6 +291,10 @@ entry rather than archiving it.
   created), and a global-search hit on a notebook opens the NOTEBOOK — the
   editor asks the project-item registry who claims a path instead of knowing
   about extensions. `PENDING`
+- Phase 70 — Notebook keyboard and control corrections: cell navigation moved
+  off the shared `menu::SelectNext`/`SelectPrevious` actions onto its own, which
+  gives `ctrl-n`/`ctrl-p` back to New File / the file finder, and Run All now
+  leaves edit mode. `PENDING`
 - Phase 68 — Kernel strip states and the Run All timer reset: the strip has its
   own "Creating…" state instead of borrowing "Starting" while an environment
   builds, and `repl.notebook_reset_execution_time_on_run_all` makes Run All
