@@ -1355,6 +1355,13 @@ pub struct ReplSettingsContent {
     ///
     /// Default: minimal
     pub notebook_follow_mode: Option<NotebookFollowMode>,
+    /// Whether Run All resets the notebook's execution-time tally first, so it
+    /// reads as the cost of that one end-to-end pass rather than of everything
+    /// run since the kernel started. Only meaningful when
+    /// `notebook_show_execution_time` is on.
+    ///
+    /// Default: false
+    pub notebook_reset_execution_time_on_run_all: Option<bool>,
 }
 
 /// How a notebook scrolls while "follow running cell" is on.

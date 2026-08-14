@@ -172,6 +172,35 @@ pub(crate) const MEDIUM_SPACING_SIZE: f32 = 12.0;
 // without wrapping; four digits will still wrap, which the user accepted as the
 // right trade against pushing every cell's content further right.
 pub(crate) const GUTTER_WIDTH: f32 = 38.0;
+
+/// What the notebook's kernel strip is showing.
+///
+/// Mostly the kernel's own status, plus one state the KERNEL cannot have:
+/// while an environment is still being BUILT there is no kernel yet to ask.
+/// Phase 48 borrowed `Starting` for that, which read as though the interpreter
+/// were coming up when in fact a build was running and the launch only follows
+/// it (user 2026-08-06). Keeping it separate lets the sequence read properly:
+/// creating → starting → idle.
+///
+/// Deliberately local to the strip rather than a variant on `KernelStatus`:
+/// that enum belongs to the kernel machinery and the inline REPL shares it, and
+/// none of them have a notion of an environment being created.
+// `KernelStatus` is only `Clone`, so this can't be `Copy`/`PartialEq` either.
+#[derive(Clone)]
+enum StripStatus {
+    Creating,
+    Kernel(KernelStatus),
+}
+
+impl StripStatus {
+    fn label(&self) -> String {
+        match self {
+            StripStatus::Creating => "Creating…".to_string(),
+            StripStatus::Kernel(status) => status.to_string(),
+        }
+    }
+}
+
 /// Hover group shared by every cell's root element, so gutters and toolbars
 /// can show/hide on cell hover regardless of cell type.
 pub(crate) const CELL_HOVER_GROUP: &str = "notebook-cell";
@@ -2283,7 +2312,28 @@ impl NotebookEditor {
     }
 
     fn run_cells(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Opt-in: make the execution tally measure THIS pass rather than
+        // everything run since the kernel started.
+        //
+        // Deliberately here and not in `run_cell_batch`, which is shared with
+        // Run Above, Run Below and running a multi-cell selection — none of
+        // those mean "the whole notebook", so resetting there would silently
+        // redefine the number for all of them.
+        if ReplSettings::get_global(cx).notebook_reset_execution_time_on_run_all {
+            self.reset_execution_time(cx);
+        }
         self.run_cell_batch(self.cell_order.clone(), window, cx);
+    }
+
+    /// Zero the execution tally, including any run currently being timed, so a
+    /// reset mid-run doesn't bank the elapsed time of the cell it interrupted.
+    fn reset_execution_time(&mut self, cx: &App) {
+        self.execution_time_banked = Duration::ZERO;
+        self.execution_time_started_at = None;
+        // A batch started while a cell is already running supersedes it
+        // (`run_cell_batch`), but the clock has to be restarted from now either
+        // way — `sync_execution_clock` only starts one when none is running.
+        self.sync_execution_clock(cx);
     }
 
     /// Run a batch of cells sequentially, stopping the remainder if one fails.
@@ -4774,12 +4824,10 @@ impl NotebookEditor {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         // While an env is being created (phase 48) it is the pending selection:
-        // show its name with a Starting status, ahead of the old kernel's.
-        let creating = self.creating_kernel_name.is_some();
-        let kernel_status = if creating {
-            KernelStatus::Starting
-        } else {
-            self.kernel.status()
+        // show its name ahead of the old kernel's, in its own state.
+        let strip_status = match self.creating_kernel_name.is_some() {
+            true => StripStatus::Creating,
+            false => StripStatus::Kernel(self.kernel.status()),
         };
         let kernel_name = self
             .creating_kernel_name
@@ -4791,25 +4839,33 @@ impl NotebookEditor {
             })
             .unwrap_or_else(|| "Select Kernel".to_string());
 
-        let (status_icon, status_color) = match &kernel_status {
-            KernelStatus::Idle => (IconName::Circle, Color::Success),
-            KernelStatus::Busy => (IconName::ArrowCircle, Color::Info),
-            KernelStatus::Starting => (IconName::ArrowCircle, Color::Muted),
-            KernelStatus::Error => (IconName::XCircle, Color::Error),
-            KernelStatus::ShuttingDown => (IconName::ArrowCircle, Color::Muted),
-            KernelStatus::Shutdown => (IconName::Circle, Color::Muted),
-            KernelStatus::Restarting => (IconName::ArrowCircle, Color::Warning),
+        let (status_icon, status_color) = match &strip_status {
+            StripStatus::Creating => (IconName::ArrowCircle, Color::Muted),
+            StripStatus::Kernel(KernelStatus::Idle) => (IconName::Circle, Color::Success),
+            StripStatus::Kernel(KernelStatus::Busy) => (IconName::ArrowCircle, Color::Info),
+            StripStatus::Kernel(KernelStatus::Starting) => (IconName::ArrowCircle, Color::Muted),
+            StripStatus::Kernel(KernelStatus::Error) => (IconName::XCircle, Color::Error),
+            StripStatus::Kernel(KernelStatus::ShuttingDown) => {
+                (IconName::ArrowCircle, Color::Muted)
+            }
+            StripStatus::Kernel(KernelStatus::Shutdown) => (IconName::Circle, Color::Muted),
+            StripStatus::Kernel(KernelStatus::Restarting) => {
+                (IconName::ArrowCircle, Color::Warning)
+            }
         };
         // "Something is happening" states spin; every settled state (including
         // every terminal one) is static, so the animation can never outlive the
         // work it stands for. Derived from the CURRENT status each render — no
         // latched flag to get stuck on.
         let kernel_working = matches!(
-            kernel_status,
-            KernelStatus::Busy
-                | KernelStatus::Starting
-                | KernelStatus::Restarting
-                | KernelStatus::ShuttingDown
+            strip_status,
+            StripStatus::Creating
+                | StripStatus::Kernel(
+                    KernelStatus::Busy
+                        | KernelStatus::Starting
+                        | KernelStatus::Restarting
+                        | KernelStatus::ShuttingDown
+                )
         );
         let status_icon = Icon::new(status_icon)
             .size(IconSize::Small)
@@ -4825,9 +4881,9 @@ impl NotebookEditor {
         // A grey dot already reads as "not running", so spelling out "Shutdown"
         // next to it is noise (user 2026-08-06). Every other state earns its
         // label.
-        let status_label = match &kernel_status {
-            KernelStatus::Shutdown => None,
-            status => Some(status.to_string()),
+        let status_label = match &strip_status {
+            StripStatus::Kernel(KernelStatus::Shutdown) => None,
+            status => Some(status.label()),
         };
 
         let worktree_id = self.worktree_id;
@@ -4922,10 +4978,15 @@ impl NotebookEditor {
                     .when_some(status_label, |el, label| {
                         el.child(Label::new(label).size(LabelSize::Small).color(status_color))
                     })
-                    .tooltip(Tooltip::text(format!(
-                        "Kernel {kernel_name} is {}",
-                        kernel_status.to_string()
-                    ))),
+                    .tooltip(Tooltip::text(match &strip_status {
+                        // "Kernel X is Creating" reads as nonsense — during a
+                        // build there is no kernel yet, which is the whole
+                        // point of the state.
+                        StripStatus::Creating => {
+                            format!("Creating environment {kernel_name}")
+                        }
+                        status => format!("Kernel {kernel_name} is {}", status.label()),
+                    })),
             )
             .child(
                 KernelSelector::new(
@@ -4945,7 +5006,7 @@ impl NotebookEditor {
                     Tooltip::text(format!(
                         "Kernel: {} ({}). Click to change.",
                         kernel_name,
-                        kernel_status.to_string()
+                        strip_status.label()
                     )),
                 )
                 // The picker reflects THIS notebook's kernel, not the
@@ -6776,6 +6837,106 @@ mod tests {
                 "opening must not make any cell buffer dirty"
             );
         });
+    }
+
+    /// The Run-All tally reset (phase 68) must fire for Run All and NOTHING
+    /// else: `run_cell_batch` is shared with Run Above, Run Below and running a
+    /// multi-cell selection, none of which mean "the whole notebook".
+    #[gpui::test]
+    async fn test_run_all_resets_the_execution_tally_only_when_asked(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            editor::init(cx);
+        });
+
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            path!("/notebooks"),
+            json!({ "test.ipynb": NOTEBOOK_WITH_MIXED_CELLS }),
+        )
+        .await;
+        let project = Project::test(fs.clone(), [path!("/notebooks").as_ref()], cx).await;
+        cx.update(|cx| ReplStore::init(fs.clone(), cx));
+        let worktree_id = project.read_with(cx, |project, cx| {
+            project.worktrees(cx).next().unwrap().read(cx).id()
+        });
+
+        let notebook_item = cx
+            .update(|cx| {
+                NotebookItem::try_open(
+                    &project,
+                    &ProjectPath {
+                        worktree_id,
+                        path: rel_path("test.ipynb").into(),
+                    },
+                    cx,
+                )
+                .expect("ipynb files should be openable as notebooks")
+            })
+            .await
+            .expect("notebook should parse");
+
+        let cx = cx.add_empty_window();
+        let editor = cx.update(|window, cx| {
+            cx.new(|cx| NotebookEditor::new(project.clone(), notebook_item, window, cx))
+        });
+        cx.run_until_parked();
+
+        // Default (setting off): Run All adds to whatever was already banked.
+        editor.update(cx, |editor, _| {
+            editor.execution_time_banked = Duration::from_secs(30);
+            editor.execution_time_started_at = None;
+        });
+        editor.update_in(cx, |editor, window, cx| editor.run_cells(window, cx));
+        cx.run_until_parked();
+        assert_eq!(
+            editor.read_with(cx, |editor, _| editor.execution_time_banked),
+            Duration::from_secs(30),
+            "with the setting off, Run All must leave the session tally alone"
+        );
+
+        cx.update(|_, cx| {
+            cx.update_global::<SettingsStore, _>(|settings_store, cx| {
+                settings_store.update_user_settings(cx, |settings| {
+                    settings
+                        .repl
+                        .get_or_insert_default()
+                        .notebook_reset_execution_time_on_run_all = Some(true);
+                });
+            });
+        });
+
+        // Run Above / Run Below / a multi-cell selection all go through
+        // `run_cell_batch`, which must never reset — whatever the setting says.
+        editor.update(cx, |editor, _| {
+            editor.execution_time_banked = Duration::from_secs(30);
+            editor.execution_time_started_at = None;
+        });
+        editor.update_in(cx, |editor, window, cx| {
+            let cells = editor.cell_order.clone();
+            editor.run_cell_batch(cells, window, cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            editor.read_with(cx, |editor, _| editor.execution_time_banked),
+            Duration::from_secs(30),
+            "a partial run is not the whole notebook, so it never resets the tally"
+        );
+
+        // Run All with the setting on: the tally starts from zero.
+        editor.update(cx, |editor, _| {
+            editor.execution_time_banked = Duration::from_secs(30);
+            editor.execution_time_started_at = None;
+        });
+        editor.update_in(cx, |editor, window, cx| editor.run_cells(window, cx));
+        cx.run_until_parked();
+        assert_eq!(
+            editor.read_with(cx, |editor, _| editor.execution_time_banked),
+            Duration::ZERO,
+            "with the setting on, Run All measures that pass and nothing before it"
+        );
     }
 
     /// A notebook opened from OUTSIDE every project root lives in an invisible

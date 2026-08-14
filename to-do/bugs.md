@@ -835,3 +835,31 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   `NotebookEditor::deserialize` against a project with no matching worktree —
   and which fails with the hold removed.
 - **Tested:** no — needs user confirmation.
+
+## 81. `d d` does not delete a cell
+
+- **Status:** open (under investigation)
+- **Symptom:** (user 2026-08-12) In command mode, `d d` does nothing. Ruled out
+  by the user: the keyboard itself (delete works in File Explorer) and the
+  notebook context generally — `b`, `shift-enter`, `ctrl-enter`, `enter` and
+  `esc` all work, so the notebook is focused and `notebook_mode == command` is
+  active.
+- **Analysis so far (code inspection 2026-08-12, cause NOT yet established):**
+  the binding and the handler both exist and both look right —
+  `"d d": "notebook::DeleteCell"` in the command-mode context of every keymap,
+  the action is registered
+  (`.on_action(cx.listener(|this, action, window, cx| this.delete_cell(...)))`),
+  and `delete_cell` itself is reached by other routes (the cell toolbar's Delete
+  and the `More options` menu entry both call it directly). No single-`d`
+  binding exists anywhere in the keymaps to swallow the first keystroke.
+  What is distinctive about the ones that fail: `d d` is a CHORD, and every
+  binding the user confirmed working is a single key. `i i`
+  (`notebook::InterruptKernel`) is the only other chord in the notebook keymap.
+- **Diagnostic to run first:** does `i i` interrupt a running kernel? If it also
+  does nothing, the fault is chord dispatch in this context (and the fix is
+  likely a keymap/context question, not a notebook one). If `i i` works, the
+  fault is specific to `DeleteCell` and the handler path is where to look —
+  note `delete_cell` returns early when `effective_selection()` is empty, which
+  would look exactly like "nothing happened".
+- **Fix attempted:** none — the two branches above need different fixes.
+- **Tested:** n/a

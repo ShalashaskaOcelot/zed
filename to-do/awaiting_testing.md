@@ -150,6 +150,35 @@ and defects become new backlog/bug items.
       error toast (instead of failing silently). (Needs a machine/session
       where `python3`/`python` isn't on PATH.)
 
+## Phase 68 — Kernel strip states and the Run All timer reset
+
+Kind: **mixed** — item 1 is a change to existing behaviour (if the strip still
+says "Starting" during a build, say so and it gets fixed in place), item 2 is a
+new opt-in setting.
+
+- [ ] Create an environment: the strip reads "Creating…" (spinning) for the
+      whole build, then switches to "Starting" when the kernel actually
+      launches, then "Idle". The picker's own row is unchanged, and its failure
+      to refresh when the build finishes is still bug #58.
+- [ ] While that build runs, check the rest of the strip reads sensibly. One
+      thing to eyeball in particular: with `notebook_show_kernel_uptime` on and
+      a kernel ALREADY running when you start the build, the strip shows the new
+      env's name with the OLD kernel's uptime beside it. That is truthful (the
+      old kernel really is still up) but may read oddly — say if it does and it
+      becomes its own item. Nothing starts an uptime clock for a kernel that
+      doesn't exist yet, which was the hazard worth checking.
+- [ ] With `notebook_show_execution_time` on and
+      `notebook_reset_execution_time_on_run_all` ON: run some cells
+      individually, note the tally, then Run All — it restarts from zero and
+      ends as the cost of that pass.
+- [ ] Same with the new setting OFF (the default): Run All adds to the existing
+      tally exactly as before.
+- [ ] Run Above / Run Below / running a multi-cell selection never reset the
+      tally, whichever way the setting is set. (Covered by a unit test too, but
+      worth one runtime check.)
+- [ ] The setting appears in Settings → REPL & Notebooks → Notebook as "Reset
+      Execution Time On Run All".
+
 ## Phase 69 — Notebooks behave like text files on disk
 
 Kind: **mixed**. Tested 2026-08-11 — most of it works; the failures became bugs

@@ -238,6 +238,18 @@ A notebook's kernel status strip can show two optional timers, both off by defau
 - `notebook_show_execution_time`: a running total (`Exec`) of the time this notebook's cells have spent executing. It only counts while a cell is running, so it pauses between cells, and it resets whenever the kernel starts, restarts, or is switched.
 - `notebook_show_kernel_uptime`: how long the kernel has been running (`Up`). It keeps counting while the kernel is idle, freezes at its final value when the kernel stops, and resets on restart.
 
+A third setting changes what the execution timer measures:
+
+```json [settings]
+{
+  "repl": {
+    "notebook_reset_execution_time_on_run_all": true
+  }
+}
+```
+
+With `notebook_reset_execution_time_on_run_all` on (default `false`), Run All zeroes the tally before it starts, so the number is the cost of that one end-to-end pass rather than of everything run since the kernel started. Run Above, Run Below and running a multi-cell selection never reset it — none of them mean "the whole notebook". It only has a visible effect when `notebook_show_execution_time` is on.
+
 ## Interactive Input
 
 When code execution requires user input (such as Python's `input()` function), the REPL displays an input prompt below the cell output.

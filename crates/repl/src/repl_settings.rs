@@ -59,6 +59,15 @@ pub struct ReplSettings {
     ///
     /// Default: minimal
     pub notebook_follow_mode: NotebookFollowMode,
+    /// Whether Run All zeroes the execution-time tally before it starts.
+    ///
+    /// NOTE if this is ever revisited: the backlog holds a competing per-cell
+    /// accounting model which largely subsumes this option. If that is built,
+    /// replace the PAIR with one enum (`session` | `notebook`) rather than
+    /// stacking a third boolean on top.
+    ///
+    /// Default: false
+    pub notebook_reset_execution_time_on_run_all: bool,
 }
 
 impl Settings for ReplSettings {
@@ -77,6 +86,9 @@ impl Settings for ReplSettings {
             notebook_show_execution_time: repl.notebook_show_execution_time.unwrap_or(false),
             notebook_show_kernel_uptime: repl.notebook_show_kernel_uptime.unwrap_or(false),
             notebook_follow_mode: repl.notebook_follow_mode.unwrap_or_default(),
+            notebook_reset_execution_time_on_run_all: repl
+                .notebook_reset_execution_time_on_run_all
+                .unwrap_or(false),
         }
     }
 }

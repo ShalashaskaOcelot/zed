@@ -277,29 +277,6 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
   after it; anchoring to the selected cell without moving the view needs a
   NEGATIVE `ListOffset::offset_in_item`, which gpui has no notion of. The cheap
   alternative is to minimally reveal the selected cell after a height change.
-- `ctrl-n` (and `ctrl-p`) navigate CELLS inside a notebook instead of making a
-  new file / opening the file finder (user 2026-08-11). NOT a bug — every piece
-  is doing what it was written to do, and the behaviour is emergent rather than
-  broken: upstream binds `ctrl-n` to `menu::SelectNext` context-FREE for menus
-  and pickers, upstream's own notebook keymap binds `down` to that same action
-  for cell navigation (confirmed present in `origin/main`), and gpui's
-  deepest-context-wins dispatch then makes the context-free binding beat
-  `Workspace`'s `ctrl-n → workspace::NewFile` inside a notebook.
-  **Change wanted:** `"ctrl-n": null` and `"ctrl-p": null` in the base
-  `NotebookEditor` context of the Linux and Windows keymaps, so they fall back
-  to the workspace bindings — the arrow keys already navigate cells, so nothing
-  is lost. Leave macOS alone: there `ctrl-n`/`ctrl-p` are standard emacs-style
-  line navigation and `cmd-n` is New File, so there is no conflict and nulling
-  them would remove expected behaviour. Worth checking at the same time whether
-  any OTHER context-free menu binding is shadowed the same way inside a
-  notebook.
-- Pressing Run All should leave edit mode (user 2026-08-11). Phase 64 made the
-  sidebar controls focus the notebook, deliberately WITHOUT pulling you out of a
-  cell you were editing; the user now wants Run All specifically to exit edit
-  mode as well, since running the whole notebook is not an editing action. Small
-  and self-contained: `enter_command_mode` on the Run All control's handler
-  only — do not generalise it to the other controls without asking, since the
-  no-yanking behaviour was a deliberate choice for those.
 - Add `smooth_scrolling` to the GUI settings UI (user 2026-07-30). Phase 54
   added the setting to `default.json`, the schema and the docs, but NOT to the
   settings UI — so it's JSON-only today. It belongs in the existing **Editor →

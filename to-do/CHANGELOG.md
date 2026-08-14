@@ -291,6 +291,10 @@ entry rather than archiving it.
   created), and a global-search hit on a notebook opens the NOTEBOOK — the
   editor asks the project-item registry who claims a path instead of knowing
   about extensions. `PENDING`
+- Phase 68 — Kernel strip states and the Run All timer reset: the strip has its
+  own "Creating…" state instead of borrowing "Starting" while an environment
+  builds, and `repl.notebook_reset_execution_time_on_run_all` makes Run All
+  measure that one pass. `PENDING`
 - Phase 69 — Notebooks behave like text files on disk: a loose notebook (one
   outside every project root) restores instead of vanishing, its tab strikes
   through when the file is deleted, and unsaved changes to a SAVED notebook

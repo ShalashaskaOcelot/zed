@@ -7377,7 +7377,7 @@ fn terminal_page() -> SettingsPage {
 }
 
 fn repl_page() -> SettingsPage {
-    fn notebook_section() -> [SettingsPageItem; 7] {
+    fn notebook_section() -> [SettingsPageItem; 8] {
         [
             SettingsPageItem::SectionHeader("Notebook"),
             SettingsPageItem::SettingItem(SettingItem {
@@ -7421,6 +7421,29 @@ fn repl_page() -> SettingsPage {
                             .repl
                             .get_or_insert_default()
                             .notebook_follow_mode = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Reset Execution Time On Run All",
+                description: "Reset the notebook's execution-time tally when Run All starts, so it measures that one pass rather than the whole session. Only applies when the execution timer is shown.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("repl.notebook_reset_execution_time_on_run_all"),
+                    pick: |settings_content| {
+                        settings_content
+                            .repl
+                            .as_ref()?
+                            .notebook_reset_execution_time_on_run_all
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .repl
+                            .get_or_insert_default()
+                            .notebook_reset_execution_time_on_run_all = value;
                     },
                 }),
                 metadata: None,
