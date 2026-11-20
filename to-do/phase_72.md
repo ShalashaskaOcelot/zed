@@ -145,26 +145,26 @@ that the fork's different data model blocks; they need their own phase):
 
 ## Tasks
 
-- [ ] Branch `upstream-merge-2026-11` off the current work branch. Do NOT merge
+- [x] Branch `upstream-merge-2026-11` off the current work branch. Do NOT merge
       into `dev` until it builds and the smoke test passes.
-- [ ] `git merge upstream/main`. **Merge, never rebase** — the history is
+- [x] `git merge upstream/main`. **Merge, never rebase** — the history is
       published and the phasing system references SHAs.
-- [ ] Resolve the mechanical conflicts first: `Cargo.lock` (take upstream's
+- [x] Resolve the mechanical conflicts first: `Cargo.lock` (take upstream's
       wholesale, then `cargo check` regenerates), the two keymaps (re-apply the
       fork's additive notebook blocks on top of upstream's file).
-- [ ] Resolve `.rules`: upstream DELETED it in `a57e2fdc38` ("Unifying agent
+- [x] Resolve `.rules` — moved to `CLAUDE.md`, a name upstream does not use, so it can never conflict again: upstream DELETED it in `a57e2fdc38` ("Unifying agent
       instructions to AGENTS.md") and now ships `AGENTS.md` + `.agents/`. The
       fork's phasing rules live in `.rules`. Decide where they go — likely fold
       into the fork's `CLAUDE.md` or a fork-owned `AGENTS.md` section — and keep
       the rules themselves intact whatever the filename.
-- [ ] Resolve the generic-code conflicts: `gpui/src/elements/list.rs`,
+- [x] Resolve the generic-code conflicts: `gpui/src/elements/list.rs`,
       `util/src/process.rs`, `workspace/{pane,workspace}.rs`,
       `editor/src/{editor.rs,element/mouse.rs}`, `ui/src/components/scrollbar.rs`,
       `zed_actions/src/lib.rs`. These are the fork's additive blocks; re-apply
       them onto upstream's version rather than keeping ours wholesale.
-- [ ] Resolve the `crates/repl` conflicts, taking a DECISION on each of the four
+- [x] Resolve the `crates/repl` conflicts, taking a DECISION on each of the four
       overlapping features above and recording it in this file.
-- [ ] Migrate the fork's own code to the new Jupyter APIs (nbformat 3.0,
+- [x] Migrate the fork's own code to the new Jupyter APIs (nbformat 3.0,
       `jupyter-zmq-client`). Use upstream's `b1962f7cd8` as the worked example
       for every pattern.
 - [ ] `rust-toolchain.toml` arrives as 1.98.1 — confirm the build works on it and
@@ -172,7 +172,15 @@ that the fork's different data model blocks; they need their own phase):
       versions of new lints will likely fire).
 - [ ] `cargo tree -d | grep async-tungstenite` returns nothing — i.e. ONE copy in
       the graph (see the dependency note in `backlog.md`).
-- [ ] Full `cargo test -p repl -p gpui -p workspace` passes.
+- [x] `cargo check` clean for gpui, workspace, editor and repl.
+- [x] `cargo test -p repl --lib`: **65 passed, 0 failed** (2026-11-20).
+- [ ] `cargo test -p gpui -p workspace`.
+- [ ] `./script/clippy` clean. NOTE: the cloud container cannot build the FULL
+      workspace — `alsa-sys` needs libasound2-dev, which is absent and cannot be
+      installed there. That is environmental, not a merge problem (alsa-sys was
+      already a dependency before the merge), but it means clippy and the
+      `zed` binary have to be built on the user's machine.
+- [ ] Toolchain moved to 1.98.1; expect new lints from three Rust releases.
 - [ ] Re-test bug #81 and re-check every item in `awaiting_testing.md` that
       touches code upstream changed — the merge may have fixed or broken some.
 
