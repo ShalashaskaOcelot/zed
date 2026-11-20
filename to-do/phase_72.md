@@ -170,11 +170,12 @@ that the fork's different data model blocks; they need their own phase):
 - [ ] `rust-toolchain.toml` arrives as 1.98.1 — confirm the build works on it and
       that `./script/clippy` is clean under the newer lint set (three minor
       versions of new lints will likely fire).
-- [ ] `cargo tree -d | grep async-tungstenite` returns nothing — i.e. ONE copy in
-      the graph (see the dependency note in `backlog.md`).
+- [x] ONE `async-tungstenite` in the graph (0.33.0), shared by `client` and
+      `jupyter-websocket-client` 3.0.1 — the break that started this is gone.
 - [x] `cargo check` clean for gpui, workspace, editor and repl.
 - [x] `cargo test -p repl --lib`: **65 passed, 0 failed** (2026-11-20).
-- [ ] `cargo test -p gpui -p workspace`.
+- [x] `cargo test -p gpui --lib`: **465 passed, 0 failed**.
+- [ ] `cargo test -p workspace`.
 - [ ] `./script/clippy` clean. NOTE: the cloud container cannot build the FULL
       workspace — `alsa-sys` needs libasound2-dev, which is absent and cannot be
       installed there. That is environmental, not a merge problem (alsa-sys was
