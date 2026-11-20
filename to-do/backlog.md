@@ -14,8 +14,10 @@ that leaves the count at 2. Promote one ONLY when the user asks for it by name.
 Everything here is the fork's release-engineering track, which the user has
 explicitly parked for a while.
 
-The three entries below were full phase files (45, 46, 47), all with ZERO tasks
-implemented, moved back here on 2026-08-06. The summaries keep what matters;
+The entries below were full phase files (45, 46, 47), all with ZERO tasks
+implemented, moved back here on 2026-08-06. The upstream-merge one (was phase
+46) was unparked on 2026-11-20 at the user's explicit request and is now
+`phase_72.md`; the other two remain parked. The summaries keep what matters;
 the complete task-by-task detail is in the deleted files — see commit `4174e8b`
 (and the phase-43 discovery findings in commit `8f9a5d3dc5`) if one is revived.
 
@@ -37,27 +39,6 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
   on a compile-time `ZED_FORK_UPDATE_GITEA_BASE`; unset ⇒ upstream behaviour
   untouched. Depends on an installer to update (phase 44, built) and on
   releases actually being published (the Drone item below).
-- **Upstream-merge workflow** (was phase 46; new feature — process + docs).
-  Make merging `zed-industries/zed` into the fork routine and documented
-  (`docs/fork/upstream-merge.md` + a short checklist), merge NEVER rebase
-  (published history, and the phasing system references SHAs). Key facts:
-  `origin/main` is an upstream MIRROR kept current by GitHub's fork-sync and
-  must stay read-only; `origin/dev` is the fork mainline; upstream velocity is
-  ~150 commits/week and a 164-commit dry-run merge was CLEAN on 2026-07-16, so
-  weekly merges are cheap and the cost compounds with delay. Conflict hotspots,
-  ranked: `Cargo.lock` (churn, trivial — take upstream, `cargo check`
-  regenerates), `crates/settings_ui/src/page_data.rs`, `assets/settings/default.json`,
-  the three keymap files, `crates/settings_content/src/settings_content.rs`,
-  `crates/zed_actions/src/lib.rs`, `crates/gpui/src/elements/list.rs` (semantic
-  breakage risk even on a clean merge), `crates/util/src/process.rs`; the fork's
-  additions to those are additive blocks that get re-applied. `crates/repl/**`
-  is the tail risk: upstream has not touched it since the fork point, but a real
-  upstream notebook push would conflict massively. Working clones are SHALLOW —
-  merge-base math needs `git fetch --unshallow`. A textually-clean merge can
-  still break the notebook, so the playbook must mandate a post-merge smoke test
-  (`cargo build -p repl`, clippy, `cargo test -p repl -p gpui`, then open a
-  notebook and run cells). The playbook is only "done" once it has survived one
-  supervised real merge.
 - **Drone pipeline: tag → Windows installer → Gitea release** (was phase 47;
   new feature). A pushed release tag should produce a Drone build on the user's
   Windows runner that runs `script/bundle-windows.ps1` and attaches the
@@ -80,6 +61,30 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
 _(empty — the line-numbers item moved into `phase_71.md` on 2026-08-12.)_
 
 ## Low priority
+
+- Re-audit dependencies AFTER phase 72 lands, then patch only the residue (user
+  2026-11-20, from a `cargo audit` showing 72 advisories + 51 warnings).
+  **Do not blanket `cargo update` on this fork.** Two reasons, both established
+  on 2026-11-20:
+  * Most advisories are in UPSTREAM's dependency tree and upstream bumps them
+    routinely, so merging clears a large share for free. The audit should be
+    re-run against the post-merge tree, because the current list is largely a
+    list of "how far behind upstream we are".
+  * `Cargo.lock` is the single worst merge-conflict hotspot, so a big local
+    lockfile diff is work that gets thrown away at merge time anyway.
+  When patching the residue, pin individual crates (`cargo update -p <crate>
+  --precise <version>`) rather than updating everything, and triage by
+  reachability — an editor is not a web server, so e.g. the `ammonia` XSS
+  advisories matter only where the fork actually sanitises untrusted HTML.
+  **Always finish with `cargo tree -d`.** A duplicate of a crate that appears in
+  a public API signature is a build break, not just bloat: this is exactly what
+  broke the 2026-11-20 build attempt (`jupyter-websocket-client` 1.1.0 declared
+  an UNBOUNDED `async-tungstenite >=0.29.1`, which floated to 0.35 while the
+  workspace pinned 0.31, so the two could not exchange a `WebSocketStream`).
+  Upstream's jwc 3.0.1 bounds it to `>=0.33, <0.36`, which is better but still
+  wider than the workspace's `0.33` pin — so the same split can recur.
+
+
 
 - Exec timer: per-cell accounting so a re-run REPLACES that cell's contribution
   (user 2026-08-06). Instead of one accumulator, hold
