@@ -122,7 +122,7 @@ pub enum Output {
         display_id: Option<String>,
         /// The source mime bundle, retained so the output can be written back
         /// to the .ipynb (the rendered `ImageView` alone can't be serialized).
-        source: MimeBundle,
+        source: Media,
     },
     ErrorOutput(ErrorView),
     Message(String),
@@ -132,19 +132,19 @@ pub enum Output {
         /// Source mime bundle for round-tripping to the .ipynb. A table is a
         /// lossy render of the original `text/html` (or datatable) mime, so the
         /// original must be kept to save it faithfully.
-        source: MimeBundle,
+        source: Media,
     },
     Markdown {
         content: Entity<MarkdownView>,
         display_id: Option<String>,
         /// Source mime bundle for round-tripping to the .ipynb.
-        source: MimeBundle,
+        source: Media,
     },
     Json {
         content: Entity<JsonView>,
         display_id: Option<String>,
         /// Source mime bundle for round-tripping to the .ipynb.
-        source: MimeBundle,
+        source: Media,
     },
     ClearOutputWaitMarker,
 }

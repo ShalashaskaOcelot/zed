@@ -765,7 +765,7 @@ pub trait RunningKernel: Send + Debug {
     /// an OS-level interrupt (SIGINT / Windows interrupt event), because
     /// ipykernel does not honor message-based interrupts by default.
     fn interrupt(&self) {
-        let message: JupyterMessage = runtimelib::InterruptRequest {}.into();
+        let message: JupyterMessage = jupyter_protocol::InterruptRequest {}.into();
         if let Err(error) = self.request_tx().try_send(message) {
             log::error!("failed to send interrupt request to kernel: {error}");
         }

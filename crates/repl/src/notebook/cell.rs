@@ -104,13 +104,13 @@ pub enum CellEvent {
 /// click returns `None` and passes through untouched, so clicking the editor
 /// focuses it (edit mode); plain selection is instead driven by a gutter click
 /// (see `CellEvent::PlainClick`), which never overlaps the editor.
-fn selection_modifiers(event: &gpui::MouseDownEvent) -> Option<bool> {
+fn selection_modifiers(event: &gpui::MouseDownEvent, cx: &App) -> Option<bool> {
     if event.button != gpui::MouseButton::Left {
         return None;
     }
     if event.modifiers.shift {
         Some(true)
-    } else if event.modifiers.secondary() {
+    } else if event.modifiers.secondary(cx) {
         Some(false)
     } else {
         None
@@ -726,7 +726,7 @@ impl Render for MarkdownCell {
                 .size_full()
                 .group(CELL_HOVER_GROUP)
                 .capture_any_mouse_down(cx.listener(|this, event, _window, cx| {
-                    if let Some(shift) = selection_modifiers(event) {
+                    if let Some(shift) = selection_modifiers(event, cx) {
                         cx.emit(CellEvent::ModifiedClick {
                             id: this.id.clone(),
                             shift,
@@ -771,7 +771,7 @@ impl Render for MarkdownCell {
             .size_full()
             .group(CELL_HOVER_GROUP)
             .capture_any_mouse_down(cx.listener(|this, event, _window, cx| {
-                if let Some(shift) = selection_modifiers(event) {
+                if let Some(shift) = selection_modifiers(event, cx) {
                     cx.emit(CellEvent::ModifiedClick {
                         id: this.id.clone(),
                         shift,
@@ -1967,7 +1967,7 @@ impl Render for CodeCell {
             .size_full()
             .group(CELL_HOVER_GROUP)
             .capture_any_mouse_down(cx.listener(|this, event, _window, cx| {
-                if let Some(shift) = selection_modifiers(event) {
+                if let Some(shift) = selection_modifiers(event, cx) {
                     cx.emit(CellEvent::ModifiedClick {
                         id: this.id.clone(),
                         shift,
@@ -2244,7 +2244,7 @@ impl Render for RawCell {
             .size_full()
             .group(CELL_HOVER_GROUP)
             .capture_any_mouse_down(cx.listener(|this, event, _window, cx| {
-                if let Some(shift) = selection_modifiers(event) {
+                if let Some(shift) = selection_modifiers(event, cx) {
                     cx.emit(CellEvent::ModifiedClick {
                         id: this.id.clone(),
                         shift,

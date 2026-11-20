@@ -23,7 +23,7 @@ use gpui::{
 };
 use language::Buffer;
 use settings::Settings as _;
-use terminal::{Terminal, TerminalBuilder, terminal_settings::TerminalSettings};
+use terminal::{MouseInputMode, Terminal, TerminalBuilder, terminal_settings::TerminalSettings};
 use terminal_view::terminal_element::TerminalElement;
 use theme_settings::ThemeSettings;
 use ui::{IntoElement, prelude::*};
@@ -711,7 +711,7 @@ impl Render for TerminalOutput {
                             return;
                         }
                         if bounds.contains(&event.position) {
-                            terminal.update(cx, |terminal, cx| terminal.mouse_down(event, cx));
+                            terminal.update(cx, |terminal, cx| terminal.mouse_down(event, MouseInputMode::LocalSelection, cx));
                             this.update(cx, |this, cx| {
                                 this.selecting = true;
                                 cx.notify();
@@ -733,7 +733,7 @@ impl Render for TerminalOutput {
                         {
                             return;
                         }
-                        terminal.update(cx, |terminal, cx| terminal.mouse_drag(event, bounds, cx));
+                        terminal.update(cx, |terminal, cx| terminal.mouse_drag(event, bounds, MouseInputMode::LocalSelection, cx));
                         this.update(cx, |_, cx| cx.notify());
                     }
                 });
@@ -746,7 +746,7 @@ impl Render for TerminalOutput {
                         {
                             return;
                         }
-                        terminal.update(cx, |terminal, cx| terminal.mouse_up(event, cx));
+                        terminal.update(cx, |terminal, cx| terminal.mouse_up(event, MouseInputMode::LocalSelection, cx));
                         this.update(cx, |this, cx| {
                             this.selecting = false;
                             cx.notify();

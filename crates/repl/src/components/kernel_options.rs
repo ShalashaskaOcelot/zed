@@ -258,10 +258,6 @@ where
         self
     }
 
-    pub fn with_info_text(mut self, text: impl Into<SharedString>) -> Self {
-        self.info_text = Some(text.into());
-        self
-    }
 }
 
 impl KernelPickerDelegate {

@@ -2490,9 +2490,7 @@ impl Pane {
                                 project.find_or_create_worktree(new_path, false, cx)
                             })
                             .ok()
-                    })
-                    .ok()
-                    .flatten();
+                    });
                 // Held until the save completes. An out-of-project save-as
                 // creates an INVISIBLE worktree, which the worktree store keeps
                 // only WEAKLY (`worktree_store.rs`, `WorktreeStore::add`), so it

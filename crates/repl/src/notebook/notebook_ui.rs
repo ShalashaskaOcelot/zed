@@ -54,12 +54,11 @@ use crate::notebook::env_name_modal::EnvNameModal;
 use crate::repl_settings::ReplSettings;
 use crate::repl_store::ReplStore;
 
-use jupyter_protocol::{ExecuteRequest, JupyterMessage, JupyterMessageContent};
-use picker::Picker;
 use jupyter_protocol::{
     ExecuteRequest, ExecutionState, JupyterMessage, JupyterMessageContent, ReplyStatus,
     ShutdownRequest,
 };
+use picker::Picker;
 use ui::{ContextMenu, PopoverMenu, PopoverMenuHandle};
 use util::ResultExt as _;
 use zed_actions::editor::{MoveDown, MoveUp};
@@ -1507,6 +1506,10 @@ impl NotebookEditor {
             nbformat::Notebook::V4(notebook) => notebook,
             nbformat::Notebook::Legacy(legacy) => nbformat::upgrade_legacy_notebook(legacy)?,
             nbformat::Notebook::V3(v3) => nbformat::upgrade_v3_notebook(v3)?,
+            // `nbformat::Notebook` is non-exhaustive as of 3.0, so a version
+            // this fork does not know about must fail loudly rather than be
+            // silently treated as one it does.
+            other => anyhow::bail!("unsupported notebook format: {other:?}"),
         })
     }
 
@@ -3329,8 +3332,8 @@ impl NotebookEditor {
             super::CodeCell::new(
                 super::CellSource::None,
                 new_cell_id.clone(),
-                metadata,
-                String::new(),
+                Self::empty_cell_metadata(),
+                source,
                 languages,
                 notebook_language,
                 window,
@@ -5249,7 +5252,6 @@ impl Render for NotebookEditor {
             .on_action(
                 cx.listener(|this, _: &AddCodeBlock, window, cx| this.add_code_block(window, cx)),
             )
-            .on_action(cx.listener(|this, _: &DeleteCell, window, cx| this.delete_cell(window, cx)))
             .on_action(
                 cx.listener(|this, action, window, cx| this.add_cell_above(action, window, cx)),
             )
@@ -6258,7 +6260,6 @@ impl SerializableItem for NotebookEditor {
         workspace: &mut Workspace,
         item_id: ItemId,
         _closing: bool,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Task<Result<()>>> {
         let workspace_id = workspace.database_id()?;
@@ -6281,7 +6282,7 @@ impl SerializableItem for NotebookEditor {
             .as_ref()
             .and_then(|buffer| buffer.read(cx).saved_mtime());
         let db = NotebookDb::global(cx);
-        Some(cx.spawn_in(window, async move |_this, cx| {
+        Some(cx.spawn(async move |_this, cx| {
             cx.background_spawn(async move {
                 // Encode off the main thread. `to_notebook` has to run on it
                 // (it reads the cell entities), but a notebook carrying image

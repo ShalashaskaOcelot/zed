@@ -183,7 +183,7 @@ impl NativeRunningKernel {
             let outcome = {
                 let heartbeat = async {
                     let mut heartbeat =
-                        runtimelib::create_client_heartbeat_connection(&connection_info).await?;
+                        jupyter_zmq_client::create_client_heartbeat_connection(&connection_info).await?;
                     heartbeat.single_heartbeat().await?;
                     anyhow::Ok(())
                 };
@@ -433,7 +433,7 @@ impl RunningKernel for NativeRunningKernel {
         // signal (Jupyter spec); sending a console event to such a kernel
         // could kill it outright if it installed no handler.
         if self.interrupt_mode.as_deref() == Some("message") {
-            let message: JupyterMessage = runtimelib::InterruptRequest {}.into();
+            let message: JupyterMessage = jupyter_protocol::InterruptRequest {}.into();
             if let Err(error) = self.request_tx().try_send(message) {
                 log::error!("failed to send interrupt request: {error}");
             }
@@ -444,7 +444,7 @@ impl RunningKernel for NativeRunningKernel {
                 "failed to interrupt kernel via OS signal ({error:#}); \
                  falling back to message-based interrupt"
             );
-            let message: JupyterMessage = runtimelib::InterruptRequest {}.into();
+            let message: JupyterMessage = jupyter_protocol::InterruptRequest {}.into();
             if let Err(error) = self.request_tx().try_send(message) {
                 log::error!("failed to send fallback interrupt request: {error}");
             }
