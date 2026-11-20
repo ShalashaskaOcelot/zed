@@ -1,4 +1,4 @@
-use gpui::{Anchor, AnyView, Entity, Pixels, Point, Role};
+use gpui::{Anchor, AnyView, Axis, Entity, Pixels, Point, Role};
 
 use crate::{ButtonLike, ContextMenu, PopoverMenu, prelude::*};
 
@@ -33,8 +33,9 @@ pub struct DropdownMenu {
     attach: Option<Anchor>,
     offset: Option<Point<Pixels>>,
     tab_index: Option<isize>,
-    chevron: bool,
     aria_label: Option<SharedString>,
+    aria_description: Option<SharedString>,
+    aria_value: Option<SharedString>,
 }
 
 impl DropdownMenu {
@@ -57,8 +58,9 @@ impl DropdownMenu {
             attach: None,
             offset: None,
             tab_index: None,
-            chevron: true,
             aria_label: None,
+            aria_description: None,
+            aria_value: None,
         }
     }
 
@@ -81,8 +83,9 @@ impl DropdownMenu {
             attach: None,
             offset: None,
             tab_index: None,
-            chevron: true,
             aria_label: None,
+            aria_description: None,
+            aria_value: None,
         }
     }
 
@@ -119,7 +122,10 @@ impl DropdownMenu {
         self
     }
 
-    /// Defines which corner of the handle to attach the menu's anchor to.
+    /// Defines which corner of the trigger the menu lines up with. The default,
+    /// [`Anchor::BottomLeft`], opens the menu below the trigger with their left edges lined
+    /// up. Use [`Anchor::BottomRight`] to line up the right edges instead, for a trigger at
+    /// the right end of a row.
     pub fn attach(mut self, attach: Anchor) -> Self {
         self.attach = Some(attach);
         self
@@ -136,15 +142,24 @@ impl DropdownMenu {
         self
     }
 
-    pub fn no_chevron(mut self) -> Self {
-        self.chevron = false;
-        self
-    }
-
     /// Sets the label announced by assistive technology.
     /// Defaults to the trigger's visible label (typically the current value).
     pub fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
         self.aria_label = Some(label.into());
+        self
+    }
+
+    /// Sets the supplementary description announced by assistive technology
+    /// after the combobox's name, role, and value.
+    pub fn aria_description(mut self, description: impl Into<SharedString>) -> Self {
+        self.aria_description = Some(description.into());
+        self
+    }
+
+    /// Sets the current value announced by assistive technology (the selected
+    /// option). Defaults to the trigger's visible text label.
+    pub fn aria_value(mut self, value: impl Into<SharedString>) -> Self {
+        self.aria_value = Some(value.into());
         self
     }
 }
@@ -172,6 +187,15 @@ impl RenderOnce for DropdownMenu {
         // and AX on macOS; on Linux/AT-SPI the click action is used instead).
         let handle = self.handle.unwrap_or_default();
         let expanded = handle.is_deployed();
+
+        // A combobox should announce its current value (the selected option).
+        // Default to the trigger's visible text label when no explicit value
+        // is provided.
+        let aria_value = self.aria_value.clone().or_else(|| match &self.label {
+            LabelKind::Text(text) => Some(text.clone()),
+            LabelKind::Element(_) => None,
+        });
+        let aria_description = self.aria_description.clone();
 
         let a11y_actions = |button: Button| {
             let show_handle = handle.clone();
@@ -202,9 +226,13 @@ impl RenderOnce for DropdownMenu {
                     a11y_actions(Button::new(self.id.clone(), text))
                         .aria_role(Role::ComboBox)
                         .when_some(self.aria_label, |this, label| this.aria_label(label))
+                        .when_some(aria_description, |this, description| {
+                            this.aria_description(description)
+                        })
+                        .when_some(aria_value, |this, value| this.aria_value(value))
                         .aria_expanded(expanded)
                         .style(button_style)
-                        .when_some(self.trigger_icon.filter(|_| self.chevron), |this, icon| {
+                        .when_some(self.trigger_icon, |this, icon| {
                             this.end_icon(
                                 Icon::new(icon).size(IconSize::XSmall).color(Color::Muted),
                             )
@@ -222,16 +250,18 @@ impl RenderOnce for DropdownMenu {
                     a11y_actions_element(ButtonLike::new(self.id.clone()))
                         .aria_role(Role::ComboBox)
                         .when_some(self.aria_label, |this, label| this.aria_label(label))
+                        .when_some(aria_description, |this, description| {
+                            this.aria_description(description)
+                        })
+                        .when_some(aria_value, |this, value| this.aria_value(value))
                         .aria_expanded(expanded)
                         .child(element)
                         .style(button_style)
-                        .when(self.chevron, |this| {
-                            this.child(
-                                Icon::new(IconName::ChevronUpDown)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Muted),
-                            )
-                        })
+                        .child(
+                            Icon::new(IconName::ChevronUpDown)
+                                .size(IconSize::XSmall)
+                                .color(Color::Muted),
+                        )
                         .when(full_width, |this| this.full_width())
                         .size(trigger_size)
                         .disabled(self.disabled)
@@ -240,9 +270,19 @@ impl RenderOnce for DropdownMenu {
             ),
         };
 
+        // When the menu opens, move the selection to the current value (or the
+        // first item) so assistive technology announces a meaningful item
+        // immediately, instead of focusing the bare menu container and
+        // announcing only "menu". See the ARIA menu button pattern.
+        let menu_for_open = self.menu.clone();
         let mut popover = PopoverMenu::new((self.id.clone(), "popover"))
             .full_width(self.full_width)
             .with_handle(handle)
+            .on_open(std::rc::Rc::new(move |window, cx| {
+                menu_for_open.update(cx, |menu, cx| {
+                    menu.select_toggled_or_first(window, cx);
+                });
+            }))
             .menu(move |_window, _cx| Some(self.menu.clone()));
 
         popover = match (text_button, element_button, self.trigger_tooltip) {
@@ -257,11 +297,10 @@ impl RenderOnce for DropdownMenu {
             _ => popover,
         };
 
+        let attach = self.attach.unwrap_or(Anchor::BottomLeft);
         popover
-            .attach(match self.attach {
-                Some(attach) => attach,
-                None => Anchor::BottomRight,
-            })
+            .attach(attach)
+            .anchor(attach.other_side_along(Axis::Vertical))
             .when_some(self.offset, |this, offset| this.offset(offset))
     }
 }
@@ -368,5 +407,101 @@ impl Component for DropdownMenu {
                 ),
             ])
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{Bounds, TestAppContext, VisualTestContext, size};
+
+    use super::*;
+
+    struct DropdownTestView {
+        handle: PopoverMenuHandle<ContextMenu>,
+        menu: Entity<ContextMenu>,
+        attach: Option<Anchor>,
+        at_right_edge: bool,
+    }
+
+    impl Render for DropdownTestView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let trigger = div()
+                .absolute()
+                .top(px(40.))
+                .map(|this| {
+                    if self.at_right_edge {
+                        this.right(px(40.))
+                    } else {
+                        this.left(px(40.))
+                    }
+                })
+                .debug_selector(|| "TRIGGER".into())
+                .child(
+                    DropdownMenu::new("dropdown", "Pick", self.menu.clone())
+                        .handle(self.handle.clone())
+                        .when_some(self.attach, |this, attach| this.attach(attach)),
+                );
+            div().size_full().child(trigger)
+        }
+    }
+
+    fn open_dropdown(
+        attach: Option<Anchor>,
+        at_right_edge: bool,
+        cx: &mut TestAppContext,
+    ) -> (Bounds<Pixels>, Bounds<Pixels>) {
+        cx.update(|cx| {
+            let settings_store = settings::SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+        });
+        let handle = PopoverMenuHandle::default();
+        let window = cx.open_window(size(px(800.), px(600.)), |window, cx| {
+            let menu = ContextMenu::build(window, cx, |menu, _, _| {
+                menu.custom_row(|_, _| {
+                    div()
+                        .debug_selector(|| "MENU_ROW".into())
+                        .w(px(300.))
+                        .h(px(20.))
+                        .into_any_element()
+                })
+            });
+            DropdownTestView {
+                handle: handle.clone(),
+                menu,
+                attach,
+                at_right_edge,
+            }
+        });
+        cx.run_until_parked();
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| handle.show(window, cx));
+        for _ in 0..3 {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+        let trigger = cx.debug_bounds("TRIGGER").expect("trigger bounds");
+        let menu_row = cx.debug_bounds("MENU_ROW").expect("menu row bounds");
+        (trigger, menu_row)
+    }
+
+    #[gpui::test]
+    fn dropdown_lines_up_with_its_attached_edge(cx: &mut TestAppContext) {
+        for (attach, at_right_edge) in [(None, false), (Some(Anchor::BottomRight), true)] {
+            let (trigger, menu_row) = open_dropdown(attach, at_right_edge, cx);
+            let (menu_edge, trigger_edge) = if at_right_edge {
+                (menu_row.right(), trigger.right())
+            } else {
+                (menu_row.left(), trigger.left())
+            };
+            assert!(
+                menu_row.top() >= trigger.bottom(),
+                "attach: {attach:?}, trigger: {trigger:?}, menu row: {menu_row:?}"
+            );
+            assert!(
+                (menu_edge - trigger_edge).abs() < px(12.),
+                "attach: {attach:?}, trigger: {trigger:?}, menu row: {menu_row:?}"
+            );
+        }
     }
 }

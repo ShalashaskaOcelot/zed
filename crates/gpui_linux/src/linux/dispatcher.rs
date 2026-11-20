@@ -60,8 +60,14 @@ impl LinuxDispatcher {
 
                 let handle = event_loop.handle();
                 let timer_handle = event_loop.handle();
+                let signal = event_loop.get_signal();
                 handle
                     .insert_source(timer_channel, move |e, _, _| {
+                        // The dispatcher owning the sender is gone; timers already
+                        // scheduled would run tasks nothing can observe.
+                        if let channel::Event::Closed = e {
+                            signal.stop();
+                        }
                         if let channel::Event::Msg(timer) = e {
                             let mut runnable = Some(timer.runnable);
                             timer_handle
@@ -127,9 +133,12 @@ impl PlatformDispatcher for LinuxDispatcher {
     }
 
     fn dispatch_after(&self, duration: Duration, runnable: RunnableVariant) {
-        self.timer_sender
-            .send(TimerAfter { duration, runnable })
-            .ok();
+        if let Err(err) = self.timer_sender.send(TimerAfter { duration, runnable }) {
+            // The timer thread has shut down. Dropping a scheduled runnable cancels its task
+            // and makes the next poll of any awaiter panic. Leaking leaves the task pending,
+            // which is acceptable during shutdown.
+            std::mem::forget(err);
+        }
     }
 
     fn spawn_realtime(&self, f: Box<dyn FnOnce() + Send>) {
@@ -209,14 +218,12 @@ use calloop::channel::Event;
 pub struct ChannelError(calloop::ping::PingError);
 
 impl std::fmt::Display for ChannelError {
-    #[cfg_attr(feature = "nightly_coverage", coverage(off))]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(&self.0, f)
     }
 }
 
 impl std::error::Error for ChannelError {
-    #[cfg_attr(feature = "nightly_coverage", coverage(off))]
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.0)
     }

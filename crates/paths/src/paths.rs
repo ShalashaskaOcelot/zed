@@ -68,7 +68,7 @@ static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
 /// Returns the relative path to the zed_server directory on the ssh host.
 pub fn remote_server_dir_relative() -> &'static RelPath {
     static CACHED: LazyLock<&'static RelPath> =
-        LazyLock::new(|| RelPath::unix(".zed_server").unwrap());
+        LazyLock::new(|| RelPath::from_unix_str(".zed_server").unwrap());
     *CACHED
 }
 
@@ -76,7 +76,7 @@ pub fn remote_server_dir_relative() -> &'static RelPath {
 /// Returns the relative path to the zed_wsl_server directory on the wsl host.
 pub fn remote_wsl_server_dir_relative() -> &'static RelPath {
     static CACHED: LazyLock<&'static RelPath> =
-        LazyLock::new(|| RelPath::unix(".zed_wsl_server").unwrap());
+        LazyLock::new(|| RelPath::from_unix_str(".zed_wsl_server").unwrap());
     *CACHED
 }
 
@@ -260,20 +260,6 @@ pub fn database_dir() -> &'static PathBuf {
     DATABASE_DIR.get_or_init(|| data_dir().join("db"))
 }
 
-/// Returns the path to the crashes directory, if it exists for the current platform.
-pub fn crashes_dir() -> &'static Option<PathBuf> {
-    static CRASHES_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
-    CRASHES_DIR.get_or_init(|| {
-        cfg!(target_os = "macos").then_some(home_dir().join("Library/Logs/DiagnosticReports"))
-    })
-}
-
-/// Returns the path to the retired crashes directory, if it exists for the current platform.
-pub fn crashes_retired_dir() -> &'static Option<PathBuf> {
-    static CRASHES_RETIRED_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
-    CRASHES_RETIRED_DIR.get_or_init(|| crashes_dir().as_ref().map(|dir| dir.join("Retired")))
-}
-
 /// Returns the path to the `settings.json` file.
 pub fn settings_file() -> &'static PathBuf {
     static SETTINGS_FILE: OnceLock<PathBuf> = OnceLock::new();
@@ -421,20 +407,6 @@ pub fn prompt_overrides_dir(repo_path: Option<&Path>) -> PathBuf {
         .clone()
 }
 
-/// Returns the path to the semantic search's embeddings directory.
-///
-/// This is where the embeddings used to power semantic search are stored.
-pub fn embeddings_dir() -> &'static PathBuf {
-    static EMBEDDINGS_DIR: OnceLock<PathBuf> = OnceLock::new();
-    EMBEDDINGS_DIR.get_or_init(|| {
-        if cfg!(target_os = "macos") {
-            config_dir().join("embeddings")
-        } else {
-            data_dir().join("embeddings")
-        }
-    })
-}
-
 /// Returns the path to the languages directory.
 ///
 /// This is where language servers are downloaded to for languages built-in to Zed.
@@ -477,12 +449,6 @@ pub fn remote_servers_dir() -> &'static PathBuf {
     REMOTE_SERVERS_DIR.get_or_init(|| data_dir().join("remote_servers"))
 }
 
-/// Returns the path to the directory where the devcontainer CLI is installed.
-pub fn devcontainer_dir() -> &'static PathBuf {
-    static DEVCONTAINER_DIR: OnceLock<PathBuf> = OnceLock::new();
-    DEVCONTAINER_DIR.get_or_init(|| data_dir().join("devcontainer"))
-}
-
 /// Returns the relative path to a `.zed` folder within a project.
 pub fn local_settings_folder_name() -> &'static str {
     ".zed"
@@ -496,21 +462,21 @@ pub fn local_vscode_folder_name() -> &'static str {
 /// Returns the relative path to a `settings.json` file within a project.
 pub fn local_settings_file_relative_path() -> &'static RelPath {
     static CACHED: LazyLock<&'static RelPath> =
-        LazyLock::new(|| RelPath::unix(".zed/settings.json").unwrap());
+        LazyLock::new(|| RelPath::from_unix_str(".zed/settings.json").unwrap());
     *CACHED
 }
 
 /// Returns the relative path to a `tasks.json` file within a project.
 pub fn local_tasks_file_relative_path() -> &'static RelPath {
     static CACHED: LazyLock<&'static RelPath> =
-        LazyLock::new(|| RelPath::unix(".zed/tasks.json").unwrap());
+        LazyLock::new(|| RelPath::from_unix_str(".zed/tasks.json").unwrap());
     *CACHED
 }
 
 /// Returns the relative path to a `.vscode/tasks.json` file within a project.
 pub fn local_vscode_tasks_file_relative_path() -> &'static RelPath {
     static CACHED: LazyLock<&'static RelPath> =
-        LazyLock::new(|| RelPath::unix(".vscode/tasks.json").unwrap());
+        LazyLock::new(|| RelPath::from_unix_str(".vscode/tasks.json").unwrap());
     *CACHED
 }
 
@@ -526,14 +492,14 @@ pub fn task_file_name() -> &'static str {
 /// .zed/debug.json
 pub fn local_debug_file_relative_path() -> &'static RelPath {
     static CACHED: LazyLock<&'static RelPath> =
-        LazyLock::new(|| RelPath::unix(".zed/debug.json").unwrap());
+        LazyLock::new(|| RelPath::from_unix_str(".zed/debug.json").unwrap());
     *CACHED
 }
 
 /// Returns the relative path to a `.vscode/launch.json` file within a project.
 pub fn local_vscode_launch_file_relative_path() -> &'static RelPath {
     static CACHED: LazyLock<&'static RelPath> =
-        LazyLock::new(|| RelPath::unix(".vscode/launch.json").unwrap());
+        LazyLock::new(|| RelPath::from_unix_str(".vscode/launch.json").unwrap());
     *CACHED
 }
 

@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     future::Future,
     path::{Path, PathBuf},
     sync::{
@@ -21,6 +22,7 @@ use rpc::{
     AnyProtoClient, ErrorExt, TypedEnvelope,
     proto::{self, REMOTE_SERVER_PROJECT_ID},
 };
+use serde::{Deserialize, Serialize};
 use text::ReplicaId;
 use util::{
     ResultExt,
@@ -46,11 +48,21 @@ use crate::{ProjectPath, trusted_worktrees::TrustedWorktrees};
 pub struct WorktreePaths {
     paths: PathList,
     main_paths: PathList,
+    delta_clones: BTreeMap<PathBuf, DeltaClone>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeltaClone {
+    pub path: PathBuf,
+    #[serde(default)]
+    pub is_linked_worktree: bool,
+    #[serde(default)]
+    pub checkout_path: Option<PathBuf>,
 }
 
 impl PartialEq for WorktreePaths {
     fn eq(&self, other: &Self) -> bool {
-        self.paths == other.paths && self.main_paths == other.main_paths
+        self.ordered_pairs().eq(other.ordered_pairs()) && self.delta_clones == other.delta_clones
     }
 }
 
@@ -73,7 +85,55 @@ impl WorktreePaths {
         Ok(Self {
             paths: folder_paths,
             main_paths: main_worktree_paths,
+            delta_clones: BTreeMap::new(),
         })
+    }
+
+    pub fn with_delta_clones(
+        mut self,
+        delta_clones: impl IntoIterator<Item = (PathBuf, DeltaClone)>,
+    ) -> Self {
+        self.delta_clones = delta_clones
+            .into_iter()
+            .filter(|(folder_path, _)| self.paths.paths().contains(folder_path))
+            .collect();
+        self
+    }
+
+    pub fn with_serialized_delta_clones(self, delta_clones: Option<&str>) -> Self {
+        let delta_clones = delta_clones
+            .and_then(|delta_clones| {
+                serde_json::from_str::<BTreeMap<PathBuf, DeltaClone>>(delta_clones).log_err()
+            })
+            .unwrap_or_default();
+        self.with_delta_clones(delta_clones)
+    }
+
+    pub fn serialized_delta_clones(&self) -> Option<String> {
+        if self.delta_clones.is_empty() {
+            return None;
+        }
+        serde_json::to_string(&self.delta_clones).log_err()
+    }
+
+    pub fn delta_clones(&self) -> &BTreeMap<PathBuf, DeltaClone> {
+        &self.delta_clones
+    }
+
+    pub fn delta_clone(&self, folder_path: &Path) -> Option<&DeltaClone> {
+        self.delta_clones.get(folder_path)
+    }
+
+    pub fn set_delta_clone(&mut self, folder_path: &Path, delta_clone: Option<DeltaClone>) {
+        match delta_clone {
+            Some(delta_clone) if self.paths.paths().iter().any(|path| path == folder_path) => {
+                self.delta_clones
+                    .insert(folder_path.to_path_buf(), delta_clone);
+            }
+            _ => {
+                self.delta_clones.remove(folder_path);
+            }
+        }
     }
 
     /// Build for non-linked worktrees where main == folder for every path.
@@ -81,6 +141,7 @@ impl WorktreePaths {
         Self {
             paths: folder_paths.clone(),
             main_paths: folder_paths.clone(),
+            delta_clones: BTreeMap::new(),
         }
     }
 
@@ -119,8 +180,16 @@ impl WorktreePaths {
             .ordered_pairs()
             .map(|(m, f)| (m.clone(), f.clone()))
             .unzip();
-        mains.push(main_path.to_path_buf());
-        folders.push(folder_path.to_path_buf());
+        if let Some((main, _)) = mains
+            .iter_mut()
+            .zip(&folders)
+            .find(|(_, folder)| folder.as_path() == folder_path)
+        {
+            *main = main_path.to_path_buf();
+        } else {
+            mains.push(main_path.to_path_buf());
+            folders.push(folder_path.to_path_buf());
+        }
         self.main_paths = PathList::new(&mains);
         self.paths = PathList::new(&folders);
     }
@@ -135,6 +204,8 @@ impl WorktreePaths {
             .unzip();
         self.main_paths = PathList::new(&mains);
         self.paths = PathList::new(&folders);
+        self.delta_clones
+            .retain(|folder_path, _| folders.contains(folder_path));
     }
 
     /// Remove all pairs whose folder path matches the given path.
@@ -147,6 +218,7 @@ impl WorktreePaths {
             .unzip();
         self.main_paths = PathList::new(&mains);
         self.paths = PathList::new(&folders);
+        self.delta_clones.remove(folder_path);
     }
 }
 
@@ -182,6 +254,28 @@ impl WorktreeIdCounter {
 
 impl Global for WorktreeIdCounter {}
 
+/// Summarizes worktree ownership and current snapshot sizes.
+#[derive(Debug, Default)]
+pub struct WorktreeStoreDiagnostics {
+    pub worktree_slots: usize,
+    pub live_worktrees: usize,
+    pub visible_worktrees: usize,
+    pub strong_handles: usize,
+    pub dead_weak_handles: usize,
+    pub loading_worktrees: usize,
+    pub total_entries: usize,
+    pub visible_entries: usize,
+    pub largest_worktree: Option<LargestWorktreeDiagnostics>,
+}
+
+/// Identifies the worktree with the largest current snapshot.
+#[derive(Debug)]
+pub struct LargestWorktreeDiagnostics {
+    pub path: PathBuf,
+    pub entries: usize,
+    pub visible_entries: usize,
+}
+
 pub struct WorktreeStore {
     next_entry_id: Arc<AtomicUsize>,
     next_worktree_id: WorktreeIdCounter,
@@ -189,7 +283,6 @@ pub struct WorktreeStore {
     retain_worktrees: bool,
     worktrees: Vec<WorktreeHandle>,
     scanning_enabled: bool,
-    #[allow(clippy::type_complexity)]
     loading_worktrees:
         HashMap<Arc<SanitizedPath>, Shared<Task<Result<Entity<Worktree>, Arc<anyhow::Error>>>>>,
     initial_scan_complete: (watch::Sender<bool>, watch::Receiver<bool>),
@@ -216,6 +309,8 @@ impl WorktreeStore {
         client.add_entity_request_handler(Self::handle_create_project_entry);
         client.add_entity_request_handler(Self::handle_copy_project_entry);
         client.add_entity_request_handler(Self::handle_delete_project_entry);
+        client.add_entity_request_handler(Self::handle_trash_project_entry);
+        client.add_entity_request_handler(Self::handle_restore_project_entry);
         client.add_entity_request_handler(Self::handle_expand_project_entry);
         client.add_entity_request_handler(Self::handle_expand_all_for_project_entry);
     }
@@ -346,6 +441,57 @@ impl WorktreeStore {
         .detach();
     }
 
+    /// Returns worktree ownership and current snapshot size diagnostics.
+    pub fn diagnostics(&self, cx: &App) -> WorktreeStoreDiagnostics {
+        let mut diagnostics = WorktreeStoreDiagnostics {
+            worktree_slots: self.worktrees.len(),
+            loading_worktrees: self.loading_worktrees.len(),
+            ..WorktreeStoreDiagnostics::default()
+        };
+
+        for handle in &self.worktrees {
+            let worktree = match handle {
+                WorktreeHandle::Strong(worktree) => {
+                    diagnostics.strong_handles += 1;
+                    Some(worktree.clone())
+                }
+                WorktreeHandle::Weak(worktree) => {
+                    let worktree = worktree.upgrade();
+                    if worktree.is_none() {
+                        diagnostics.dead_weak_handles += 1;
+                    }
+                    worktree
+                }
+            };
+            let Some(worktree) = worktree else {
+                continue;
+            };
+
+            diagnostics.live_worktrees += 1;
+            let worktree = worktree.read(cx);
+            diagnostics.visible_worktrees += usize::from(worktree.is_visible());
+            let snapshot = worktree.snapshot();
+            let entries = snapshot.entry_count();
+            let visible_entries = snapshot.visible_entry_count();
+            diagnostics.total_entries += entries;
+            diagnostics.visible_entries += visible_entries;
+
+            let is_largest = diagnostics
+                .largest_worktree
+                .as_ref()
+                .is_none_or(|largest| entries > largest.entries);
+            if is_largest {
+                diagnostics.largest_worktree = Some(LargestWorktreeDiagnostics {
+                    path: worktree.abs_path().to_path_buf(),
+                    entries,
+                    visible_entries,
+                });
+            }
+        }
+
+        diagnostics
+    }
+
     /// Iterates through all worktrees, including ones that don't appear in the project panel
     pub fn worktrees(&self) -> impl '_ + DoubleEndedIterator<Item = Entity<Worktree>> {
         self.worktrees
@@ -393,8 +539,10 @@ impl WorktreeStore {
         let abs_path = SanitizedPath::new(abs_path.as_ref());
         for tree in self.worktrees() {
             let path_style = tree.read(cx).path_style();
-            if let Some(relative_path) =
-                path_style.strip_prefix(abs_path.as_ref(), tree.read(cx).abs_path().as_ref())
+            if let Some(relative_path) = path_style
+                .strip_prefix(abs_path.as_ref(), tree.read(cx).abs_path().as_ref())
+                .ok()
+                .and_then(|path| RelPath::new(path, path_style).ok())
             {
                 return Some((tree.clone(), relative_path.into_arc()));
             }
@@ -513,7 +661,7 @@ impl WorktreeStore {
                 let response = upstream_client.request(proto::CopyProjectEntry {
                     project_id: *upstream_project_id,
                     entry_id: entry_id.to_proto(),
-                    new_path: new_project_path.path.to_proto(),
+                    new_path: new_project_path.path.as_unix_str().to_owned(),
                     new_worktree_id: new_project_path.worktree_id.to_proto(),
                 });
                 cx.spawn(async move |_, cx| {
@@ -668,7 +816,7 @@ impl WorktreeStore {
                 let response = upstream_client.request(proto::RenameProjectEntry {
                     project_id: *upstream_project_id,
                     entry_id: entry_id.to_proto(),
-                    new_path: new_project_path.path.to_proto(),
+                    new_path: new_project_path.path.as_unix_str().to_owned(),
                     new_worktree_id: new_project_path.worktree_id.to_proto(),
                 });
                 cx.spawn(async move |_, cx| {
@@ -722,27 +870,21 @@ impl WorktreeStore {
                 }
             };
 
-            self.loading_worktrees
-                .insert(abs_path.clone(), task.shared());
+            let loading_task = cx.spawn({
+                let abs_path = abs_path.clone();
+                async move |this, cx| {
+                    let result = task.await;
+                    this.update(cx, |this, cx| {
+                        this.loading_worktrees.remove(&abs_path);
+                        if !visible || !this.scanning_enabled || result.is_err() {
+                            this.update_initial_scan_state(cx);
+                        }
+                    })
+                    .ok();
 
-            if visible && self.scanning_enabled {
-                *self.initial_scan_complete.0.borrow_mut() = false;
-            }
-        }
-        let task = self.loading_worktrees.get(&abs_path).unwrap().clone();
-        cx.spawn(async move |this, cx| {
-            let result = task.await;
-            this.update(cx, |this, cx| {
-                this.loading_worktrees.remove(&abs_path);
-                if !visible || !this.scanning_enabled || result.is_err() {
-                    this.update_initial_scan_state(cx);
-                }
-            })
-            .ok();
-
-            match result {
-                Ok(worktree) => {
-                    if !is_via_collab {
+                    if let Ok(worktree) = &result
+                        && !is_via_collab
+                    {
                         if let Some((trusted_worktrees, worktree_store)) = this
                             .update(cx, |_, cx| {
                                 TrustedWorktrees::try_get_global(cx).zip(Some(cx.entity()))
@@ -761,16 +903,25 @@ impl WorktreeStore {
 
                         this.update(cx, |this, cx| {
                             if this.scanning_enabled && visible {
-                                this.observe_worktree_scan_completion(&worktree, cx);
+                                this.observe_worktree_scan_completion(worktree, cx);
                             }
                         })
                         .ok();
                     }
-                    Ok(worktree)
+
+                    result
                 }
-                Err(err) => Err((*err).cloned()),
+            });
+
+            self.loading_worktrees
+                .insert(abs_path.clone(), loading_task.shared());
+
+            if visible && self.scanning_enabled {
+                *self.initial_scan_complete.0.borrow_mut() = false;
             }
-        })
+        }
+        let task = self.loading_worktrees.get(&abs_path).unwrap().clone();
+        cx.background_spawn(async move { task.await.map_err(|error| (*error).cloned()) })
     }
 
     fn create_remote_worktree(
@@ -940,6 +1091,7 @@ impl WorktreeStore {
     }
 
     pub fn remove_worktree(&mut self, id_to_remove: WorktreeId, cx: &mut Context<Self>) {
+        let mut removed = false;
         self.worktrees.retain(|worktree| {
             if let Some(worktree) = worktree.upgrade() {
                 if worktree.read(cx).id() == id_to_remove {
@@ -947,6 +1099,7 @@ impl WorktreeStore {
                         worktree.entity_id(),
                         id_to_remove,
                     ));
+                    removed = true;
                     false
                 } else {
                     true
@@ -955,23 +1108,16 @@ impl WorktreeStore {
                 false
             }
         });
+        // A remote client asks to remove a worktree whenever it releases a
+        // handle to it, which can happen again after the worktree is gone.
+        // Announcing the unchanged worktrees in response would make the
+        // client re-create and release handles for the ones it has dropped
+        // in the meantime, and send us even more removal requests.
+        if !removed {
+            return;
+        }
         self.update_initial_scan_state(cx);
         self.send_project_updates(cx);
-    }
-
-    pub fn worktree_for_main_worktree_path(
-        &self,
-        path: &Path,
-        cx: &App,
-    ) -> Option<Entity<Worktree>> {
-        self.visible_worktrees(cx).find(|worktree| {
-            let worktree = worktree.read(cx);
-            if let Some(common_dir) = worktree.root_repo_common_dir() {
-                common_dir.parent() == Some(path)
-            } else {
-                worktree.abs_path().as_ref() == path
-            }
-        })
     }
 
     fn upstream_client(&self) -> Option<(AnyProtoClient, u64)> {
@@ -1009,7 +1155,7 @@ impl WorktreeStore {
                 let push_strong_handle =
                     self.retain_worktrees || old_worktree.read(cx).is_visible();
                 let handle = if push_strong_handle {
-                    WorktreeHandle::Strong(old_worktree.clone())
+                    WorktreeHandle::Strong(old_worktree)
                 } else {
                     WorktreeHandle::Weak(old_worktree.downgrade())
                 };
@@ -1231,7 +1377,7 @@ impl WorktreeStore {
         let new_worktree_id = WorktreeId::from_proto(envelope.payload.new_worktree_id);
         let new_project_path = (
             new_worktree_id,
-            RelPath::from_proto(&envelope.payload.new_path)?,
+            RelPath::from_unix_str(&envelope.payload.new_path)?,
         );
         let (scan_id, entry) = this.update(&mut cx, |this, cx| {
             let Some((_, project_id)) = this.downstream_client else {
@@ -1260,6 +1406,28 @@ impl WorktreeStore {
         })
     }
 
+    pub async fn handle_trash_project_entry(
+        this: Entity<Self>,
+        envelope: TypedEnvelope<proto::TrashProjectEntry>,
+        mut cx: AsyncApp,
+    ) -> Result<proto::TrashProjectEntryResponse> {
+        let entry_id = ProjectEntryId::from_proto(envelope.payload.entry_id);
+        let worktree = this.update(&mut cx, |this, cx| {
+            let Some((_, project_id)) = this.downstream_client else {
+                bail!("no downstream client")
+            };
+            let Some(entry) = this.entry_for_id(entry_id, cx) else {
+                bail!("no entry")
+            };
+            if entry.is_private && project_id != REMOTE_SERVER_PROJECT_ID {
+                bail!("entry is private")
+            }
+            this.worktree_for_entry(entry_id, cx)
+                .context("worktree not found")
+        })?;
+        Worktree::handle_trash_entry(worktree, envelope.payload, cx).await
+    }
+
     pub async fn handle_delete_project_entry(
         this: Entity<Self>,
         envelope: TypedEnvelope<proto::DeleteProjectEntry>,
@@ -1282,6 +1450,21 @@ impl WorktreeStore {
         Worktree::handle_delete_entry(worktree, envelope.payload, cx).await
     }
 
+    pub async fn handle_restore_project_entry(
+        this: Entity<Self>,
+        envelope: TypedEnvelope<proto::RestoreProjectEntry>,
+        mut cx: AsyncApp,
+    ) -> Result<proto::RestoreProjectEntryResponse> {
+        let worktree_id = WorktreeId::from_proto(envelope.payload.worktree_id);
+
+        let worktree = this.update(&mut cx, |this, cx| {
+            this.worktree_for_id(worktree_id, cx)
+                .context("worktree not found")
+        })?;
+
+        Worktree::handle_restore_entry(worktree, envelope.payload, cx).await
+    }
+
     pub async fn handle_rename_project_entry(
         this: Entity<Self>,
         request: proto::RenameProjectEntry,
@@ -1289,8 +1472,8 @@ impl WorktreeStore {
     ) -> Result<proto::ProjectEntryResponse> {
         let entry_id = ProjectEntryId::from_proto(request.entry_id);
         let new_worktree_id = WorktreeId::from_proto(request.new_worktree_id);
-        let rel_path = RelPath::from_proto(&request.new_path)
-            .with_context(|| format!("received invalid relative path {:?}", &request.new_path))?;
+        let rel_path = RelPath::from_unix_str(&request.new_path)
+            .with_context(|| format!("received invalid relative path {:?}", request.new_path))?;
 
         let (scan_id, task) = this.update(&mut cx, |this, cx| {
             let worktree = this
@@ -1363,29 +1546,65 @@ impl WorktreeStore {
         }
     }
 
-    pub fn paths(&self, cx: &App) -> WorktreePaths {
+    pub(crate) fn paths(&self, cx: &App) -> WorktreePaths {
+        self.worktree_paths(true, cx)
+    }
+
+    pub(crate) fn git_paths(&self, cx: &App) -> WorktreePaths {
+        self.worktree_paths(false, cx)
+    }
+
+    fn worktree_paths(&self, group_by_source: bool, cx: &App) -> WorktreePaths {
+        let mut delta_clones = BTreeMap::new();
         let (mains, folders): (Vec<PathBuf>, Vec<PathBuf>) = self
             .visible_worktrees(cx)
             .map(|worktree| {
                 let snapshot = worktree.read(cx).snapshot();
                 let folder_path = snapshot.abs_path().to_path_buf();
-                let main_path = snapshot
-                    .root_repo_common_dir()
-                    .map(|dir| crate::git_store::repo_identity_path(dir))
-                    .filter(|repo_path| {
-                        snapshot.root_repo_is_linked_worktree()
-                            || *repo_path == folder_path.as_path()
-                            || !folder_path.starts_with(*repo_path)
-                    })
-                    .map(Path::to_path_buf)
-                    .unwrap_or_else(|| folder_path.clone());
-                (main_path, folder_path)
+                let main_path =
+                    snapshot
+                        .root_repo_common_dir()
+                        .map_or(folder_path.as_path(), |common_dir| {
+                            crate::git_store::root_repository_group_path(
+                                &folder_path,
+                                common_dir,
+                                snapshot.root_repo_is_linked_worktree(),
+                                snapshot
+                                    .root_repo_source_common_dir()
+                                    .filter(|_| group_by_source)
+                                    .map(|source_common_dir| source_common_dir.as_ref()),
+                                snapshot.path_style(),
+                            )
+                        });
+                if let Some(common_dir) = snapshot.root_repo_common_dir()
+                    && main_path
+                        != crate::git_store::root_repository_group_path(
+                            &folder_path,
+                            common_dir,
+                            snapshot.root_repo_is_linked_worktree(),
+                            None,
+                            snapshot.path_style(),
+                        )
+                {
+                    delta_clones.insert(
+                        folder_path.clone(),
+                        DeltaClone {
+                            path: common_dir.to_path_buf(),
+                            is_linked_worktree: snapshot.root_repo_is_linked_worktree(),
+                            checkout_path: snapshot
+                                .root_repo_work_directory()
+                                .map(|work_directory| work_directory.to_path_buf()),
+                        },
+                    );
+                }
+                (main_path.to_path_buf(), folder_path)
             })
             .unzip();
 
         WorktreePaths {
             paths: PathList::new(&folders),
             main_paths: PathList::new(&mains),
+            delta_clones,
         }
     }
 }

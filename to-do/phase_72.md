@@ -53,9 +53,12 @@ and four of them build things this fork already built independently.
 | `bc538def45` | Save notebooks through the project, not the local fs | the fork's save path |
 | `9f03ff88e4` | Fix language injections in notebook cells | — (pure gain) |
 
-Each of these needs a DECISION at resolution time, not a default. For each:
-compare the two implementations, keep the better one, and record which was kept
-and why. Two specific notes:
+**Resolution policy (user, 2026-11-20): LEAN UPSTREAM.** Compare the two
+implementations for each. Where they are equivalent, or upstream's is better,
+take UPSTREAM's — even when the difference is cosmetic, because every line of
+fork-specific code is carried forever and widens the next merge. Keep the fork's
+version ONLY where it is genuinely better, and say what makes it better. Record
+the decision and the reason for each one in this file. Two specific notes:
 
 - **Bug #81 (`d d` does nothing)** may be resolved or reshaped by upstream's own
   delete-cell action. Re-test it after the merge BEFORE investigating further —
@@ -84,6 +87,61 @@ merge conflict; it surfaces as a wall of compile errors AFTER the merge resolves
 **Budget for this as the single largest piece of the phase.**
 
 It also kills `async-std` (RUSTSEC-2025-0052, unmaintained) from the tree.
+
+## Decisions taken at conflict resolution (2026-11-20)
+
+All 19 conflicts resolved. Policy was LEAN UPSTREAM; these are the calls made
+and why, including every place the fork's version was kept.
+
+**Took upstream:**
+- `Cargo.lock` wholesale; the three keymaps gained upstream's new
+  `"backspace": "notebook::DeleteCell"` binding on top of the fork's block.
+- `editor/element/mouse.rs` delta filtering — upstream's
+  `scroll_manager.filter_scroll_delta(delta, touch_phase)` replaces the fork's
+  `ongoing_scroll.filter(delta)`. Upstream moved `OngoingScroll` into gpui and
+  it now locks the delta to the dominant axis IN PLACE, so the fork's axis
+  plumbing (`scroll_smoothly(.., axis, ..)`, `update_ongoing_scroll`) became
+  redundant and was dropped. The fork's smooth glide itself is KEPT: upstream
+  has no smooth scrolling at all, so taking theirs wholesale would have deleted
+  a feature rather than swapped an equivalent one.
+- `gpui/elements/list.rs`: upstream replaced `logical_scroll_top` +
+  `pending_scroll` with a single `scroll_anchor: Option<ScrollAnchor>` whose
+  `set_scroll_anchor` does the pending-rebasing the fork did by hand. Ported the
+  fork's calls onto it and deleted the fork's `rebase_pending_scroll`.
+- `notebook/cell.rs`, `session.rs`, `ssh_kernel.rs`, `outputs/table.rs`:
+  `runtimelib` → `jupyter_protocol` imports.
+- `notebook_ui.rs`: upstream's cell-constructor signature and its new
+  `KeyContext::new_with_defaults(cx.platform_info().os)` API.
+
+**Kept the fork's (with the reason):**
+- `workspace/pane.rs` save-as: the fork creates an INVISIBLE single-file
+  worktree; upstream passes `visible=true`, which would add a new root to the
+  project panel for every out-of-project save-as. The already-merged code below
+  the hunk also depends on the fork's `created_worktree` hold.
+- `notebook_ui.rs` `delete_cell`: the fork's handles multi-cell selections, undo
+  as one cell-op, and never leaves an empty notebook; upstream's deletes one
+  cell. **Caveat: bug #81 says the fork's does not fire on `d d`.** Re-test it
+  first — if it is still dead, upstream's simpler version is the fallback.
+- `notebook_ui.rs` interrupt: the fork sends a real OS interrupt (SIGINT /
+  Windows CTRL_C, see `util/process.rs`) and cancels the run queue; upstream
+  sends a Jupyter `InterruptRequest` message, which only works for kernels
+  declaring `interrupt_mode: message`.
+- `GUTTER_WIDTH` 38.0, not upstream's 19.0 — bug #78 (three-digit execution
+  counts wrapped).
+- The whole `NotebookItem` path model (`path: Option<PathBuf>`,
+  `project_path: Option<ProjectPath>`). Upstream's is non-optional, which has no
+  room for an untitled notebook — a fork feature (phase 33).
+
+**Deliberately DEFERRED, not rejected** (each is a genuine upstream improvement
+that the fork's different data model blocks; they need their own phase):
+- Upstream's `save_impl` — saving through the PROJECT rather than the local
+  filesystem (`bc538def45`). Matters for remote projects. Blocked on the
+  optional-path model above; adopting it means reworking untitled notebooks.
+- Upstream's `render_empty_state` / add-cell controls for empty notebooks
+  (`d1548bd013`).
+- Upstream's two new tests, `test_open_single_file_notebook` and
+  `test_save_goes_through_the_project`, which sit in a conflicted region with
+  the fork's test suite.
 
 ## Tasks
 

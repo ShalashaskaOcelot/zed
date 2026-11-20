@@ -9,7 +9,7 @@ use anyhow::Result;
 use collections::HashMap;
 use gpui::{
     Along, AnyView, AnyWeakView, Axis, Bounds, Entity, Hsla, IntoElement, MouseButton, Pixels,
-    Point, StyleRefinement, WeakEntity, Window, point, size,
+    Point, StyleRefinement, WeakEntity, Window,
 };
 use parking_lot::Mutex;
 use project::Project;
@@ -29,31 +29,24 @@ const VERTICAL_MIN_SIZE: f32 = 100.;
 #[derive(Clone)]
 pub struct PaneGroup {
     pub root: Member,
-    pub is_center: bool,
 }
 
 pub struct PaneRenderResult {
     pub element: gpui::AnyElement,
     pub contains_active_pane: bool,
+    #[cfg(any(test, feature = "test-support"))]
+    pub decorated_pane_ix: Option<usize>,
 }
 
 impl PaneGroup {
     pub fn with_root(root: Member) -> Self {
-        Self {
-            root,
-            is_center: false,
-        }
+        Self { root }
     }
 
     pub fn new(pane: Entity<Pane>) -> Self {
         Self {
             root: Member::Pane(pane),
-            is_center: false,
         }
-    }
-
-    pub fn set_is_center(&mut self, is_center: bool) {
-        self.is_center = is_center;
     }
 
     pub fn split(
@@ -61,7 +54,6 @@ impl PaneGroup {
         old_pane: &Entity<Pane>,
         new_pane: &Entity<Pane>,
         direction: SplitDirection,
-        cx: &mut App,
     ) {
         let found = match &mut self.root {
             Member::Pane(pane) => {
@@ -87,8 +79,6 @@ impl PaneGroup {
                 }
             }
         }
-
-        self.mark_positions(cx);
     }
 
     pub fn bounding_box_for_pane(&self, pane: &Entity<Pane>) -> Option<Bounds<Pixels>> {
@@ -120,7 +110,6 @@ impl PaneGroup {
         &mut self,
         active_pane: &Entity<Pane>,
         direction: SplitDirection,
-        cx: &mut App,
     ) -> Result<bool> {
         if let Some(pane) = self.find_pane_at_border(direction)
             && pane == active_pane
@@ -128,7 +117,7 @@ impl PaneGroup {
             return Ok(false);
         }
 
-        if !self.remove_internal(active_pane)? {
+        if !self.remove(active_pane)? {
             return Ok(false);
         }
 
@@ -141,7 +130,6 @@ impl PaneGroup {
                 0
             };
             root.insert_pane(idx, active_pane);
-            self.mark_positions(cx);
             return Ok(true);
         }
 
@@ -151,7 +139,6 @@ impl PaneGroup {
             vec![Member::Pane(active_pane.clone()), self.root.clone()]
         };
         self.root = Member::Axis(PaneAxis::new(direction.axis(), members));
-        self.mark_positions(cx);
         Ok(true)
     }
 
@@ -166,15 +153,7 @@ impl PaneGroup {
     /// - Ok(true) if it found and removed a pane
     /// - Ok(false) if it found but did not remove the pane
     /// - Err(_) if it did not find the pane
-    pub fn remove(&mut self, pane: &Entity<Pane>, cx: &mut App) -> Result<bool> {
-        let result = self.remove_internal(pane);
-        if let Ok(true) = result {
-            self.mark_positions(cx);
-        }
-        result
-    }
-
-    fn remove_internal(&mut self, pane: &Entity<Pane>) -> Result<bool> {
+    pub fn remove(&mut self, pane: &Entity<Pane>) -> Result<bool> {
         match &mut self.root {
             Member::Pane(_) => Ok(false),
             Member::Axis(axis) => {
@@ -192,7 +171,6 @@ impl PaneGroup {
         direction: Axis,
         amount: Pixels,
         bounds: &Bounds<Pixels>,
-        cx: &mut App,
     ) {
         match &mut self.root {
             Member::Pane(_) => {}
@@ -200,39 +178,35 @@ impl PaneGroup {
                 let _ = axis.resize(pane, direction, amount, bounds);
             }
         };
-        self.mark_positions(cx);
     }
 
-    pub fn reset_pane_sizes(&mut self, cx: &mut App) {
+    pub fn reset_pane_sizes(&mut self) {
         match &mut self.root {
             Member::Pane(_) => {}
             Member::Axis(axis) => {
-                let _ = axis.reset_pane_sizes();
+                axis.reset_pane_sizes();
             }
         };
-        self.mark_positions(cx);
     }
 
-    pub fn swap(&mut self, from: &Entity<Pane>, to: &Entity<Pane>, cx: &mut App) {
+    pub fn swap(&mut self, from: &Entity<Pane>, to: &Entity<Pane>) {
         match &mut self.root {
             Member::Pane(_) => {}
             Member::Axis(axis) => axis.swap(from, to),
         };
-        self.mark_positions(cx);
-    }
-
-    pub fn mark_positions(&mut self, cx: &mut App) {
-        self.root.mark_positions(self.is_center, cx);
     }
 
     pub fn render(
         &self,
         zoomed: Option<&AnyWeakView>,
+        maximized: Option<&WeakEntity<Pane>>,
         render_cx: &dyn PaneLeaderDecorator,
         window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {
-        self.root.render(0, zoomed, render_cx, window, cx).element
+        self.root
+            .render(0, zoomed, maximized, render_cx, window, cx)
+            .element
     }
 
     pub fn panes(&self) -> Vec<&Entity<Pane>> {
@@ -281,9 +255,8 @@ impl PaneGroup {
         self.pane_at_pixel_position(target)
     }
 
-    pub fn invert_axies(&mut self, cx: &mut App) {
+    pub fn invert_axies(&mut self) {
         self.root.invert_pane_axies();
-        self.mark_positions(cx);
     }
 }
 
@@ -294,19 +267,6 @@ pub enum Member {
 }
 
 impl Member {
-    pub fn mark_positions(&mut self, in_center_group: bool, cx: &mut App) {
-        match self {
-            Member::Axis(pane_axis) => {
-                for member in pane_axis.members.iter_mut() {
-                    member.mark_positions(in_center_group, cx);
-                }
-            }
-            Member::Pane(entity) => entity.update(cx, |pane, _| {
-                pane.in_center_group = in_center_group;
-            }),
-        }
-    }
-
     fn full_height_column_count(&self) -> usize {
         match self {
             Member::Pane(_) => 1,
@@ -528,6 +488,7 @@ impl Member {
         &self,
         basis: usize,
         zoomed: Option<&AnyWeakView>,
+        maximized: Option<&WeakEntity<Pane>>,
         render_cx: &dyn PaneLeaderDecorator,
         window: &mut Window,
         cx: &mut App,
@@ -538,38 +499,79 @@ impl Member {
                     return PaneRenderResult {
                         element: div().into_any(),
                         contains_active_pane: false,
+                        #[cfg(any(test, feature = "test-support"))]
+                        decorated_pane_ix: None,
                     };
                 }
 
+                let is_maximized = if let Some(maximized) = maximized {
+                    if maximized.upgrade().as_ref() != Some(pane) {
+                        return PaneRenderResult {
+                            element: div().into_any(),
+                            contains_active_pane: false,
+                            #[cfg(any(test, feature = "test-support"))]
+                            decorated_pane_ix: None,
+                        };
+                    }
+                    true
+                } else {
+                    false
+                };
+
                 let decoration = render_cx.decorate(pane, cx);
                 let is_active = pane == render_cx.active_pane();
+
+                let pane = div()
+                    .relative()
+                    .size_full()
+                    .when(is_maximized, |this| {
+                        this.bg(cx.theme().colors().background)
+                            .border_1()
+                            .border_color(cx.theme().colors().border)
+                            .shadow_lg()
+                            .overflow_hidden()
+                    })
+                    .child(
+                        AnyView::from(pane.clone())
+                            .cached(StyleRefinement::default().v_flex().size_full()),
+                    )
+                    .when_some(decoration.border, |this, color| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .size_full()
+                                .left_0()
+                                .top_0()
+                                .border_2()
+                                .border_color(color),
+                        )
+                    })
+                    .children(decoration.status_box);
 
                 PaneRenderResult {
                     element: div()
                         .relative()
                         .flex_1()
                         .size_full()
-                        .child(
-                            AnyView::from(pane.clone())
-                                .cached(StyleRefinement::default().v_flex().size_full()),
-                        )
-                        .when_some(decoration.border, |this, color| {
-                            this.child(
-                                div()
-                                    .absolute()
-                                    .size_full()
-                                    .left_0()
-                                    .top_0()
-                                    .border_2()
-                                    .border_color(color),
-                            )
-                        })
-                        .children(decoration.status_box)
+                        .when(is_maximized, |this| this.p_2())
+                        .child(pane)
                         .into_any(),
                     contains_active_pane: is_active,
+                    #[cfg(any(test, feature = "test-support"))]
+                    decorated_pane_ix: None,
                 }
             }
-            Member::Axis(axis) => axis.render(basis + 1, zoomed, render_cx, window, cx),
+            Member::Axis(axis) => axis.render(basis + 1, zoomed, maximized, render_cx, window, cx),
+        }
+    }
+
+    pub fn contains_pane(&self, needle: &Entity<Pane>) -> bool {
+        match self {
+            Member::Pane(pane) => pane == needle,
+            Member::Axis(axis) => axis
+                .members
+                .iter()
+                .any(|member| member.contains_pane(needle)),
         }
     }
 
@@ -922,10 +924,28 @@ impl PaneAxis {
         &self,
         basis: usize,
         zoomed: Option<&AnyWeakView>,
+        maximized: Option<&WeakEntity<Pane>>,
         render_cx: &dyn PaneLeaderDecorator,
         window: &mut Window,
         cx: &mut App,
     ) -> PaneRenderResult {
+        if let Some(maximized) = maximized {
+            if let Some(maximized_pane) = maximized.upgrade() {
+                for member in &self.members {
+                    if member.contains_pane(&maximized_pane) {
+                        return member.render(
+                            basis,
+                            zoomed,
+                            Some(maximized),
+                            render_cx,
+                            window,
+                            cx,
+                        );
+                    }
+                }
+            }
+        }
+
         debug_assert!(self.members.len() == self.flexes.lock().len());
         let mut active_pane_ix = None;
         let mut contains_active_pane = false;
@@ -940,7 +960,7 @@ impl PaneAxis {
                     Member::Pane(pane) => {
                         is_leaf_pane[ix] = true;
                         if pane == render_cx.active_pane() {
-                            active_pane_ix = Some(ix);
+                            active_pane_ix = pane.read(cx).has_focus(window, cx).then_some(ix);
                             contains_active_pane = true;
                         }
                     }
@@ -949,7 +969,7 @@ impl PaneAxis {
                     }
                 }
 
-                let result = member.render((basis + ix) * 10, zoomed, render_cx, window, cx);
+                let result = member.render((basis + ix) * 10, zoomed, None, render_cx, window, cx);
                 if result.contains_active_pane {
                     contains_active_pane = true;
                 }
@@ -972,6 +992,8 @@ impl PaneAxis {
         PaneRenderResult {
             element,
             contains_active_pane,
+            #[cfg(any(test, feature = "test-support"))]
+            decorated_pane_ix: active_pane_ix,
         }
     }
 }
@@ -1024,27 +1046,6 @@ impl SplitDirection {
         }
     }
 
-    pub fn along_edge(&self, bounds: Bounds<Pixels>, length: Pixels) -> Bounds<Pixels> {
-        match self {
-            Self::Up => Bounds {
-                origin: bounds.origin,
-                size: size(bounds.size.width, length),
-            },
-            Self::Down => Bounds {
-                origin: point(bounds.bottom_left().x, bounds.bottom_left().y - length),
-                size: size(bounds.size.width, length),
-            },
-            Self::Left => Bounds {
-                origin: bounds.origin,
-                size: size(length, bounds.size.height),
-            },
-            Self::Right => Bounds {
-                origin: point(bounds.bottom_right().x - length, bounds.bottom_left().y),
-                size: size(length, bounds.size.height),
-            },
-        }
-    }
-
     pub fn axis(&self) -> Axis {
         match self {
             Self::Up | Self::Down => Axis::Vertical,
@@ -1075,8 +1076,8 @@ mod element {
 
     use gpui::{
         Along, AnyElement, App, Axis, BorderStyle, Bounds, Element, GlobalElementId,
-        HitboxBehavior, IntoElement, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
-        Pixels, Point, Size, Style, WeakEntity, Window, px, relative, size,
+        HitboxBehavior, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
+        Size, Style, WeakEntity, Window, px, relative, size,
     };
     use gpui::{CursorStyle, Hitbox};
     use parking_lot::Mutex;
@@ -1277,14 +1278,6 @@ mod element {
                 hitbox: window.insert_hitbox(handle_bounds, HitboxBehavior::BlockMouse),
                 divider_bounds,
             }
-        }
-    }
-
-    impl IntoElement for PaneAxisElement {
-        type Element = Self;
-
-        fn into_element(self) -> Self::Element {
-            self
         }
     }
 

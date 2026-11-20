@@ -34,10 +34,12 @@ use gpui::{
 };
 use language::Point;
 use project::Fs;
-use runtimelib::{
-    ExecuteRequest, ExecutionState, InputReply, JupyterMessage, JupyterMessageContent,
-    KernelInfoRequest, ReplyStatus, ShutdownRequest,
+use jupyter_protocol::{
+    ExecuteRequest, ExecutionState, InputReply, InterruptRequest, JupyterMessage,
+    JupyterMessageContent, KernelInfoRequest, ReplyStatus, ShutdownRequest,
 };
+use language::Point;
+use project::Fs;
 use settings::Settings as _;
 use std::{env::temp_dir, ops::Range, sync::Arc, time::Duration};
 use theme::ActiveTheme;

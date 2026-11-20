@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use fuzzy_nucleo::{StringMatch, StringMatchCandidate, match_strings};
+use fuzzy_nucleo::{
+    MaxResults, StringMatch, StringMatchCandidate, StringMatchOptions, match_strings,
+};
 use gpui::{
     Action, AnyElement, App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable,
     Subscription, Task, TaskExt, WeakEntity, Window,
@@ -12,7 +14,6 @@ use picker::{
 use remote::RemoteConnectionOptions;
 use settings::Settings;
 use ui::{ButtonLike, KeyBinding, ListItem, ListItemSpacing, Tooltip, prelude::*};
-use ui_input::ErasedEditor;
 use util::{ResultExt, paths::PathExt};
 use workspace::{
     MultiWorkspace, OpenMode, OpenOptions, ProjectGroupKey, RecentWorkspace,
@@ -144,22 +145,6 @@ impl PickerDelegate for SidebarRecentProjectsDelegate {
         "Search projects…".into()
     }
 
-    fn render_editor(
-        &self,
-        editor: &Arc<dyn ErasedEditor>,
-        window: &mut Window,
-        cx: &mut Context<Picker<Self>>,
-    ) -> Div {
-        h_flex()
-            .flex_none()
-            .h_9()
-            .px_2p5()
-            .justify_between()
-            .border_b_1()
-            .border_color(cx.theme().colors().border_variant)
-            .child(editor.render(window, cx))
-    }
-
     fn match_count(&self) -> usize {
         self.filtered_workspaces.len()
     }
@@ -184,7 +169,6 @@ impl PickerDelegate for SidebarRecentProjectsDelegate {
         cx: &mut Context<Picker<Self>>,
     ) -> Task<()> {
         let query = query.trim_start();
-        let case = fuzzy_nucleo::Case::smart_if_uppercase_in(query);
         let is_empty_query = query.is_empty();
 
         let current_workspace_id = self
@@ -201,7 +185,7 @@ impl PickerDelegate for SidebarRecentProjectsDelegate {
                     && !self
                         .window_project_groups
                         .iter()
-                        .any(|key| key.matches(&workspace.project_group_key()))
+                        .any(|key| key.matches_identity(&workspace.project_group_key()))
             })
             .map(|(id, workspace)| {
                 let combined_string = workspace
@@ -228,9 +212,10 @@ impl PickerDelegate for SidebarRecentProjectsDelegate {
             self.filtered_workspaces = match_strings(
                 &candidates,
                 query,
-                case,
-                fuzzy_nucleo::LengthPenalty::On,
-                100,
+                StringMatchOptions {
+                    max_results: MaxResults::limit::<100>(),
+                    ..Default::default()
+                },
             );
         }
 
@@ -341,8 +326,12 @@ impl PickerDelegate for SidebarRecentProjectsDelegate {
             .ordered_paths()
             .map(|p| p.compact())
             .map(|path| {
-                let (label, path_match) =
-                    highlights_for_path(path.as_ref(), &hit.positions, path_start_offset);
+                let (label, path_match) = highlights_for_path(
+                    path.as_ref(),
+                    workspace.effective_path_style(),
+                    &hit.positions,
+                    path_start_offset,
+                );
                 path_start_offset += path_match.text.len();
                 label
             })
@@ -357,7 +346,7 @@ impl PickerDelegate for SidebarRecentProjectsDelegate {
 
         let highlighted_match = HighlightedMatchWithPaths {
             prefix,
-            match_label: HighlightedMatch::join(match_labels.into_iter().flatten(), ", "),
+            match_label: HighlightedMatch::join(match_labels.into_iter(), ", "),
             paths: Vec::new(),
             active: false,
         };

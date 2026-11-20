@@ -5,7 +5,7 @@ pub(crate) mod scroll_amount;
 use crate::editor_settings::ScrollBeyondLastLine;
 use crate::{
     Anchor, DisplayPoint, DisplayRow, Editor, EditorEvent, EditorMode, EditorSettings,
-    MultiBufferSnapshot, RowExt, SizingBehavior, ToPoint,
+    MultiBufferSnapshot, RowExt, SelectionEffects, SizingBehavior, ToPoint,
     display_map::{DisplaySnapshot, ToDisplayPoint},
     hover_popover::hide_hover,
     persistence::EditorDb,
@@ -13,21 +13,18 @@ use crate::{
 pub use autoscroll::{Autoscroll, AutoscrollStrategy};
 use core::fmt::Debug;
 use gpui::{
-    Along, App, AppContext as _, Axis, Context, Entity, EntityId, Pixels, Task, Window, point, px,
+    Along, App, AppContext as _, Axis, Context, Entity, EntityId, OngoingScroll, Pixels, Task,
+    TouchPhase, Window, point,
 };
 use language::language_settings::{AllLanguageSettings, SoftWrap};
 use language::{Bias, Point};
 pub use scroll_amount::ScrollAmount;
 use settings::Settings;
-use std::{
-    cmp::Ordering,
-    time::{Duration, Instant},
-};
+use std::{cmp::Ordering, time::Duration};
 use ui::scrollbars::ScrollbarAutoHide;
 use util::ResultExt;
 use workspace::{ItemId, WorkspaceId};
 
-pub const SCROLL_EVENT_SEPARATION: Duration = Duration::from_millis(28);
 const SCROLLBAR_SHOW_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Time constant of the smooth-scroll exponential decay, in seconds. The
@@ -77,12 +74,6 @@ impl ScrollAnchor {
     pub fn top_row(&self, buffer: &MultiBufferSnapshot) -> u32 {
         self.anchor.to_point(buffer).row
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct OngoingScroll {
-    last_event: Instant,
-    axis: Option<Axis>,
 }
 
 /// In the split diff view, the two sides share a ScrollAnchor using this struct.
@@ -136,62 +127,6 @@ impl SharedScrollAnchor {
     }
 }
 
-impl OngoingScroll {
-    fn new() -> Self {
-        Self {
-            last_event: Instant::now() - SCROLL_EVENT_SEPARATION,
-            axis: None,
-        }
-    }
-
-    pub fn filter(&self, delta: &mut gpui::Point<Pixels>) -> Option<Axis> {
-        const UNLOCK_PERCENT: f32 = 1.9;
-        const UNLOCK_LOWER_BOUND: Pixels = px(6.);
-        let mut axis = self.axis;
-
-        let x = delta.x.abs();
-        let y = delta.y.abs();
-        let duration = Instant::now().duration_since(self.last_event);
-        if duration > SCROLL_EVENT_SEPARATION {
-            //New ongoing scroll will start, determine axis
-            axis = if x <= y {
-                Some(Axis::Vertical)
-            } else {
-                Some(Axis::Horizontal)
-            };
-        } else if x.max(y) >= UNLOCK_LOWER_BOUND {
-            //Check if the current ongoing will need to unlock
-            match axis {
-                Some(Axis::Vertical) => {
-                    if x > y && x >= y * UNLOCK_PERCENT {
-                        axis = None;
-                    }
-                }
-
-                Some(Axis::Horizontal) => {
-                    if y > x && y >= x * UNLOCK_PERCENT {
-                        axis = None;
-                    }
-                }
-
-                None => {}
-            }
-        }
-
-        match axis {
-            Some(Axis::Vertical) => {
-                *delta = point(px(0.), delta.y);
-            }
-            Some(Axis::Horizontal) => {
-                *delta = point(delta.x, px(0.));
-            }
-            None => {}
-        }
-
-        axis
-    }
-}
-
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
 pub enum ScrollbarThumbState {
     #[default]
@@ -242,7 +177,6 @@ pub struct ScrollManager {
     visible_line_count: Option<f64>,
     visible_column_count: Option<f64>,
     forbid_vertical_scroll: bool,
-    notified_top_overscroll: bool,
     minimap_thumb_state: Option<ScrollbarThumbState>,
     /// Where an in-flight smooth scroll is heading, in scroll-position space.
     /// `None` when nothing is animating.
@@ -269,7 +203,7 @@ impl ScrollManager {
             vertical_scroll_margin: EditorSettings::get_global(cx).vertical_scroll_margin,
             anchor,
             scroll_max_x: None,
-            ongoing: OngoingScroll::new(),
+            ongoing: OngoingScroll::default(),
             autoscroll_request: None,
             show_scrollbars: true,
             hide_scrollbar_task: None,
@@ -278,7 +212,6 @@ impl ScrollManager {
             visible_line_count: None,
             visible_column_count: None,
             forbid_vertical_scroll: false,
-            notified_top_overscroll: false,
             minimap_thumb_state: None,
             smooth_scroll_target: None,
             smooth_scroll_last_step: None,
@@ -287,18 +220,6 @@ impl ScrollManager {
             smooth_scroll_task: None,
             _save_scroll_position_task: Task::ready(()),
         }
-    }
-
-    pub fn set_native_display_map_id(
-        &mut self,
-        display_map_id: EntityId,
-        cx: &mut Context<Editor>,
-    ) {
-        self.anchor.update(cx, |shared, _| {
-            if shared.display_map_id.is_none() {
-                shared.display_map_id = Some(display_map_id);
-            }
-        });
     }
 
     pub fn clone_state(
@@ -393,28 +314,12 @@ impl ScrollManager {
         });
     }
 
-    pub fn ongoing_scroll(&self) -> OngoingScroll {
-        self.ongoing
-    }
-
-    pub fn update_ongoing_scroll(&mut self, axis: Option<Axis>) {
-        self.ongoing.last_event = Instant::now();
-        self.ongoing.axis = axis;
-    }
-
-    pub fn should_notify_top_overscroll(&mut self, axis: Option<Axis>) -> bool {
-        let now = Instant::now();
-        let new_scroll = now.duration_since(self.ongoing.last_event) > SCROLL_EVENT_SEPARATION;
-        let axis_changed = self.ongoing.axis != axis;
-        let should_notify = !self.notified_top_overscroll || new_scroll || axis_changed;
-        self.ongoing.last_event = now;
-        self.ongoing.axis = axis;
-        self.notified_top_overscroll = true;
-        should_notify
-    }
-
-    pub fn reset_top_overscroll_notification(&mut self) {
-        self.notified_top_overscroll = false;
+    pub fn filter_scroll_delta(
+        &mut self,
+        delta: &mut gpui::Point<Pixels>,
+        touch_phase: TouchPhase,
+    ) {
+        self.ongoing.filter(delta, touch_phase);
     }
 
     pub fn scroll_position(
@@ -524,7 +429,6 @@ impl ScrollManager {
             return WasScrolled(false);
         }
 
-        self.notified_top_overscroll = false;
         self.anchor.update(cx, |shared, _| {
             shared.scroll_anchor = adjusted_anchor;
             shared.display_map_id = Some(display_map.display_map_id);
@@ -819,16 +723,14 @@ impl Editor {
     pub fn scroll_smoothly(
         &mut self,
         scroll_position: gpui::Point<ScrollOffset>,
-        axis: Option<Axis>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if !self.smooth_scrolling_enabled(cx) {
-            self.scroll(scroll_position, axis, window, cx);
+            self.scroll(scroll_position, window, cx);
             return;
         }
 
-        self.scroll_manager.update_ongoing_scroll(axis);
         self.scroll_manager.smooth_scroll_target = Some(scroll_position);
         if self.scroll_manager.smooth_scroll_running {
             return;
@@ -1112,11 +1014,68 @@ impl Editor {
         self.set_scroll_position(new_position, window, cx);
     }
 
+    pub fn scroll_screen_with_cursor_margin(
+        &mut self,
+        amount: &ScrollAmount,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.scroll_screen(amount, window, cx);
+
+        let Some(visible_line_count) = self.visible_line_count() else {
+            return;
+        };
+        let display_snapshot = self.display_map.update(cx, |map, cx| map.snapshot(cx));
+        let top = self
+            .scroll_manager
+            .scroll_top_display_point(&display_snapshot, cx);
+        let vertical_scroll_margin =
+            (self.vertical_scroll_margin() as u32).min(visible_line_count as u32 / 2);
+
+        let max_point = display_snapshot.max_point();
+        let min_row = if top.row().0 == 0 {
+            DisplayRow(0)
+        } else {
+            DisplayRow(top.row().0 + vertical_scroll_margin)
+        };
+        let max_row = if top.row().0 + visible_line_count as u32 >= max_point.row().0 {
+            max_point.row()
+        } else {
+            DisplayRow(
+                (top.row().0 + visible_line_count as u32)
+                    .saturating_sub(1 + vertical_scroll_margin),
+            )
+        };
+
+        self.change_selections(
+            SelectionEffects::no_scroll().nav_history(false),
+            window,
+            cx,
+            |s| {
+                s.move_with(&mut |map, selection| {
+                    let head = selection.head();
+                    let new_row = if head.row() < min_row {
+                        min_row
+                    } else if head.row() > max_row {
+                        max_row
+                    } else {
+                        head.row()
+                    };
+                    if new_row != head.row() {
+                        let new_head =
+                            map.clip_point(DisplayPoint::new(new_row, head.column()), Bias::Left);
+                        selection.collapse_to(new_head, selection.goal);
+                    }
+                })
+            },
+        );
+    }
+
     /// Returns an ordering. The newest selection is:
     ///     Ordering::Equal => on screen
     ///     Ordering::Less => above or to the left of the screen
     ///     Ordering::Greater => below or to the right of the screen
-    pub fn newest_selection_on_screen(&self, cx: &mut App) -> Ordering {
+    pub fn newest_selection_on_screen(&self, window: &mut Window, cx: &mut App) -> Ordering {
         let snapshot = self.display_map.update(cx, |map, cx| map.snapshot(cx));
         let newest_head = self
             .selections
@@ -1132,9 +1091,32 @@ impl Editor {
         if let (Some(visible_lines), Some(visible_columns)) =
             (self.visible_line_count(), self.visible_column_count())
             && newest_head.row() <= DisplayRow(screen_top.row().0 + visible_lines as u32)
-            && newest_head.column() <= screen_top.column() + visible_columns as u32
         {
-            return Ordering::Equal;
+            let text_layout_details = self.text_layout_details(window, cx);
+            let font_id = text_layout_details
+                .text_system
+                .resolve_font(&text_layout_details.editor_style.text.font());
+            let font_size = text_layout_details
+                .editor_style
+                .text
+                .font_size
+                .to_pixels(text_layout_details.rem_size);
+            let on_screen = match text_layout_details
+                .text_system
+                .em_advance(font_id, font_size)
+                .log_err()
+            {
+                Some(em_advance) => {
+                    let head_x = snapshot.x_for_display_point(newest_head, &text_layout_details);
+                    let screen_left_x =
+                        snapshot.x_for_display_point(screen_top, &text_layout_details);
+                    head_x <= screen_left_x + em_advance * visible_columns as f32
+                }
+                None => newest_head.column() <= screen_top.column() + visible_columns as u32,
+            };
+            if on_screen {
+                return Ordering::Equal;
+            }
         }
 
         Ordering::Greater

@@ -321,48 +321,10 @@ impl Contact {
 
 pub type NotificationBatch = Vec<(UserId, proto::Notification)>;
 
-pub struct CreatedChannelMessage {
-    pub message_id: MessageId,
-    pub participant_connection_ids: HashSet<ConnectionId>,
-    pub notifications: NotificationBatch,
-}
-
-pub struct UpdatedChannelMessage {
-    pub message_id: MessageId,
-    pub participant_connection_ids: Vec<ConnectionId>,
-    pub notifications: NotificationBatch,
-    pub reply_to_message_id: Option<MessageId>,
-    pub timestamp: PrimitiveDateTime,
-    pub deleted_mention_notification_ids: Vec<NotificationId>,
-    pub updated_mention_notifications: Vec<rpc::proto::Notification>,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, FromQueryResult, Serialize, Deserialize)]
 pub struct Invite {
     pub email_address: String,
     pub email_confirmation_code: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct NewSignup {
-    pub email_address: String,
-    pub platform_mac: bool,
-    pub platform_windows: bool,
-    pub platform_linux: bool,
-    pub editor_features: Vec<String>,
-    pub programming_languages: Vec<String>,
-    pub device_id: Option<String>,
-    pub added_to_mailing_list: bool,
-    pub created_at: Option<DateTime>,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, FromQueryResult)]
-pub struct WaitlistSummary {
-    pub count: i64,
-    pub linux_count: i64,
-    pub mac_count: i64,
-    pub windows_count: i64,
-    pub unknown_count: i64,
 }
 
 /// The result of creating a new user.
@@ -732,6 +694,10 @@ fn db_status_to_proto(
         }),
         diff_stat_added: entry.lines_added.map(|v| v as u32),
         diff_stat_deleted: entry.lines_deleted.map(|v| v as u32),
+        staged_diff_stat_added: None,
+        staged_diff_stat_deleted: None,
+        unstaged_diff_stat_added: None,
+        unstaged_diff_stat_deleted: None,
     })
 }
 
@@ -742,7 +708,6 @@ fn proto_status_to_db(
 
     let (status_kind, first_status, second_status) = status_entry
         .status
-        .clone()
         .and_then(|status| status.variant)
         .map_or(
             (StatusKind::Untracked, None, None),

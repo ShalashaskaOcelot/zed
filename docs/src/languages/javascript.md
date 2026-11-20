@@ -107,7 +107,7 @@ You can also only execute a single ESLint rule when using `fixAll`:
 ```
 
 > **Note:** the other formatter you have configured will still run, after ESLint.
-> So if your language server or Prettier configuration don't format according to
+> So if your language server or Prettier configuration doesn't format according to
 > ESLint's rules, then they will overwrite what ESLint fixed and you end up with
 > errors.
 
@@ -235,11 +235,11 @@ Zed supports debugging JavaScript code out of the box with `vscode-js-debug`.
 The following can be debugged without writing additional configuration:
 
 - Tasks from `package.json`
-- Tests written using several popular frameworks (Jest, Mocha, Vitest, Jasmine, Bun, Node)
+- Tests written using several popular frameworks (Jest, Mocha, Vitest, Jasmine, Node)
 
-Run {#action debugger::Start} ({#kb debugger::Start}) to see a contextual list of these predefined debug tasks.
+Run {#action debugger::Start} ({#kb debugger::Start}) to see a contextual list of these predefined [debug tasks](../debugger.md).
 
-> **Note:** Bun test is automatically detected when `@types/bun` is present in `package.json`.
+> **Note:** Bun test is automatically detected when `@types/bun` is present in `package.json`. Detected Bun tests can be run as tasks but not debugged, because `vscode-js-debug` does not support the WebKit Inspector Protocol that Bun uses.
 
 > **Note:** Node test is automatically detected when `@types/node` is present in `package.json` (requires Node.js 20+).
 

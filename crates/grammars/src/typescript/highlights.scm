@@ -10,11 +10,11 @@
       "Number" "String" "Boolean" "Symbol" "BigInt" "Proxy" "ArrayBuffer" "DataView")))
 
 ; Special identifiers
-(type_annotation) @type
-
 (type_identifier) @type
 
 (predefined_type) @type.builtin
+
+(this_type) @type.builtin
 
 (type_alias_declaration
   (type_identifier) @type)
@@ -123,7 +123,7 @@
     ] @function.method))
 
 (new_expression
-  constructor: (identifier) @type)
+  constructor: (identifier) @type.class)
 
 (nested_type_identifier
   module: (identifier) @type)
@@ -180,8 +180,6 @@
     (arrow_function)
   ])
 
-(arrow_function) @function
-
 ; Parameters
 (required_parameter
   (identifier) @variable.parameter)
@@ -192,6 +190,26 @@
       (identifier)
       (shorthand_property_identifier_pattern)
     ]) @variable.parameter))
+
+(required_parameter
+  (_
+    (object_assignment_pattern
+      left: (shorthand_property_identifier_pattern) @variable.parameter)))
+
+(required_parameter
+  (_
+    (assignment_pattern
+      left: (identifier) @variable.parameter)))
+
+(optional_parameter
+  (_
+    (object_assignment_pattern
+      left: (shorthand_property_identifier_pattern) @variable.parameter)))
+
+(optional_parameter
+  (_
+    (assignment_pattern
+      left: (identifier) @variable.parameter)))
 
 (optional_parameter
   (identifier) @variable.parameter)
@@ -417,6 +435,10 @@
   "void"
   "with"
 ] @keyword
+
+; `void` is also a unary operator, so the keyword rule above would otherwise win in type positions.
+(predefined_type
+  "void" @type.builtin)
 
 [
   "const"

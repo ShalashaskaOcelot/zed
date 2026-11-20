@@ -170,7 +170,6 @@ where
     on_create_env: Option<OnCreateEnv>,
     trigger: T,
     tooltip: TT,
-    info_text: Option<SharedString>,
     worktree_id: WorktreeId,
     /// When set, this is the current selection shown in the picker (checkmark
     /// + Recommended override) instead of the store's worktree-level
@@ -209,7 +208,6 @@ where
             handle: None,
             trigger,
             tooltip,
-            info_text: None,
             worktree_id,
             selected_override: None,
             creating: None,

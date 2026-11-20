@@ -1,5 +1,3 @@
-#![allow(non_snake_case)]
-
 pub mod error;
 mod macros;
 mod typed_envelope;
@@ -18,6 +16,23 @@ include!(concat!(env!("OUT_DIR"), "/zed.messages.rs"));
 
 pub const REMOTE_SERVER_PEER_ID: PeerId = PeerId { owner_id: 0, id: 0 };
 pub const REMOTE_SERVER_PROJECT_ID: u64 = 0;
+
+impl Envelope {
+    #[inline(never)]
+    pub fn decode_from_slice(buffer: &[u8]) -> Result<Self, DecodeError> {
+        Self::decode(buffer)
+    }
+
+    #[inline(never)]
+    pub fn encode_to_buffer(&self, buffer: &mut Vec<u8>) -> Result<(), prost::EncodeError> {
+        self.encode(buffer)
+    }
+
+    #[inline(never)]
+    pub fn encoded_size(&self) -> usize {
+        self.encoded_len()
+    }
+}
 
 messages!(
     (Ack, Foreground),
@@ -64,6 +79,10 @@ messages!(
     (DeleteChannel, Foreground),
     (DeleteNotification, Foreground),
     (DeleteProjectEntry, Foreground),
+    (TrashProjectEntry, Foreground),
+    (TrashProjectEntryResponse, Foreground),
+    (RestoreProjectEntry, Foreground),
+    (RestoreProjectEntryResponse, Foreground),
     (DownloadFileByPath, Background),
     (DownloadFileResponse, Background),
     (EndStream, Foreground),
@@ -94,6 +113,10 @@ messages!(
     (GetDeclarationResponse, Background),
     (GetDefinition, Background),
     (GetDefinitionResponse, Background),
+    (GetEditPredictionDefinition, Background),
+    (GetEditPredictionDefinitionResponse, Background),
+    (GetEditPredictionTypeDefinition, Background),
+    (GetEditPredictionTypeDefinitionResponse, Background),
     (GetDocumentHighlights, Background),
     (GetDocumentHighlightsResponse, Background),
     (GetDocumentSymbols, Background),
@@ -104,6 +127,8 @@ messages!(
     (GetNotificationsResponse, Foreground),
     (GetCrashFiles, Background),
     (GetCrashFilesResponse, Background),
+    (GetFilePermalink, Foreground),
+    (GetFilePermalinkResponse, Foreground),
     (GetPathMetadata, Background),
     (GetPathMetadataResponse, Background),
     (GetPermalinkToLine, Foreground),
@@ -116,10 +141,25 @@ messages!(
     (GetReferencesResponse, Background),
     (GetSignatureHelp, Background),
     (GetSignatureHelpResponse, Background),
+    (GetTerminalShell, Background),
+    (GetTerminalShellResponse, Background),
+    (GetGlobalSkills, Background),
+    (GetGlobalSkillsResponse, Background),
+    (GlobalSkillsChanged, Background),
+    (CreateGlobalSkill, Background),
+    (CreateGlobalSkillResponse, Background),
+    (TrashGlobalSkill, Background),
+    (ResolveGlobalSkillPath, Background),
+    (ResolveGlobalSkillPathResponse, Background),
+    (ApplyGlobalSkillFileOperation, Background),
     (GetTypeDefinition, Background),
     (GetTypeDefinitionResponse, Background),
     (GetImplementation, Background),
     (GetImplementationResponse, Background),
+    (GetIncomingCalls, Background),
+    (GetIncomingCallsResponse, Background),
+    (GetOutgoingCalls, Background),
+    (GetOutgoingCallsResponse, Background),
     (OpenUnstagedDiff, Foreground),
     (OpenUnstagedDiffResponse, Foreground),
     (OpenUncommittedDiff, Foreground),
@@ -148,6 +188,7 @@ messages!(
     (LanguageServerLog, Foreground),
     (LanguageServerPromptRequest, Foreground),
     (LanguageServerPromptResponse, Foreground),
+    (LanguageServerShowDocumentRequest, Background),
     (LeaveChannelBuffer, Background),
     (LeaveChannelChat, Foreground),
     (LeaveProject, Foreground),
@@ -162,6 +203,8 @@ messages!(
     (LoadCommitDiffResponse, Foreground),
     (LspExtExpandMacro, Background),
     (LspExtExpandMacroResponse, Background),
+    (LspExtExpandAbbreviation, Background),
+    (LspExtExpandAbbreviationResponse, Background),
     (LspExtOpenDocs, Background),
     (LspExtOpenDocsResponse, Background),
     (LspExtRunnables, Background),
@@ -170,6 +213,8 @@ messages!(
     (LspExtSwitchSourceHeaderResponse, Background),
     (LspExtGoToParentModule, Background),
     (LspExtGoToParentModuleResponse, Background),
+    (ExecuteLspCommand, Background),
+    (ExecuteLspCommandResponse, Background),
     (LspExtCancelFlycheck, Background),
     (LspExtRunFlycheck, Background),
     (LspExtClearFlycheck, Background),
@@ -193,11 +238,18 @@ messages!(
     (PerformRename, Background),
     (PerformRenameResponse, Background),
     (Ping, Foreground),
+    (PrepareCallHierarchy, Background),
+    (PrepareCallHierarchyResponse, Background),
     (PrepareRename, Background),
     (PrepareRenameResponse, Background),
     (ProjectEntryResponse, Foreground),
     (RefreshInlayHints, Background),
     (RefreshSemanticTokens, Background),
+    (RefreshDocumentColors, Background),
+    (RefreshDocumentLinks, Background),
+    (RefreshDocumentHighlights, Background),
+    (RefreshFoldingRanges, Background),
+    (RefreshDocumentSymbols, Background),
     (RegisterBufferWithLanguageServers, Background),
     (RejoinChannelBuffers, Foreground),
     (RejoinChannelBuffersResponse, Foreground),
@@ -297,18 +349,13 @@ messages!(
     (GitReset, Background),
     (GitDeleteBranch, Background),
     (GitCheckoutFiles, Background),
+    (GitAddPathToGitignore, Background),
+    (GitAddPathToGitInfoExclude, Background),
     (GitShow, Background),
     (GitCommitDetails, Background),
-    (GitCreateCheckpoint, Background),
-    (GitCreateCheckpointResponse, Background),
     (GitCreateArchiveCheckpoint, Background),
     (GitCreateArchiveCheckpointResponse, Background),
-    (GitRestoreCheckpoint, Background),
     (GitRestoreArchiveCheckpoint, Background),
-    (GitCompareCheckpoints, Background),
-    (GitCompareCheckpointsResponse, Background),
-    (GitDiffCheckpoints, Background),
-    (GitDiffCheckpointsResponse, Background),
     (SetIndexText, Background),
     (Push, Background),
     (Fetch, Background),
@@ -344,9 +391,14 @@ messages!(
     (GetTreeDiffResponse, Background),
     (GetBlobContent, Background),
     (GetBlobContentResponse, Background),
+    (BlameBufferAtRevision, Background),
+    (BlameBufferAtRevisionResponse, Background),
+    (LoadCommitTemplate, Background),
+    (LoadCommitTemplateResponse, Background),
     (GitClone, Background),
     (GitCloneResponse, Background),
-    (ToggleLspLogs, Background),
+    // Reconnect reconciliation must stay ordered with subsequent user toggles.
+    (ToggleLspLogs, Foreground),
     (GetDirectoryEnvironment, Background),
     (DirectoryEnvironment, Background),
     (GetAgentServerCommand, Background),
@@ -402,6 +454,8 @@ request_messages!(
     (DeclineCall, Ack),
     (DeleteChannel, Ack),
     (DeleteProjectEntry, ProjectEntryResponse),
+    (TrashProjectEntry, TrashProjectEntryResponse),
+    (RestoreProjectEntry, RestoreProjectEntryResponse),
     (DownloadFileByPath, DownloadFileResponse),
     (ExpandProjectEntry, ExpandProjectEntryResponse),
     (ExpandAllForProjectEntry, ExpandAllForProjectEntryResponse),
@@ -415,6 +469,14 @@ request_messages!(
     (GetCodeActions, GetCodeActionsResponse),
     (GetCompletions, GetCompletionsResponse),
     (GetDefinition, GetDefinitionResponse),
+    (
+        GetEditPredictionDefinition,
+        GetEditPredictionDefinitionResponse
+    ),
+    (
+        GetEditPredictionTypeDefinition,
+        GetEditPredictionTypeDefinitionResponse
+    ),
     (GetDeclaration, GetDeclarationResponse),
     (GetImplementation, GetImplementationResponse),
     (GetDocumentHighlights, GetDocumentHighlightsResponse),
@@ -454,10 +516,18 @@ request_messages!(
     (OpenNewBuffer, OpenBufferResponse),
     (PerformRename, PerformRenameResponse),
     (Ping, Ack),
+    (PrepareCallHierarchy, PrepareCallHierarchyResponse),
+    (GetIncomingCalls, GetIncomingCallsResponse),
+    (GetOutgoingCalls, GetOutgoingCallsResponse),
     (PrepareRename, PrepareRenameResponse),
     (RefreshInlayHints, Ack),
     (RefreshSemanticTokens, Ack),
     (RefreshCodeLens, Ack),
+    (RefreshDocumentColors, Ack),
+    (RefreshDocumentLinks, Ack),
+    (RefreshDocumentHighlights, Ack),
+    (RefreshFoldingRanges, Ack),
+    (RefreshDocumentSymbols, Ack),
     (RejoinChannelBuffers, RejoinChannelBuffersResponse),
     (RejoinRoom, RejoinRoomResponse),
     (ReloadBuffers, ReloadBuffersResponse),
@@ -504,6 +574,7 @@ request_messages!(
     (UpdateRepository, Ack),
     (RemoveRepository, Ack),
     (LspExtExpandMacro, LspExtExpandMacroResponse),
+    (LspExtExpandAbbreviation, LspExtExpandAbbreviationResponse),
     (LspExtOpenDocs, LspExtOpenDocsResponse),
     (LspExtRunnables, LspExtRunnablesResponse),
     (SetRoomParticipantRole, Ack),
@@ -515,6 +586,7 @@ request_messages!(
     (StopLanguageServers, Ack),
     (LspExtSwitchSourceHeader, LspExtSwitchSourceHeaderResponse),
     (LspExtGoToParentModule, LspExtGoToParentModuleResponse),
+    (ExecuteLspCommand, ExecuteLspCommandResponse),
     (LspExtCancelFlycheck, Ack),
     (LspExtRunFlycheck, Ack),
     (LspExtClearFlycheck, Ack),
@@ -522,9 +594,11 @@ request_messages!(
     (ShutdownRemoteServer, Ack),
     (RemoveWorktree, Ack),
     (OpenServerSettings, OpenBufferResponse),
+    (GetFilePermalink, GetFilePermalinkResponse),
     (GetPermalinkToLine, GetPermalinkToLineResponse),
     (FlushBufferedMessages, Ack),
     (LanguageServerPromptRequest, LanguageServerPromptResponse),
+    (LanguageServerShowDocumentRequest, Ack),
     (GitGetBranches, GitBranchesResponse),
     (UpdateGitBranch, Ack),
     (ListToolchains, ListToolchainsResponse),
@@ -538,18 +612,16 @@ request_messages!(
     (InstallExtension, Ack),
     (RegisterBufferWithLanguageServers, Ack),
     (GitShow, GitCommitDetails),
-    (GitCreateCheckpoint, GitCreateCheckpointResponse),
     (
         GitCreateArchiveCheckpoint,
         GitCreateArchiveCheckpointResponse
     ),
-    (GitRestoreCheckpoint, Ack),
     (GitRestoreArchiveCheckpoint, Ack),
-    (GitCompareCheckpoints, GitCompareCheckpointsResponse),
-    (GitDiffCheckpoints, GitDiffCheckpointsResponse),
     (GitReset, Ack),
     (GitDeleteBranch, Ack),
     (GitCheckoutFiles, Ack),
+    (GitAddPathToGitignore, Ack),
+    (GitAddPathToGitInfoExclude, Ack),
     (SetIndexText, Ack),
     (Push, RemoteMessageResponse),
     (Fetch, RemoteMessageResponse),
@@ -571,10 +643,17 @@ request_messages!(
     (PullWorkspaceDiagnostics, Ack),
     (GetDefaultBranch, GetDefaultBranchResponse),
     (GetBlobContent, GetBlobContentResponse),
+    (BlameBufferAtRevision, BlameBufferAtRevisionResponse),
+    (LoadCommitTemplate, LoadCommitTemplateResponse),
     (GetTreeDiff, GetTreeDiffResponse),
     (GitClone, GitCloneResponse),
-    (ToggleLspLogs, Ack),
     (GetDirectoryEnvironment, DirectoryEnvironment),
+    (GetTerminalShell, GetTerminalShellResponse),
+    (GetGlobalSkills, GetGlobalSkillsResponse),
+    (CreateGlobalSkill, CreateGlobalSkillResponse),
+    (TrashGlobalSkill, Ack),
+    (ResolveGlobalSkillPath, ResolveGlobalSkillPathResponse),
+    (ApplyGlobalSkillFileOperation, Ack),
     (GetProcesses, GetProcessesResponse),
     (GetAgentServerCommand, AgentServerCommand),
     (GetContextServerCommand, ContextServerCommand),
@@ -610,11 +689,24 @@ lsp_messages!(
     (GetCodeLens, GetCodeLensResponse, true),
     (GetDocumentDiagnostics, GetDocumentDiagnosticsResponse, true),
     (GetDefinition, GetDefinitionResponse, true),
+    (
+        GetEditPredictionDefinition,
+        GetEditPredictionDefinitionResponse,
+        true
+    ),
+    (
+        GetEditPredictionTypeDefinition,
+        GetEditPredictionTypeDefinitionResponse,
+        true
+    ),
     (GetDeclaration, GetDeclarationResponse, true),
     (GetTypeDefinition, GetTypeDefinitionResponse, true),
     (GetImplementation, GetImplementationResponse, true),
     (InlayHints, InlayHintsResponse, false),
-    (SemanticTokens, SemanticTokensResponse, true)
+    (SemanticTokens, SemanticTokensResponse, true),
+    (PrepareCallHierarchy, PrepareCallHierarchyResponse, true),
+    (GetIncomingCalls, GetIncomingCallsResponse, true),
+    (GetOutgoingCalls, GetOutgoingCallsResponse, true),
 );
 
 entity_messages!(
@@ -641,6 +733,8 @@ entity_messages!(
     ResolveDocumentLink,
     GetFoldingRanges,
     DeleteProjectEntry,
+    TrashProjectEntry,
+    RestoreProjectEntry,
     ExpandProjectEntry,
     ExpandAllForProjectEntry,
     FindSearchCandidates,
@@ -650,6 +744,8 @@ entity_messages!(
     GetCodeLens,
     GetCompletions,
     GetDefinition,
+    GetEditPredictionDefinition,
+    GetEditPredictionTypeDefinition,
     GetDeclaration,
     GetImplementation,
     GetDocumentHighlights,
@@ -685,6 +781,11 @@ entity_messages!(
     RefreshInlayHints,
     RefreshSemanticTokens,
     RefreshCodeLens,
+    RefreshDocumentColors,
+    RefreshDocumentLinks,
+    RefreshDocumentHighlights,
+    RefreshFoldingRanges,
+    RefreshDocumentSymbols,
     ReloadBuffers,
     RemoveProjectCollaborator,
     RenameProjectEntry,
@@ -715,10 +816,12 @@ entity_messages!(
     UpdateWorktreeSettings,
     UpdateUserSettings,
     LspExtExpandMacro,
+    LspExtExpandAbbreviation,
     LspExtOpenDocs,
     LspExtRunnables,
     LspExtSwitchSourceHeader,
     LspExtGoToParentModule,
+    ExecuteLspCommand,
     LspExtCancelFlycheck,
     LspExtRunFlycheck,
     LspExtClearFlycheck,
@@ -727,8 +830,10 @@ entity_messages!(
     Toast,
     HideToast,
     OpenServerSettings,
+    GetFilePermalink,
     GetPermalinkToLine,
     LanguageServerPromptRequest,
+    LanguageServerShowDocumentRequest,
     GitGetBranches,
     UpdateGitBranch,
     ListToolchains,
@@ -740,16 +845,21 @@ entity_messages!(
     CancelLanguageServerWork,
     RegisterBufferWithLanguageServers,
     GitShow,
-    GitCreateCheckpoint,
-    GitRestoreCheckpoint,
-    GitCompareCheckpoints,
-    GitDiffCheckpoints,
     GitReset,
     GitDeleteBranch,
     GitCheckoutFiles,
+    GitAddPathToGitignore,
+    GitAddPathToGitInfoExclude,
     SetIndexText,
     ToggleLspLogs,
     GetDirectoryEnvironment,
+    GetTerminalShell,
+    GetGlobalSkills,
+    GlobalSkillsChanged,
+    CreateGlobalSkill,
+    TrashGlobalSkill,
+    ResolveGlobalSkillPath,
+    ApplyGlobalSkillFileOperation,
 
     Push,
     Fetch,
@@ -774,6 +884,8 @@ entity_messages!(
     GetDefaultBranch,
     GetTreeDiff,
     GetBlobContent,
+    BlameBufferAtRevision,
+    LoadCommitTemplate,
     GitClone,
     GetAgentServerCommand,
     GetContextServerCommand,
@@ -856,29 +968,22 @@ pub const MAX_WORKTREE_UPDATE_MAX_CHUNK_SIZE: usize = 256;
 
 pub fn split_worktree_update(mut message: UpdateWorktree) -> impl Iterator<Item = UpdateWorktree> {
     let mut done = false;
+    let mut updated_entries_iter = mem::take(&mut message.updated_entries).into_iter();
+    let mut removed_entries_iter = mem::take(&mut message.removed_entries).into_iter();
 
     iter::from_fn(move || {
         if done {
             return None;
         }
 
-        let updated_entries_chunk_size = cmp::min(
-            message.updated_entries.len(),
-            MAX_WORKTREE_UPDATE_MAX_CHUNK_SIZE,
-        );
-        let updated_entries: Vec<_> = message
-            .updated_entries
-            .drain(..updated_entries_chunk_size)
-            .collect();
-
-        let removed_entries_chunk_size = cmp::min(
-            message.removed_entries.len(),
-            MAX_WORKTREE_UPDATE_MAX_CHUNK_SIZE,
-        );
-        let removed_entries = message
-            .removed_entries
-            .drain(..removed_entries_chunk_size)
-            .collect();
+        let updated_entries = updated_entries_iter
+            .by_ref()
+            .take(MAX_WORKTREE_UPDATE_MAX_CHUNK_SIZE)
+            .collect::<Vec<_>>();
+        let removed_entries = removed_entries_iter
+            .by_ref()
+            .take(MAX_WORKTREE_UPDATE_MAX_CHUNK_SIZE)
+            .collect::<Vec<_>>();
 
         let mut updated_repositories = Vec::new();
         let mut limit = MAX_WORKTREE_UPDATE_MAX_CHUNK_SIZE;
@@ -908,8 +1013,8 @@ pub fn split_worktree_update(mut message: UpdateWorktree) -> impl Iterator<Item 
             }
         }
 
-        done = message.updated_entries.is_empty()
-            && message.removed_entries.is_empty()
+        done = updated_entries_iter.as_slice().is_empty()
+            && removed_entries_iter.as_slice().is_empty()
             && message.updated_repositories.is_empty();
 
         let removed_repositories = if done {
@@ -987,6 +1092,12 @@ impl LspQuery {
                 ("GetDocumentDiagnostics", false)
             }
             Some(lsp_query::Request::GetDefinition(_)) => ("GetDefinition", false),
+            Some(lsp_query::Request::GetEditPredictionDefinition(_)) => {
+                ("GetEditPredictionDefinition", false)
+            }
+            Some(lsp_query::Request::GetEditPredictionTypeDefinition(_)) => {
+                ("GetEditPredictionTypeDefinition", false)
+            }
             Some(lsp_query::Request::GetDeclaration(_)) => ("GetDeclaration", false),
             Some(lsp_query::Request::GetTypeDefinition(_)) => ("GetTypeDefinition", false),
             Some(lsp_query::Request::GetImplementation(_)) => ("GetImplementation", false),
@@ -997,6 +1108,9 @@ impl LspQuery {
             Some(lsp_query::Request::GetDocumentLinks(_)) => ("GetDocumentLinks", false),
             Some(lsp_query::Request::InlayHints(_)) => ("InlayHints", false),
             Some(lsp_query::Request::SemanticTokens(_)) => ("SemanticTokens", false),
+            Some(lsp_query::Request::PrepareCallHierarchy(_)) => ("PrepareCallHierarchy", false),
+            Some(lsp_query::Request::GetIncomingCalls(_)) => ("GetIncomingCalls", false),
+            Some(lsp_query::Request::GetOutgoingCalls(_)) => ("GetOutgoingCalls", false),
             None => ("<unknown>", true),
         }
     }
