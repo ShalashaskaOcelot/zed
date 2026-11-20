@@ -1207,6 +1207,42 @@ impl StateInner {
         self.scroll_anchor.is_some_and(|anchor| anchor.provisional)
     }
 
+    /// Drop any un-applied smooth-scroll distance. Every absolute scroll
+    /// (reveal, scroll-to, scrollbar drag) calls this so it lands exactly where
+    /// asked instead of being dragged onward by a glide still in flight.
+    fn cancel_smooth_scroll(&mut self) {
+        self.pending_smooth_delta = px(0.);
+        self.smooth_scroll_last_step = None;
+    }
+
+    /// Consume one frame's worth of the pending wheel distance, returning the
+    /// amount to scroll now. Returns `None` when nothing is animating.
+    fn take_smooth_scroll_step(&mut self) -> Option<Pixels> {
+        if !self.smooth_scroll || self.pending_smooth_delta == px(0.) {
+            return None;
+        }
+
+        let now = Instant::now();
+        let elapsed = self
+            .smooth_scroll_last_step
+            .map_or(SMOOTH_SCROLL_TAU, |last| {
+                now.saturating_duration_since(last).as_secs_f32()
+            });
+        self.smooth_scroll_last_step = Some(now);
+
+        // Applying the remainder below the epsilon keeps this terminating.
+        if self.pending_smooth_delta.abs().0 <= SMOOTH_SCROLL_EPSILON {
+            let step = self.pending_smooth_delta;
+            self.cancel_smooth_scroll();
+            return Some(step);
+        }
+
+        let progress = 1.0 - (-elapsed / SMOOTH_SCROLL_TAU).exp();
+        let step = self.pending_smooth_delta * progress;
+        self.pending_smooth_delta -= step;
+        Some(step)
+    }
+
     fn set_scroll_anchor(&mut self, position: Option<ListOffset>) {
         let Some(position) = position else {
             self.scroll_anchor = None;
