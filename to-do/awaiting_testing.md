@@ -163,6 +163,33 @@ and defects become new backlog/bug items.
       error toast (instead of failing silently). (Needs a machine/session
       where `python3`/`python` isn't on PATH.)
 
+## Phase 72 — Merge upstream into the fork
+
+Kind: **mixed**. Implementation complete and verified as far as a machine can:
+`./script/clippy` clean across the whole workspace, 465 gpui + 310 workspace +
+65 repl tests pass, one `async-tungstenite` in the graph, and the user's own
+Windows build of `zed 1.31.0` compiles and runs. What is left is runtime
+behaviour, and a textually clean merge of 2057 commits can still leave the
+notebook broken, so these are mandatory rather than nice to have.
+
+Decisions taken during the merge, and the upstream features deliberately
+deferred, are recorded in `CHANGELOG.md` and commit `a2f67faa9f`.
+
+- [ ] Zed launches and a notebook opens.
+- [ ] Select a kernel, run a cell, see output. Restart the kernel. Interrupt a
+      run.
+- [ ] Run All over a multi-cell notebook with outputs; follow mode behaves.
+- [ ] A DataFrame renders in a table output — the Jupyter dependency migration
+      rewrote `outputs/table.rs`'s imports, so this is the most direct check
+      that nbformat 3.0 / jupyter-zmq-client went in cleanly.
+- [ ] Save, close, reopen a notebook — including an unsaved one and one outside
+      any project root (the two restore paths from phases 66/69).
+- [ ] The fork's own notebook features still work: cell add/delete/move/convert,
+      command vs edit mode, the kernel strip, the timers.
+- [ ] Wheel scrolling still eases (the fork's smooth scrolling was kept on top
+      of upstream's new delta filter), and a diagonal trackpad swipe still locks
+      to one axis.
+
 ## Phase 70 — Notebook keyboard and control corrections
 
 Kind: **change to existing behaviour** — if any of these still behave the old

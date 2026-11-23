@@ -291,6 +291,15 @@ entry rather than archiving it.
   created), and a global-search hit on a notebook opens the NOTEBOOK — the
   editor asks the project-item registry who claims a path instead of knowing
   about extensions. `PENDING`
+- Phase 72 — Merge upstream into the fork: 2057 upstream commits absorbed from
+  the 2026-07-08 fork point, 19 conflicts resolved, and the fork's code migrated
+  onto upstream's new Jupyter stack (nbformat 1.2 to 3.0, runtimelib to
+  jupyter-zmq-client, async-std dropped). Toolchain 1.95.0 to 1.98.1. The fork
+  kept its own save-as worktree handling, delete-cell, interrupt, gutter width
+  and optional notebook path model; it took upstream's scroll-delta filter,
+  scroll-anchor model and Jupyter APIs. Upstream's save-through-project,
+  empty-notebook controls and two tests are DEFERRED, not rejected — see commit
+  `a2f67faa9f` for the reasoning on each. `PENDING`
 - Phase 70 — Notebook keyboard and control corrections: cell navigation moved
   off the shared `menu::SelectNext`/`SelectPrevious` actions onto its own, which
   gives `ctrl-n`/`ctrl-p` back to New File / the file finder, and Run All now
