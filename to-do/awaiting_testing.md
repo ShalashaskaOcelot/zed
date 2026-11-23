@@ -10,6 +10,25 @@ it in `bugs.md` (or as a backlog/phase item per the kind rules), annotate the
 line with the bug number, and tick it here (the follow-up is tracked
 elsewhere). Delete a section once all its boxes are ticked.
 
+## Suggested order after the 2026-11 upstream merge
+
+This ledger has built up over months and most of it is unrelated to the merge.
+After absorbing 2057 upstream commits the highest-signal items are the ones
+whose code the merge actually rewrote, so test in this order:
+
+1. **Phase 72** — the merge smoke tests. If these fail nothing else matters.
+2. **Bugs #83 and #84** — both fixed on 2026-11-23, a minute each.
+3. **The areas the merge rewrote underneath existing features:**
+   * Bugs #69 / #70 — table rendering. The Jupyter migration rewrote
+     `outputs/table.rs`'s imports (the datatable types moved crates).
+   * Phase 67, bug #77, phase 56 — anything scrolling. Upstream replaced gpui's
+     list scroll model (`logical_scroll_top` → `scroll_anchor`) and the fork's
+     helpers were ported onto it.
+   * Phase 69, bugs #74 / #75 / #79 — notebook restore and save-as. The
+     workspace persistence struct gained fields and `pane.rs` save-as was a
+     conflict.
+4. Everything else, which the merge is unlikely to have touched.
+
 ## Phases awaiting confirmation (detail lives in the phase file)
 
 These are implementation-complete and marked `⚠️ AWAITING USER TESTING` in

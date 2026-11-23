@@ -978,15 +978,25 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   (`native_kernel.rs` / `wsl_kernel.rs`). The connection file is written to a
   fresh uuid path each launch, so there is no original to remove and it cannot
   raise this. That leaves the notebook save.
-- **Likely cause:** another process holding a handle to the file at the moment
-  of the replace — Defender or another AV scanning the freshly written temp
-  file, Windows Search indexing, or a cloud-sync client (OneDrive/Dropbox) on
-  the folder. Classic Windows contention, and it explains the "saved anyway"
-  part: the replace lands, the tidy-up of the original is what fails.
-- **NOT caused by the upstream merge.** `atomic_write` is upstream's and
-  unchanged, and the fork's notebook save predates the merge (phase 72 kept the
-  fork's save path deliberately). Worth confirming with the user whether they
-  ever saw this before the merge.
+- **Cause: another process holding a handle at the moment of the replace.**
+  Narrowed by the user 2026-11-23: `C:\Users\SamKirby\Dev` is EXCLUDED from
+  Defender, so AV is out. They had the same folder — and probably the same file
+  — open in VS Code at the time, which is the best remaining candidate: VS Code
+  keeps file watchers and editor handles on open documents, and a held handle is
+  exactly what makes `ReplaceFile` fail to remove the original. That also
+  explains why it is intermittent (it needs the other editor to have the file
+  open) and why it "saves anyway" (the replace lands, the tidy-up fails).
+- **PRE-EXISTING, not caused by the upstream merge** — confirmed by the user
+  2026-11-23, who believes they saw it before the merge. Consistent with the
+  code: `atomic_write` is upstream's and unchanged, and the fork's notebook save
+  predates the merge. The user has also never noticed it on a `.py` file, which
+  matches the analysis above, since only the notebook save uses `atomic_write`.
+- **Implication for the fix:** if the trigger is a second editor holding the
+  file, a bounded retry will often NOT clear it — the other process may hold the
+  handle indefinitely. That moves option 2 (upstream's save-through-the-project
+  path, which never replaces a file) ahead of option 1, and means any retry
+  should be short and then surface a message naming the likely cause rather than
+  retrying for long.
 - **Fix options, in preference order:**
   1. Bounded retry with a short backoff around the `persist` in the notebook
      save. This is the standard mitigation for AV/indexer contention on Windows,
