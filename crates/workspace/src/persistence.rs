@@ -6416,6 +6416,8 @@ mod tests {
             breakpoints: Default::default(),
             window_id: Some(1),
             user_toolchains: Default::default(),
+            recent_navigation_history: Default::default(),
+            path_style: PathStyle::local(),
         })
         .await;
 
@@ -6435,6 +6437,8 @@ mod tests {
             breakpoints: Default::default(),
             window_id: Some(2),
             user_toolchains: Default::default(),
+            recent_navigation_history: Default::default(),
+            path_style: PathStyle::local(),
         })
         .await;
 
