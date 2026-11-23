@@ -27,6 +27,11 @@ here, add a one-line entry to `CHANGELOG.md`, and delete the bug's `bugs.md`
 entry. If a fix failed, leave the bug open with the new finding and keep it
 listed here.
 
+- [ ] Bug #82 — Windows build prints "Failed to copy conpty.dll". Check
+      `zed: open log` for "Terminal will work with reduced functionality" to
+      confirm whether the fallback is in use, and look in
+      `target/release/build/zed-<hash>/out/conpty/` to see what the downloaded
+      package actually contains. Upstream's code, low impact, no fix attempted.
 - [ ] Bug #15 — Soak test: use command-mode shortcuts across focus changes
       (click away to another pane/panel and back, close and reopen a notebook).
       Shortcuts should never stop responding. The on_focus part was already

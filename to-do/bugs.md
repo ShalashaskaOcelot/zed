@@ -863,3 +863,40 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   would look exactly like "nothing happened".
 - **Fix attempted:** none — the two branches above need different fixes.
 - **Tested:** n/a
+
+## 82. Windows build cannot bundle conpty.dll / OpenConsole.exe
+
+- **Status:** open (upstream's code, not the fork's; low impact)
+- **Symptom:** (user 2026-11-23, first Windows build after the upstream merge)
+  `cargo build --release` prints two warnings and carries on:
+  `Failed to copy conpty.dll from ...\out\conpty\runtimes/win-x64/native/conpty.dll:
+  The system cannot find the path specified. (os error 3)`, and the same for
+  `OpenConsole.exe`. Zed compiles and runs.
+- **Impact:** NOT fatal and not a merge defect. `check_for_conpty_dll`
+  (`crates/zed/src/main.rs:2533`) tries `LoadLibraryW("conpty.dll")` at startup
+  and, when it fails, logs "Failed to load conpty.dll. Terminal will work with
+  reduced functionality." Zed falls back to the ConPTY that ships with Windows,
+  so the built-in terminal works but without whatever the newer bundled build
+  adds. Confirm by looking for that warning in `zed: open log`.
+- **Analysis:** this is NOT a compile artifact, which is why "it should have
+  been produced earlier in the build" does not apply. `crates/zed/build.rs`
+  DOWNLOADS a NuGet package from GitHub at build time
+  (`Microsoft.Windows.Console.ConPTY.1.25.260710002-preview.nupkg`), extracts it
+  with `Expand-Archive`, then copies two files out of the extracted tree. The
+  download and extract steps emit their own `cargo::warning` on failure and
+  neither appeared, so both reported success and the expected path simply is not
+  where the script looks — most likely the preview package's internal layout
+  differs from `runtimes/win-x64/native/`, or the download produced a file that
+  "extracted" without being the real package.
+- **Arrived with the upstream merge:** upstream added this conpty bundling after
+  the 2026-07-08 fork point, so this is the first build that could hit it.
+  Upstream's own TODO in `build.rs` notes the URL is pinned to a PREVIEW build
+  "until Microsoft finally decides to publish v1.26", which is exactly the kind
+  of pin that rots.
+- **Next step (cheap):** look in
+  `target/release/build/zed-<hash>/out/conpty/` and see what the archive
+  actually contains. If the DLL is there under a different path, the fix is a
+  one-line path change in `build.rs`; if the directory is empty or holds an HTML
+  error page, the download is being blocked or redirected.
+- **Fix attempted:** none
+- **Tested:** n/a
