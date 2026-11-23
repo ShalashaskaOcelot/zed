@@ -27,6 +27,9 @@ here, add a one-line entry to `CHANGELOG.md`, and delete the bug's `bugs.md`
 entry. If a fix failed, leave the bug open with the new finding and keep it
 listed here.
 
+- [ ] Bug #85 — Does the "Unable to remove the file to be replaced" toast only
+      appear for NOTEBOOK saves, never for `.py` or other text files? And did it
+      happen before the upstream merge? Those two answers pick the fix.
 - [ ] Bug #84 — In a `.py` file with no kernel running, click the toolbar
       button tooltipped "Start REPL for ...": the kernel should come up and sit
       Idle with NOTHING executed. Then confirm `ctrl-shift-enter` still runs the

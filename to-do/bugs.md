@@ -956,3 +956,50 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   upstream — see the backlog item about upstreaming the fork's generic changes.
 - **Tested:** no — click the button and confirm the kernel comes up Idle with no
   cell executed; then check a normal run still works.
+
+## 85. Notebook save reports "Unable to remove the file to be replaced" (Windows)
+
+- **Status:** open (not yet reproduced here — Windows-only, no fix attempted)
+- **Symptom:** (user 2026-11-23, seen a couple of times) Saving shows an error
+  toast, `ERROR [workspace::notifications] Unable to remove the file to be
+  replaced. (0x80070497)`, but the file DOES save. `0x80070497` is Win32 error
+  1175, `ERROR_UNABLE_TO_REMOVE_REPLACED`, raised when a replace-the-destination
+  write cannot get rid of the original.
+- **Which save path (established by inspection 2026-11-23):** it has to be the
+  NOTEBOOK save. The two write paths behave differently:
+  * `Fs::save` — regular text files, and upstream's save-through-the-project
+    path — does `File::create(path)`, i.e. truncate and write in place. No
+    temp file, no replace, so it cannot produce this error.
+  * `Fs::atomic_write` writes a `NamedTempFile` beside the destination and
+    `persist()`s it over the original. That is the replace step that returns
+    1175.
+  In production code `atomic_write` has exactly two callers: the notebook save
+  (`notebook_ui.rs`, three sites) and the kernel connection file
+  (`native_kernel.rs` / `wsl_kernel.rs`). The connection file is written to a
+  fresh uuid path each launch, so there is no original to remove and it cannot
+  raise this. That leaves the notebook save.
+- **Likely cause:** another process holding a handle to the file at the moment
+  of the replace — Defender or another AV scanning the freshly written temp
+  file, Windows Search indexing, or a cloud-sync client (OneDrive/Dropbox) on
+  the folder. Classic Windows contention, and it explains the "saved anyway"
+  part: the replace lands, the tidy-up of the original is what fails.
+- **NOT caused by the upstream merge.** `atomic_write` is upstream's and
+  unchanged, and the fork's notebook save predates the merge (phase 72 kept the
+  fork's save path deliberately). Worth confirming with the user whether they
+  ever saw this before the merge.
+- **Fix options, in preference order:**
+  1. Bounded retry with a short backoff around the `persist` in the notebook
+     save. This is the standard mitigation for AV/indexer contention on Windows,
+     and it is the smallest change. Needs care not to swallow genuine failures —
+     retry only on 1175 (and arguably 32, `ERROR_SHARING_VIOLATION`).
+  2. Adopt upstream's save-through-the-project path, DEFERRED by phase 72. It
+     routes through `Fs::save`, which never replaces a file, so this class of
+     error disappears. That is now a SECOND argument for un-deferring it, on top
+     of remote-project support — see the deferral note in `CHANGELOG.md`.
+  * **Do NOT simply swap `atomic_write` for `save`/`write` in the notebook
+    path.** A notebook is one JSON blob; truncate-and-write means a failure
+    part-way through leaves a truncated, unparseable notebook. The atomic write
+    is what stops a failed save destroying the file, so trading it away to
+    silence a toast would swap a cosmetic error for a data-loss risk.
+- **Fix attempted:** none
+- **Tested:** n/a
