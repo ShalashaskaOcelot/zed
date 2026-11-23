@@ -27,6 +27,10 @@ here, add a one-line entry to `CHANGELOG.md`, and delete the bug's `bugs.md`
 entry. If a fix failed, leave the bug open with the new finding and keep it
 listed here.
 
+- [ ] Bug #84 — In a `.py` file with no kernel running, click the toolbar
+      button tooltipped "Start REPL for ...": the kernel should come up and sit
+      Idle with NOTHING executed. Then confirm `ctrl-shift-enter` still runs the
+      cell under the cursor as before.
 - [ ] Bug #83 — Open a `.ipynb` whose cells have no `id` fields (or any v4.5
       notebook that previously warned about quirks): it should open, repaired,
       rather than failing with "unsupported notebook format". Check

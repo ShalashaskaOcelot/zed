@@ -926,32 +926,33 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   it was one of the six dead-code warnings.
 - **Tested:** no — open a notebook whose cells have no `id` fields.
 
-## 84. REPL runs the selected cell when the kernel starts
+## 84. "Start REPL" button runs the selected cell instead of just starting
 
-- **Status:** open (needs the exact repro step)
-- **Symptom:** (user 2026-11-23, confirmed on a second occurrence after
-  initially assuming it was their own mistake) In a `.py` file with `# %%`
-  cells, starting the kernel executes whichever cell the cursor is in. It is
-  `Cell In[1]`, i.e. genuinely the first execution on that kernel, so a cell
-  part-way down the file almost always fails — the screenshot shows cell 4
-  raising `NameError: name 'client_id' is not defined` because cells 1-3 never
-  ran.
-- **Analysis so far — what is RULED OUT (code inspection 2026-11-23):** none of
-  the kernel-start paths execute anything.
-  * `assign_kernelspec` (`repl_editor.rs`), which the kernel picker calls,
-    shuts down any old session and creates a new one. It never runs code.
-  * `install_ipykernel_and_assign` just defers to `assign_kernelspec`.
-  * `Session::start_kernel` sends exactly one message when the kernel comes up,
-    a `KernelInfoRequest`.
-  * `repl_editor.rs` is byte-identical to upstream, so this is not fork code.
-  The only path that executes is `repl::run`, which runs the cell under the
-  cursor AND lazily starts the kernel if there is none.
-- **The question that settles it:** how was the kernel started — picked from the
-  kernel menu in the toolbar, or by pressing run (`ctrl-shift-enter`) on a cell?
-  If it was the kernel menu, something is calling `repl::run` that this analysis
-  says cannot, and that is the bug. If it was run-on-a-cell, then the kernel
-  starting is a side effect of the run and the real complaint is the UX: the
-  first run of a session both starts the kernel and runs one arbitrary cell,
-  with no way to say "start the kernel and run from the top".
-- **Fix attempted:** none — the two branches need different fixes.
-- **Tested:** n/a
+- **Status:** fix attempted - untested
+- **Symptom:** (user 2026-11-23, reproduced three times, with video) In a `.py`
+  file, clicking the toolbar button whose tooltip reads **"Start REPL for
+  Python (venv)"** shows "Connecting to kernel..." and then immediately
+  "Executing...". It runs whichever cell the cursor is in, as `Cell In[1]`, so
+  any cell that depends on the ones above it fails — the reported case was cell
+  4 raising `NameError: name 'client_id' is not defined`.
+- **Cause (found 2026-11-23, `quick_action_bar/repl_menu.rs`):** the control's
+  label and its action disagree. `render_repl_launch_menu` builds the button
+  with the tooltip `"Start REPL for {kernel}"` and then wires
+  `.on_click(|_, window, cx| window.dispatch_action(Box::new(repl::Run {}), cx))`.
+  `repl::Run` executes the cell under the cursor and starts a kernel only as a
+  SIDE EFFECT of needing one. So the button never had a "just start it" path.
+- **Note on the earlier analysis, which was wrong:** this was first chased
+  through `assign_kernelspec` and `Session::start_kernel` — neither of which
+  executes anything — and written up as "cannot be explained from the code,
+  need the repro step". That ruled out the kernel-START paths and missed that
+  the button is not one of them. The user was right that it is reproducible.
+- **Fix attempted (2026-11-23):** the button now calls
+  `repl::assign_kernelspec(kernel_specification, editor, ..)`, which creates the
+  session (and so launches the kernel) without executing anything. That function
+  was already used a few lines away for the kernel picker, so this is the same
+  path the picker takes. The tooltip is now true.
+- **Upstream's bug, fixed in the fork:** `repl_menu.rs` was byte-identical to
+  upstream before this, so the fork now diverges in `crates/zed`. Worth sending
+  upstream — see the backlog item about upstreaming the fork's generic changes.
+- **Tested:** no — click the button and confirm the kernel comes up Idle with no
+  cell executed; then check a normal run still works.

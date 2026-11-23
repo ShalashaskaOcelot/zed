@@ -62,7 +62,11 @@ _(empty — the line-numbers item moved into `phase_71.md` on 2026-08-12.)_
 
 - VS Code-style inline cell controls for `# %%` cells in a `.py` file (user
   2026-11-23, with a VS Code screenshot). Above each `# %%` marker VS Code
-  renders a small `Run Cell | Run Above | Debug Cell` affordance. Zed currently
+  renders a small affordance above each cell. The fork wants FOUR entries, in
+  VS Code's style and this order (user 2026-11-23):
+  `Run Cell | Run Above | Run Cell & Below | Debug Cell`
+  — i.e. VS Code's row with `Run Cell & Below` added as the fourth, between
+  Run Above and Debug. Zed currently
   offers only the toolbar menu (Run Line / Run Selection) and
   `ctrl-shift-enter`, which runs one cell and moves down — so there is no way to
   run many cells at once in a script, and no way to run everything above the

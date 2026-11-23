@@ -258,6 +258,9 @@ impl QuickActionBar {
     ) -> Option<AnyElement> {
         let tooltip: SharedString =
             SharedString::from(format!("Start REPL for {}", kernel_specification.name()));
+        // `render_repl_menu` has already resolved this, so it is always `Some`
+        // by the time this runs.
+        let editor = self.active_editor()?;
 
         Some(
             h_flex()
@@ -268,8 +271,21 @@ impl QuickActionBar {
                         .icon_color(Color::Muted)
                         .style(ButtonStyle::Subtle)
                         .tooltip(Tooltip::text(tooltip))
-                        .on_click(|_, window, cx| {
-                            window.dispatch_action(Box::new(repl::Run {}), cx)
+                        .on_click(move |_, window, cx| {
+                            // This button starts the kernel and nothing else.
+                            // It used to dispatch `repl::Run`, which starts a
+                            // kernel only as a SIDE EFFECT of executing the
+                            // cell under the cursor — so a control labelled
+                            // "Start REPL for ..." silently ran whichever cell
+                            // you happened to be in, which fails on any cell
+                            // that depends on the ones above it (bug #84).
+                            repl::assign_kernelspec(
+                                kernel_specification.clone(),
+                                editor.downgrade(),
+                                window,
+                                cx,
+                            )
+                            .log_err();
                         }),
                 )
                 .into_any_element(),
