@@ -926,37 +926,6 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   it was one of the six dead-code warnings.
 - **Tested:** no — open a notebook whose cells have no `id` fields.
 
-## 84. "Start REPL" button runs the selected cell instead of just starting
-
-- **Status:** fix attempted - untested
-- **Symptom:** (user 2026-11-23, reproduced three times, with video) In a `.py`
-  file, clicking the toolbar button whose tooltip reads **"Start REPL for
-  Python (venv)"** shows "Connecting to kernel..." and then immediately
-  "Executing...". It runs whichever cell the cursor is in, as `Cell In[1]`, so
-  any cell that depends on the ones above it fails — the reported case was cell
-  4 raising `NameError: name 'client_id' is not defined`.
-- **Cause (found 2026-11-23, `quick_action_bar/repl_menu.rs`):** the control's
-  label and its action disagree. `render_repl_launch_menu` builds the button
-  with the tooltip `"Start REPL for {kernel}"` and then wires
-  `.on_click(|_, window, cx| window.dispatch_action(Box::new(repl::Run {}), cx))`.
-  `repl::Run` executes the cell under the cursor and starts a kernel only as a
-  SIDE EFFECT of needing one. So the button never had a "just start it" path.
-- **Note on the earlier analysis, which was wrong:** this was first chased
-  through `assign_kernelspec` and `Session::start_kernel` — neither of which
-  executes anything — and written up as "cannot be explained from the code,
-  need the repro step". That ruled out the kernel-START paths and missed that
-  the button is not one of them. The user was right that it is reproducible.
-- **Fix attempted (2026-11-23):** the button now calls
-  `repl::assign_kernelspec(kernel_specification, editor, ..)`, which creates the
-  session (and so launches the kernel) without executing anything. That function
-  was already used a few lines away for the kernel picker, so this is the same
-  path the picker takes. The tooltip is now true.
-- **Upstream's bug, fixed in the fork:** `repl_menu.rs` was byte-identical to
-  upstream before this, so the fork now diverges in `crates/zed`. Worth sending
-  upstream — see the backlog item about upstreaming the fork's generic changes.
-- **Tested:** no — click the button and confirm the kernel comes up Idle with no
-  cell executed; then check a normal run still works.
-
 ## 85. Notebook save reports "Unable to remove the file to be replaced" (Windows)
 
 - **Status:** open (not yet reproduced here — Windows-only, no fix attempted)
@@ -1012,4 +981,46 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
     is what stops a failed save destroying the file, so trading it away to
     silence a toast would swap a cosmetic error for a data-loss risk.
 - **Fix attempted:** none
+- **Tested:** n/a
+
+## 86. Interrupt waits for a blocking call to finish instead of cutting it short
+
+- **Status:** open (needs one log check to classify — see below)
+- **Symptom:** (user 2026-11-23, during the phase-72 merge testing) Interrupting
+  a cell no longer stops it immediately: a `time.sleep(10)` interrupted after a
+  second runs the full ten seconds. The fork's intent (commit `0ad52d7f9e`,
+  "Interrupt kernels with an OS signal instead of a control message") is that
+  interrupt is INSTANT even for blocking C calls.
+- **NOT caused by the upstream merge** (verified by diffing `util/process.rs`
+  and `kernels/native_kernel.rs` across the merge): the only interrupt-related
+  change in the whole merge is the fallback message's type path moving from
+  `runtimelib::InterruptRequest` to `jupyter_protocol::InterruptRequest`. The
+  OS-signal path, `Child::spawn_interruptible`, the Windows CTRL_C console
+  event and the `interrupt_mode` dispatch are all untouched, and
+  `native_kernel.rs` still prefers the signal unless the kernelspec declares
+  `interrupt_mode: "message"`.
+- **Prime suspect — the kernel itself refuses Ctrl-C.** The user's own log from
+  the same session contains, from the kernel's stdout:
+  `NOTE: When using the 'ipython kernel' entry point, Ctrl-C will not work.`
+  IPython prints that when the kernel is launched through the `ipython kernel`
+  entry point rather than `python -m ipykernel_launcher`. In that mode the
+  kernel does not install the OS-level handler that makes a console CTRL_C wake
+  a blocking call, so the fork can send a perfectly good signal and the kernel
+  will ignore it — which looks exactly like "interrupt waits".
+  Note the fork's OWN synthesised kernelspecs all use
+  `python -m ipykernel_launcher` (`kernels/mod.rs`, `native_kernel.rs:583`), so
+  a kernel in the bad form is a REGISTERED kernelspec from
+  `jupyter kernelspec list`, not one the fork built.
+- **The two diagnostics that classify this:**
+  1. Search the log for `failed to interrupt kernel via OS signal`. PRESENT
+     means the signal path itself broke and this is a real fork bug. ABSENT
+     means the signal was sent fine and the kernel ignored it.
+  2. Check the selected kernel's `kernel.json` argv. `ipython kernel -f
+     {connection_file}` is the bad form; `python -m ipykernel_launcher -f
+     {connection_file}` is the good one.
+- **If it is the kernelspec,** the fix is not in the interrupt code: either
+  prefer/repair the launcher form when the fork registers or adopts a spec, or
+  surface a warning when the selected kernel announces that Ctrl-C will not
+  work, so this is diagnosable without reading the log.
+- **Fix attempted:** none — the two branches need different fixes.
 - **Tested:** n/a

@@ -46,14 +46,16 @@ here, add a one-line entry to `CHANGELOG.md`, and delete the bug's `bugs.md`
 entry. If a fix failed, leave the bug open with the new finding and keep it
 listed here.
 
+- [ ] Bug #86 — Interrupt. Search the log for "failed to interrupt kernel via
+      OS signal": PRESENT means the signal path broke (a real bug), ABSENT means
+      the kernel ignored a good signal. Then check the kernel's `kernel.json`
+      argv for `ipython kernel` vs `python -m ipykernel_launcher`.
 - [ ] Bug #85 — Does the "Unable to remove the file to be replaced" toast only
       appear for NOTEBOOK saves, never for `.py` or other text files? And did it
       happen before the upstream merge? Those two answers pick the fix.
-- [ ] Bug #84 — In a `.py` file with no kernel running, click the toolbar
-      button tooltipped "Start REPL for ...": the kernel should come up and sit
-      Idle with NOTHING executed. Then confirm `ctrl-shift-enter` still runs the
-      cell under the cursor as before.
-- [ ] Bug #83 — Open a `.ipynb` whose cells have no `id` fields (or any v4.5
+- [ ] Bug #83 — MONITORED (user 2026-11-23 has no notebook without cell ids to
+      hand, so this is unverified rather than confirmed). Open a `.ipynb` whose
+      cells have no `id` fields (or any v4.5
       notebook that previously warned about quirks): it should open, repaired,
       rather than failing with "unsupported notebook format". Check
       `zed: open log` for "Repairing notebook cell IDs".
@@ -197,20 +199,23 @@ notebook broken, so these are mandatory rather than nice to have.
 Decisions taken during the merge, and the upstream features deliberately
 deferred, are recorded in `CHANGELOG.md` and commit `a2f67faa9f`.
 
-- [ ] Zed launches and a notebook opens.
+- [x] Zed launches and a notebook opens. CONFIRMED 2026-11-23.
 - [ ] Select a kernel, run a cell, see output. Restart the kernel. Interrupt a
-      run.
-- [ ] Run All over a multi-cell notebook with outputs; follow mode behaves.
-- [ ] A DataFrame renders in a table output — the Jupyter dependency migration
-      rewrote `outputs/table.rs`'s imports, so this is the most direct check
-      that nbformat 3.0 / jupyter-zmq-client went in cleanly.
+      run. PARTIAL 2026-11-23: selecting a kernel and running cells work
+      perfectly. Interrupt appears not to cut a blocking call short — filed as
+      bug #86, which the merge is cleared of. Restart still untested.
+- [x] Run All over a multi-cell notebook with outputs; follow mode behaves.
+      CONFIRMED 2026-11-23.
+- [x] A DataFrame renders in a table output. CONFIRMED 2026-11-23 — "renders
+      are working great", which is the strongest single signal that the
+      nbformat 3.0 / jupyter-zmq-client migration landed correctly.
 - [ ] Save, close, reopen a notebook — including an unsaved one and one outside
       any project root (the two restore paths from phases 66/69).
 - [ ] The fork's own notebook features still work: cell add/delete/move/convert,
       command vs edit mode, the kernel strip, the timers.
-- [ ] Wheel scrolling still eases (the fork's smooth scrolling was kept on top
-      of upstream's new delta filter), and a diagonal trackpad swipe still locks
-      to one axis.
+- [x] Wheel scrolling still eases and scrolling behaves. CONFIRMED 2026-11-23
+      ("scroll appears fine"). The diagonal-trackpad axis lock was not called
+      out specifically; flag it if a diagonal swipe ever drifts.
 
 ## Phase 70 — Notebook keyboard and control corrections
 

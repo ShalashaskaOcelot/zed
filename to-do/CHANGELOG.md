@@ -318,6 +318,11 @@ entry rather than archiving it.
 
 ## Fixed bugs (confirmed)
 
+- #84 — The toolbar button tooltipped "Start REPL for <kernel>" dispatched
+  `repl::Run`, so it executed whichever cell the cursor was in instead of just
+  starting the kernel. It now starts the kernel and nothing else. Confirmed
+  2026-11-23.
+
 - #78 — Three-digit execution counts (`[169]`) wrapped their closing bracket in
   the cell gutter; the gutter is wider and the count no longer wraps. Confirmed
   2026-08-11.
