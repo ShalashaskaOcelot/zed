@@ -27,6 +27,10 @@ here, add a one-line entry to `CHANGELOG.md`, and delete the bug's `bugs.md`
 entry. If a fix failed, leave the bug open with the new finding and keep it
 listed here.
 
+- [ ] Bug #83 — Open a `.ipynb` whose cells have no `id` fields (or any v4.5
+      notebook that previously warned about quirks): it should open, repaired,
+      rather than failing with "unsupported notebook format". Check
+      `zed: open log` for "Repairing notebook cell IDs".
 - [ ] Bug #82 — Windows build prints "Failed to copy conpty.dll". Check
       `zed: open log` for "Terminal will work with reduced functionality" to
       confirm whether the fallback is in use, and look in

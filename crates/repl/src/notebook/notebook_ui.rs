@@ -214,6 +214,9 @@ struct NotebookConflictToast;
 pub(crate) const CODE_BLOCK_INSET: f32 = MEDIUM_SPACING_SIZE;
 pub(crate) const CONTROL_SIZE: f32 = 20.0;
 
+// Unused until the fork adopts upstream's single-file-worktree notebook
+// detection, deferred in phase 72.
+#[allow(dead_code)]
 const NOTEBOOK_EXTENSION: &str = "ipynb";
 
 pub fn init(cx: &mut App) {
@@ -349,6 +352,9 @@ pub struct NotebookEditor {
     runtime_timer_ticking: bool,
 }
 
+// Unused until the fork adopts upstream's save-through-the-project path,
+// deferred in phase 72 because it needs a non-optional notebook path.
+#[allow(dead_code)]
 enum SaveDestination {
     CurrentPath,
     NewPath(ProjectPath),
@@ -1502,15 +1508,11 @@ impl NotebookEditor {
             }
         };
 
-        Ok(match parsed {
-            nbformat::Notebook::V4(notebook) => notebook,
-            nbformat::Notebook::Legacy(legacy) => nbformat::upgrade_legacy_notebook(legacy)?,
-            nbformat::Notebook::V3(v3) => nbformat::upgrade_v3_notebook(v3)?,
-            // `nbformat::Notebook` is non-exhaustive as of 3.0, so a version
-            // this fork does not know about must fail loudly rather than be
-            // silently treated as one it does.
-            other => anyhow::bail!("unsupported notebook format: {other:?}"),
-        })
+        // `V4QuirksMode` is a SUCCESS return for a v4.5 notebook with spec
+        // violations (missing cell ids among them), so the repair pass above —
+        // which only runs on a parse ERROR — never sees one. Upstream's
+        // `upgrade_notebook` repairs it instead of rejecting the file (bug #83).
+        upgrade_notebook(parsed)
     }
 
     /// Rebuild the notebook's cells from `notebook`, wiring up subscriptions
@@ -4747,7 +4749,7 @@ impl NotebookEditor {
                                 cx,
                             )
                             .disabled(self.cell_order.is_empty())
-                            .tooltip(move |window, cx| {
+                            .tooltip(move |_window, cx| {
                                 Tooltip::for_action("Delete cell", &DeleteCell, cx)
                             })
                             .on_click(|_, window, cx| {
@@ -5121,6 +5123,9 @@ impl NotebookEditor {
         .size_full()
     }
 
+    // Unused until the fork adopts upstream's add-cell controls for an empty
+    // notebook, deferred in phase 72.
+    #[allow(dead_code)]
     fn render_empty_state(&self, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .size_full()

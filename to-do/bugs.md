@@ -900,3 +900,58 @@ bug's entry here (there is no archive dir; the CHANGELOG + commit is the record)
   error page, the download is being blocked or redirected.
 - **Fix attempted:** none
 - **Tested:** n/a
+
+## 83. Notebooks with spec quirks refuse to open after the upstream merge
+
+- **Status:** fix attempted - untested
+- **Symptom:** (found by inspection 2026-11-23, while chasing the merge's
+  dead-code warnings) A `.ipynb` with v4.5 spec violations — MISSING CELL IDS
+  being the common one, which plenty of tools emit — fails to open with
+  "unsupported notebook format" instead of being repaired and opened.
+- **Introduced by the upstream merge (phase 72), not by upstream.** `nbformat`
+  3.0 added a `Notebook::V4QuirksMode` variant and made the enum
+  `#[non_exhaustive]`. Resolving the merge added a catch-all arm to
+  `parse_notebook_text` so an unknown format would fail loudly. That looked
+  right, but `V4QuirksMode` is NOT an unknown format and NOT an error: the
+  library returns `Ok(V4QuirksMode(..))` for exactly these files.
+- **Why the existing repair path did not save it:** `parse_notebook_text`
+  repairs missing cell ids only in the `Err(_)` branch of `parse_notebook`.
+  Under nbformat 1.2 those files errored, so the repair ran. Under 3.0 they
+  succeed as `V4QuirksMode`, so the repair is skipped and the catch-all rejects
+  them. The behaviour therefore regressed silently on a dependency bump.
+- **Fix attempted (2026-11-23):** `parse_notebook_text` now ends in upstream's
+  own `upgrade_notebook`, which handles every variant including
+  `V4QuirksMode(notebook) => notebook.repair()` (logging the quirks it fixed).
+  That function already existed in the file but was left unused by the merge —
+  it was one of the six dead-code warnings.
+- **Tested:** no — open a notebook whose cells have no `id` fields.
+
+## 84. REPL runs the selected cell when the kernel starts
+
+- **Status:** open (needs the exact repro step)
+- **Symptom:** (user 2026-11-23, confirmed on a second occurrence after
+  initially assuming it was their own mistake) In a `.py` file with `# %%`
+  cells, starting the kernel executes whichever cell the cursor is in. It is
+  `Cell In[1]`, i.e. genuinely the first execution on that kernel, so a cell
+  part-way down the file almost always fails — the screenshot shows cell 4
+  raising `NameError: name 'client_id' is not defined` because cells 1-3 never
+  ran.
+- **Analysis so far — what is RULED OUT (code inspection 2026-11-23):** none of
+  the kernel-start paths execute anything.
+  * `assign_kernelspec` (`repl_editor.rs`), which the kernel picker calls,
+    shuts down any old session and creates a new one. It never runs code.
+  * `install_ipykernel_and_assign` just defers to `assign_kernelspec`.
+  * `Session::start_kernel` sends exactly one message when the kernel comes up,
+    a `KernelInfoRequest`.
+  * `repl_editor.rs` is byte-identical to upstream, so this is not fork code.
+  The only path that executes is `repl::run`, which runs the cell under the
+  cursor AND lazily starts the kernel if there is none.
+- **The question that settles it:** how was the kernel started — picked from the
+  kernel menu in the toolbar, or by pressing run (`ctrl-shift-enter`) on a cell?
+  If it was the kernel menu, something is calling `repl::run` that this analysis
+  says cannot, and that is the bug. If it was run-on-a-cell, then the kernel
+  starting is a side effect of the run and the real complaint is the UX: the
+  first run of a session both starts the kernel and runs one arbitrary cell,
+  with no way to say "start the kernel and run from the top".
+- **Fix attempted:** none — the two branches need different fixes.
+- **Tested:** n/a

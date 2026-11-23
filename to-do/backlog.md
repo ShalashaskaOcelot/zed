@@ -60,6 +60,20 @@ the complete task-by-task detail is in the deleted files — see commit `4174e8b
 
 _(empty — the line-numbers item moved into `phase_71.md` on 2026-08-12.)_
 
+- VS Code-style inline cell controls for `# %%` cells in a `.py` file (user
+  2026-11-23, with a VS Code screenshot). Above each `# %%` marker VS Code
+  renders a small `Run Cell | Run Above | Debug Cell` affordance. Zed currently
+  offers only the toolbar menu (Run Line / Run Selection) and
+  `ctrl-shift-enter`, which runs one cell and moves down — so there is no way to
+  run many cells at once in a script, and no way to run everything above the
+  cursor to get the environment into shape first. **Run Above is the one that
+  matters most**, because it is the direct answer to bug #84's symptom: landing
+  part-way down a file and needing everything before it to have run.
+  The notebook already has `RunCellsAbove` / `RunCellAndBelow` actions; the work
+  is surfacing equivalents for script cells, which upstream's REPL does not do.
+  Check whether `runnable_ranges` (`repl_editor.rs`) can already enumerate the
+  cells above the cursor before designing anything.
+
 ## Low priority
 
 - Re-audit dependencies AFTER phase 72 lands, then patch only the residue (user

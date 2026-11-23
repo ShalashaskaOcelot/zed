@@ -34,8 +34,8 @@ use gpui::{
 };
 use language::Point;
 use jupyter_protocol::{
-    ExecuteRequest, ExecutionState, InputReply, InterruptRequest, JupyterMessage,
-    JupyterMessageContent, KernelInfoRequest, ReplyStatus, ShutdownRequest,
+    ExecuteRequest, ExecutionState, InputReply, JupyterMessage, JupyterMessageContent,
+    KernelInfoRequest, ReplyStatus, ShutdownRequest,
 };
 use project::Fs;
 use settings::Settings as _;
